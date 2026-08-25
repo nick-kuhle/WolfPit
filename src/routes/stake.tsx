@@ -20,8 +20,8 @@ function StakePage() {
     <Shell>
       <ProductGate product="stake">
       <main className="mx-auto max-w-xl px-4 py-8">
-        <p className="font-mono text-[11px] uppercase tracking-wider text-brass">$WPIT · insurance junior</p>
-        <h1 className="mt-2 text-2xl font-medium">Stake</h1>
+        <p className="font-mono text-[11px] uppercase tracking-wider text-brass">$WPIT · first-loss junior</p>
+        <h1 className="mt-2 font-display text-4xl font-medium tracking-tight">Park it. Earn 12%.</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           Staked WPIT is first-loss junior: insurance USDC → staked WPIT haircut → pause listings → LP NAV.
           Simulated emission is a placeholder funded by emissions, not by selling naked vol. Not a deposit.

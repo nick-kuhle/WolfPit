@@ -28,16 +28,26 @@ type DeskUi = {
   focus: Listing;
   universe: Listing[];
   query: string;
+  cardOpen: boolean;
+  expanded: boolean;
   setFocus: (l: Listing) => void;
   setUniverse: (rows: Listing[]) => void;
   setQuery: (q: string) => void;
+  openCard: (l: Listing) => void;
+  closeCard: () => void;
+  setExpanded: (v: boolean) => void;
 };
 
 export const useDesk = create<DeskUi>((set) => ({
   focus: ETH_LISTING,
   universe: [],
   query: "",
+  cardOpen: false,
+  expanded: false,
   setFocus: (focus) => set({ focus }),
   setUniverse: (universe) => set({ universe }),
   setQuery: (query) => set({ query }),
+  openCard: (l) => set({ focus: l, cardOpen: true, expanded: false }),
+  closeCard: () => set({ cardOpen: false, expanded: false }),
+  setExpanded: (expanded) => set({ expanded }),
 }));

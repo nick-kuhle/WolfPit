@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { ChartInterval } from "@/lib/wolfpit/market";
 import type { Candle } from "@/lib/wolfpit/types";
 
 function cssVar(name: string, fallback: string) {
@@ -7,7 +8,23 @@ function cssVar(name: string, fallback: string) {
   return v || fallback;
 }
 
-export function PitChart({ candles, height = 280 }: { candles: Candle[]; height?: number }) {
+function axisLabel(t: number, interval: ChartInterval) {
+  const d = new Date(t);
+  if (interval === "1d") return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (interval === "1h")
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric" });
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
+export function PitChart({
+  candles,
+  height = 240,
+  interval = "1m",
+}: {
+  candles: Candle[];
+  height?: number;
+  interval?: ChartInterval;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -18,7 +35,7 @@ export function PitChart({ candles, height = 280 }: { candles: Candle[]; height?
 
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
-      const w = parent.clientWidth;
+      const w = Math.max(1, parent.clientWidth);
       const h = Math.max(height, parent.clientHeight || height);
       canvas.width = Math.max(1, Math.floor(w * dpr));
       canvas.height = Math.max(1, Math.floor(h * dpr));
@@ -34,20 +51,25 @@ export function PitChart({ candles, height = 280 }: { candles: Candle[]; height?
       const down = cssVar("--color-down", "#c45c52");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
-      if (candles.length < 2) return;
-      const padL = 8;
-      const padR = 56;
-      const padT = 10;
-      const padB = 18;
-      const slice = candles.slice(-120);
+      if (candles.length < 2) {
+        ctx.fillStyle = muted;
+        ctx.font = "12px 'IBM Plex Sans', sans-serif";
+        ctx.fillText("Waiting on candles…", 16, h / 2);
+        return;
+      }
+      const padL = 10;
+      const padR = 52;
+      const padT = 12;
+      const padB = 28;
+      const slice = candles.length > 240 ? candles.slice(-240) : candles;
       let lo = Math.min(...slice.map((c) => c.l));
       let hi = Math.max(...slice.map((c) => c.h));
-      const pad = (hi - lo) * 0.06 || 1;
+      const pad = (hi - lo) * 0.08 || 1;
       lo -= pad;
       hi += pad;
       const plotW = w - padL - padR;
       const plotH = h - padT - padB;
-      const x = (i: number) => padL + (i / (slice.length - 1)) * plotW;
+      const x = (i: number) => padL + (i / Math.max(slice.length - 1, 1)) * plotW;
       const y = (p: number) => padT + ((hi - p) / (hi - lo)) * plotH;
       ctx.strokeStyle = grid;
       ctx.lineWidth = 1;
@@ -60,9 +82,18 @@ export function PitChart({ candles, height = 280 }: { candles: Candle[]; height?
         ctx.moveTo(padL, yy);
         ctx.lineTo(w - padR, yy);
         ctx.stroke();
-        ctx.fillText(p >= 100 ? p.toFixed(0) : p.toFixed(2), w - padR + 6, yy + 3);
+        const label = p >= 1000 ? p.toFixed(0) : p >= 1 ? p.toFixed(2) : p.toFixed(5);
+        ctx.fillText(label, w - padR + 6, yy + 3);
       }
-      const cw = Math.max(2, plotW / slice.length - 1.5);
+      const ticks = 4;
+      for (let i = 0; i <= ticks; i++) {
+        const idx = Math.round((i / ticks) * (slice.length - 1));
+        const bar = slice[idx];
+        if (!bar) continue;
+        const xx = x(idx);
+        ctx.fillText(axisLabel(bar.t, interval), Math.min(xx, w - padR - 48), h - 8);
+      }
+      const cw = Math.max(1.5, plotW / slice.length - 1.2);
       slice.forEach((c, i) => {
         const isUp = c.c >= c.o;
         ctx.strokeStyle = isUp ? up : down;
@@ -82,7 +113,7 @@ export function PitChart({ candles, height = 280 }: { candles: Candle[]; height?
     const ro = new ResizeObserver(draw);
     ro.observe(parent);
     return () => ro.disconnect();
-  }, [candles, height]);
+  }, [candles, height, interval]);
 
   return <canvas ref={ref} className="block h-full w-full" />;
 }

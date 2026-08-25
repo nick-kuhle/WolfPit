@@ -11,7 +11,8 @@ type Tab = "hot" | "gainers" | "losers" | "chains";
 export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   const universe = useDesk((s) => s.universe);
   const focus = useDesk((s) => s.focus);
-  const setFocus = useDesk((s) => s.setFocus);
+  const openCard = useDesk((s) => s.openCard);
+  const cardOpen = useDesk((s) => s.cardOpen);
   const [tab, setTab] = useState<Tab>("hot");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,9 +35,9 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   }, [universe, tab]);
 
   function pick(l: Listing) {
-    setFocus(l);
+    openCard(l);
     listToken(l.symbol, l.price || 1);
-    ping(`${l.symbol} on the board`, "brass");
+    ping(`${l.symbol} card`, "brass");
     onPick?.(l);
   }
 
@@ -59,7 +60,7 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
       <div className="border-b border-border px-3 py-2">
-        <div className="text-[10px] uppercase tracking-wider text-subtle">The board · live</div>
+        <div className="font-display text-lg font-medium">Names in play</div>
         <form
           className="mt-2 flex gap-1"
           onSubmit={(e) => {
@@ -99,7 +100,7 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={cn("min-h-0 flex-1 overflow-auto", cardOpen && "pb-72 lg:pb-4 lg:pr-[min(440px,44vw)]")}>
         {rows.length === 0 ? (
           <p className="p-3 text-xs text-muted">Loading the tape…</p>
         ) : null}
@@ -109,7 +110,7 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
             onClick={() => pick(r)}
             className={cn(
               "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left",
-              focus.symbol === r.symbol && "bg-elevated",
+              focus.symbol === r.symbol && cardOpen && "bg-elevated",
             )}
           >
             <div className="min-w-0">

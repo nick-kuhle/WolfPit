@@ -95,13 +95,22 @@ function PoolsPage() {
           </div>
         </section>
 
-        <ul className="mt-6 grid gap-2 font-mono text-xs text-muted sm:grid-cols-3">
-          <li className="rounded-[var(--radius-md)] border border-border bg-surface px-3 py-3">
-            Vault 70%
-            <div className="mt-1 text-fg">util {(0.3 + 0.7 * u).toFixed(2)}×</div>
+        <ul className="mt-6 grid gap-3 sm:grid-cols-3">
+          <li className="rounded-[var(--radius-xl)] border border-border bg-elevated p-4">
+            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">Stake</div>
+            <div className="mt-1 font-display text-3xl font-medium text-brass">12%</div>
+            <p className="mt-1 text-xs text-muted">Simulated APR on WPIT</p>
           </li>
-          <li className="rounded-[var(--radius-md)] border border-border bg-surface px-3 py-3">WPIT-USDC 20%</li>
-          <li className="rounded-[var(--radius-md)] border border-border bg-surface px-3 py-3">WPIT-ETH 10%</li>
+          <li className="rounded-[var(--radius-xl)] border border-border bg-elevated p-4">
+            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">WPIT-USDC</div>
+            <div className="mt-1 font-display text-3xl font-medium text-brass">48%</div>
+            <p className="mt-1 text-xs text-muted">Farm share 20% · paper APY</p>
+          </li>
+          <li className="rounded-[var(--radius-xl)] border border-border bg-elevated p-4">
+            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">WPIT-ETH</div>
+            <div className="mt-1 font-display text-3xl font-medium text-brass">36%</div>
+            <p className="mt-1 text-xs text-muted">Farm share 10% · paper APY</p>
+          </li>
         </ul>
 
         <div className="mt-6 grid gap-3">
@@ -138,13 +147,13 @@ function PoolsPage() {
           })}
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-lg)] border border-border bg-surface p-4">
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-xl)] border border-brass/40 bg-elevated p-5">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-subtle">WPIT farm</div>
-            <div className="font-mono text-lg tabular-nums">{s.farmWpit.toFixed(2)} WPIT</div>
-            <p className="mt-1 text-xs text-muted">Harvest tax 1% → insurance ({tax.toFixed(2)} WPIT)</p>
+            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">Ripe to harvest</div>
+            <div className="font-display text-3xl font-medium tabular-nums">{s.farmWpit.toFixed(2)} WPIT</div>
+            <p className="mt-1 text-xs text-muted">1% tax → insurance ({tax.toFixed(2)} WPIT) · util {(0.3 + 0.7 * u).toFixed(2)}×</p>
           </div>
-          <Button variant="outline" disabled={s.farmWpit <= 0} onClick={harvest}>
+          <Button disabled={s.farmWpit <= 0} onClick={harvest}>
             Harvest
           </Button>
         </div>

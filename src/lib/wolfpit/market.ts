@@ -130,6 +130,29 @@ async function coingecko(): Promise<LiveFeed | null> {
   }
 }
 
+const COINBASE_MAP: Record<string, string> = {
+  BTC: "BTC-USD",
+  ETH: "ETH-USD",
+  SOL: "SOL-USD",
+  XRP: "XRP-USD",
+  DOGE: "DOGE-USD",
+  ADA: "ADA-USD",
+  AVAX: "AVAX-USD",
+  LINK: "LINK-USD",
+  SUI: "SUI-USD",
+  DOT: "DOT-USD",
+  NEAR: "NEAR-USD",
+  APT: "APT-USD",
+  UNI: "UNI-USD",
+  AAVE: "AAVE-USD",
+  LTC: "LTC-USD",
+  SHIB: "SHIB-USD",
+  ATOM: "ATOM-USD",
+  FIL: "FIL-USD",
+  BCH: "BCH-USD",
+  PEPE: "PEPE-USD",
+};
+
 const BINANCE_MAP: Record<string, string> = {
   BTC: "BTCUSDT",
   ETH: "ETHUSDT",
@@ -203,12 +226,22 @@ export const lookupToken = createServerFn({ method: "GET" })
   });
 
 export const getSymbolCandles = createServerFn({ method: "GET" })
-  .validator((d: { symbol: string; interval?: ChartInterval; binance?: string }) => d)
+  .validator((d: { symbol: string; interval?: ChartInterval; binance?: string; geckoId?: string }) => d)
   .handler(async ({ data }): Promise<Candle[]> => {
     const interval: ChartInterval = data.interval ?? "1m";
-    const pair = data.binance || BINANCE_MAP[data.symbol.toUpperCase()];
+    const sym = data.symbol.toUpperCase();
+    const cb = COINBASE_MAP[sym];
+    if (cb) {
+      const bars = await coinbaseKlines(cb, interval);
+      if (bars.length) return bars;
+    }
+    const pair = data.binance || BINANCE_MAP[sym];
     if (pair) {
       const bars = await binanceKlines(pair, interval);
+      if (bars.length) return bars;
+    }
+    if (data.geckoId) {
+      const bars = await geckoOhlc(data.geckoId, interval);
       if (bars.length) return bars;
     }
     return [];
@@ -346,4 +379,47 @@ async function binanceKlines(pair: string, interval: ChartInterval): Promise<Can
     return [];
   }
 }
+
+async function coinbaseKlines(product: string, interval: ChartInterval): Promise<Candle[]> {
+  try {
+    const g = GRAN[interval].coinbase;
+    const res = await fetch(`https://api.exchange.coinbase.com/products/${product}/candles?granularity=${g}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return [];
+    const raw = (await res.json()) as number[][];
+    return raw
+      .map((r) => ({
+        t: r[0]! * 1000,
+        l: r[1]!,
+        h: r[2]!,
+        o: r[3]!,
+        c: r[4]!,
+        v: r[5]!,
+      }))
+      .sort((a, b) => a.t - b.t);
+  } catch {
+    return [];
+  }
+}
+
+async function geckoOhlc(id: string, interval: ChartInterval): Promise<Candle[]> {
+  try {
+    const days = interval === "1d" ? 90 : interval === "1h" ? 14 : 1;
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${id}/ohlc?vs_currency=usd&days=${days}`);
+    if (!res.ok) return [];
+    const raw = (await res.json()) as number[][];
+    return raw.map((r) => ({
+      t: r[0]!,
+      o: r[1]!,
+      h: r[2]!,
+      l: r[3]!,
+      c: r[4]!,
+      v: 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 

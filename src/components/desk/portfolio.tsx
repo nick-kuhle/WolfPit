@@ -9,7 +9,7 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
   const closeFut = useWolf((st) => st.closeFut);
   const closeOpt = useWolf((st) => st.closeOpt);
   const universe = useDesk((d) => d.universe);
-  const setFocus = useDesk((d) => d.setFocus);
+  const openCard = useDesk((d) => d.openCard);
   const listToken = useWolf((st) => st.listToken);
 
   const holdings: { sym: string; qty: number; px: number }[] = [
@@ -33,7 +33,7 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
       change24: 0,
       volume24: 0,
     };
-    setFocus(l);
+    openCard(l);
     listToken(sym, l.price || 1);
     ping(`${sym} from wallet`, "brass");
     onPick?.(l);
