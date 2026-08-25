@@ -6,6 +6,14 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-25 (Tue) — mobile + ops + term copy
+
+- Done: mobile bottom nav, landing seal, “term / vanilla / expiry” not “dated”.
+- `/admin` cookie session. Dev id/pw `admin` / `admin`. TEST deploy writes addresses locally.
+- Blocked: live Foundry broadcast still Q1 (wallet signer).
+
+---
+
 ## 2026-08-25 (Tue) — brand polish + Alloy keeper
 
 - Done:

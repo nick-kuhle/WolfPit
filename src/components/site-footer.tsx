@@ -2,9 +2,9 @@ import { Link } from "@tanstack/react-router";
 
 export function SiteFooter() {
   return (
-    <footer className="border-t border-border px-4 py-8">
+    <footer className="border-t border-border px-4 py-8 pb-24 lg:pb-8">
       <div className="mx-auto flex max-w-5xl flex-col gap-3 text-xs text-subtle sm:flex-row sm:items-center sm:justify-between">
-        <p>WolfPit · paper desk · never naked</p>
+        <p className="tracking-[0.18em]">WOLFPIT · term markets · never naked</p>
         <nav className="flex flex-wrap gap-4">
           <Link to="/trade" className="hover:text-fg">
             Desk
@@ -17,6 +17,9 @@ export function SiteFooter() {
           </Link>
           <Link to="/plan" className="hover:text-fg">
             Plan
+          </Link>
+          <Link to="/admin" className="hover:text-fg">
+            Ops
           </Link>
         </nav>
       </div>

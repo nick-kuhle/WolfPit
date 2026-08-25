@@ -16,6 +16,7 @@ import {
   unstakeWpit,
 } from "./engine";
 import type { EngineState, FutSide, OptType, PoolId } from "./types";
+import { useAdmin } from "@/lib/admin/config";
 
 type Actions = {
   lastError: string | null;
@@ -35,9 +36,16 @@ type Actions = {
   harvest: () => void;
   reset: () => void;
   clearError: () => void;
+  seedVault: (eth: number, usdc: number) => void;
 };
 
 type WolfStore = EngineState & Actions;
+
+function gated(): string | null {
+  if (useAdmin.getState().listingsPaused) return "Listings paused by pit ops.";
+  if (useAdmin.getState().geoFenceUs) return "US geo-fence on. Futures and options hidden.";
+  return null;
+}
 
 function apply(result: EngineState | string, set: (p: Partial<WolfStore>) => void) {
   if (typeof result === "string") {
@@ -59,10 +67,24 @@ export const useWolf = create<WolfStore>()(
       setSpeed: (simSpeed) => set({ simSpeed }),
       buySpot: (pool, usd) => apply(tradeSpot(get(), pool, "buy", usd), set),
       sellSpot: (pool, baseAmt) => apply(tradeSpot(get(), pool, "sell", baseAmt), set),
-      openFut: (side, contracts, expiry) => apply(tradeFuture(get(), side, contracts, expiry), set),
+      openFut: (side, contracts, expiry) => {
+        const g = gated();
+        if (g) {
+          set({ lastError: g });
+          return;
+        }
+        apply(tradeFuture(get(), side, contracts, expiry), set);
+      },
       closeFut: (id) => apply(closeFuture(get(), id), set),
       closeOpt: (id) => apply(closeOption(get(), id), set),
-      openOpt: (type, strike, expiry, contracts) => apply(buyOption(get(), type, strike, expiry, contracts), set),
+      openOpt: (type, strike, expiry, contracts) => {
+        const g = gated();
+        if (g) {
+          set({ lastError: g });
+          return;
+        }
+        apply(buyOption(get(), type, strike, expiry, contracts), set);
+      },
       lpAdd: (pool, usd) => apply(addLiquidity(get(), pool, usd), set),
       lpRemove: (pool, shares) => apply(removeLiquidity(get(), pool, shares), set),
       lockStake: (amt) => apply(stakeWpit(get(), amt), set),
@@ -70,6 +92,10 @@ export const useWolf = create<WolfStore>()(
       harvest: () => set(harvestFarm(get())),
       reset: () => set({ ...initialState(), lastError: null }),
       clearError: () => set({ lastError: null }),
+      seedVault: (eth, usdc) =>
+        set({
+          vault: { ...get().vault, eth, usdc },
+        }),
     }),
     {
       name: "wolfpit-sim-v4",

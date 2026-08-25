@@ -1,6 +1,6 @@
 # WolfPit
 
-Dated crypto futures and options. Inventory-backed. Never naked. **Base, not Ethereum L1.**
+Term crypto futures and vanilla options. Inventory-backed. Never naked. **Base, not Ethereum L1.**
 
 This repository ships:
 

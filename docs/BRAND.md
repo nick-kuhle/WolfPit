@@ -39,4 +39,4 @@ One octagon-width of black around the mark. Do not put it on purple, green, or a
 
 ## Voice
 
-Pit. Dated. Covered. Never naked. No “yield.” No 10,000% APR.
+Pit. Term. Covered. Never naked. No “yield.” No 10,000% APR.

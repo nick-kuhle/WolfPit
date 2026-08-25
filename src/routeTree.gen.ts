@@ -10,14 +10,21 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as PlanRouteImport } from './routes/plan'
 import { Route as PoolsRouteImport } from './routes/pools'
 import { Route as StakeRouteImport } from './routes/stake'
 import { Route as TradeRouteImport } from './routes/trade'
+import { Route as AdminLoginRouteImport } from './routes/admin.login'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlanRoute = PlanRouteImport.update({
@@ -40,39 +47,60 @@ const TradeRoute = TradeRouteImport.update({
   path: '/trade',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminLoginRoute = AdminLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => AdminRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
   '/trade': typeof TradeRoute
+  '/admin/login': typeof AdminLoginRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
   '/trade': typeof TradeRoute
+  '/admin/login': typeof AdminLoginRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
   '/trade': typeof TradeRoute
+  '/admin/login': typeof AdminLoginRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/plan' | '/pools' | '/stake' | '/trade'
+  fullPaths:
+    '/' | '/admin' | '/plan' | '/pools' | '/stake' | '/trade' | '/admin/login'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/plan' | '/pools' | '/stake' | '/trade'
-  id: '__root__' | '/' | '/plan' | '/pools' | '/stake' | '/trade'
+  to: '/' | '/admin' | '/plan' | '/pools' | '/stake' | '/trade' | '/admin/login'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/plan'
+    | '/pools'
+    | '/stake'
+    | '/trade'
+    | '/admin/login'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   PlanRoute: typeof PlanRoute
   PoolsRoute: typeof PoolsRoute
   StakeRoute: typeof StakeRoute
@@ -86,6 +114,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/plan': {
@@ -116,11 +151,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TradeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/login': {
+      id: '/admin/login'
+      path: '/login'
+      fullPath: '/admin/login'
+      preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof AdminRoute
+    }
   }
 }
 
+interface AdminRouteChildren {
+  AdminLoginRoute: typeof AdminLoginRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminLoginRoute: AdminLoginRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   PlanRoute: PlanRoute,
   PoolsRoute: PoolsRoute,
   StakeRoute: StakeRoute,

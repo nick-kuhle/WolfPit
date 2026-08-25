@@ -5,17 +5,17 @@ import { cn } from "@/lib/utils";
 import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
 
 const NAV = [
-  { to: "/trade", label: "Desk" },
-  { to: "/pools", label: "Pools" },
-  { to: "/stake", label: "Stake" },
-  { to: "/plan", label: "Plan" },
+  { to: "/trade" as const, label: "Desk" },
+  { to: "/pools" as const, label: "Pools" },
+  { to: "/stake" as const, label: "Stake" },
+  { to: "/plan" as const, label: "Plan" },
 ];
 
-export function BrandLockup({ className }: { className?: string }) {
+export function BrandLockup({ className, markClass }: { className?: string; markClass?: string }) {
   return (
-    <Link to="/" className={cn("flex items-center gap-2 text-fg", className)}>
-      <WolfMark className="size-6 text-accent" />
-      <span className="text-sm font-medium tracking-[0.22em]">WOLFPIT</span>
+    <Link to="/" className={cn("flex min-h-11 items-center gap-2 text-fg", className)}>
+      <WolfMark className={cn("size-7 text-accent", markClass)} />
+      <span className="text-[13px] font-medium tracking-[0.28em]">WOLFPIT</span>
     </Link>
   );
 }
@@ -34,16 +34,16 @@ export function ChainChip() {
   );
 }
 
-export function Shell({ children }: { children: ReactNode }) {
+export function Shell({ children, desk }: { children: ReactNode; desk?: boolean }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   return (
     <div className="flex min-h-dvh flex-col bg-bg text-fg">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-3 sm:px-4">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:gap-3 sm:px-4">
         <BrandLockup />
         <span className="hidden sm:inline">
           <ChainChip />
         </span>
-        <nav className="ml-auto flex items-center gap-1">
+        <nav className="ml-auto hidden items-center gap-1 lg:flex">
           {NAV.map((n) => (
             <Link
               key={n.to}
@@ -56,9 +56,45 @@ export function Shell({ children }: { children: ReactNode }) {
               {n.label}
             </Link>
           ))}
+          <Link
+            to="/admin"
+            className={cn(
+              "flex h-11 items-center px-3 text-sm text-muted hover:text-fg",
+              pathname.startsWith("/admin") && "text-fg",
+            )}
+          >
+            Ops
+          </Link>
         </nav>
       </header>
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className={cn("min-h-0 flex-1", desk ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>
+        {children}
+      </div>
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
+        <div className="grid grid-cols-5">
+          {NAV.map((n) => (
+            <Link
+              key={n.to}
+              to={n.to}
+              className={cn(
+                "flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
+                pathname === n.to ? "text-fg" : "text-muted",
+              )}
+            >
+              {n.label}
+            </Link>
+          ))}
+          <Link
+            to="/admin"
+            className={cn(
+              "flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
+              pathname.startsWith("/admin") ? "text-fg" : "text-muted",
+            )}
+          >
+            Ops
+          </Link>
+        </div>
+      </nav>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { rejectFuture } from "@/lib/wolfpit/risk";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { FutSide, OptType, PoolId } from "@/lib/wolfpit/types";
 import { MINI_ETH, FUT_IM } from "@/lib/wolfpit/types";
+import { useAdmin } from "@/lib/admin/config";
 import { fmtPx, fmtUsd } from "@/lib/utils";
 
 const SPOT_POOLS: { id: PoolId; label: string }[] = [
@@ -17,10 +18,13 @@ export function OrderTicket() {
   const [tab, setTab] = useState<"spot" | "future" | "option">("spot");
   const err = useWolf((s) => s.lastError);
   const clear = useWolf((s) => s.clearError);
+  const geo = useAdmin((s) => s.geoFenceUs);
+  const paused = useAdmin((s) => s.listingsPaused);
+  const tabs = geo ? (["spot"] as const) : (["spot", "future", "option"] as const);
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
       <div className="flex border-b border-border">
-        {(["spot", "future", "option"] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => {
@@ -35,8 +39,9 @@ export function OrderTicket() {
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {tab === "spot" && <SpotForm />}
-        {tab === "future" && <FutForm />}
-        {tab === "option" && <OptForm />}
+        {!geo && tab === "future" && <FutForm />}
+        {!geo && tab === "option" && <OptForm />}
+        {paused ? <p className="mt-3 text-xs text-brass">Listings paused by pit ops.</p> : null}
         {err ? <p className="mt-3 text-xs text-down">{err}</p> : null}
       </div>
     </div>

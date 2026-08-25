@@ -57,7 +57,7 @@ function Briefing() {
   return (
     <>
       <p className="text-fg">
-        Nick — WolfPit is a dated derivatives pit on crypto: mini futures and mini options with expiry,
+        Nick — WolfPit is a term-market derivatives pit on crypto: mini futures and mini options with expiry,
         inventory-backed market making, and Uniswap-style pools. This app is the paper desk. It is not a
         mainnet money vault.
       </p>
