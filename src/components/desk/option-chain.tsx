@@ -17,7 +17,7 @@ export function OptionChain() {
           <button
             key={e.at}
             onClick={() => setExi(i)}
-            className={`h-11 px-3 text-xs ${i === exi ? "text-fg" : "text-muted"}`}
+            className={`h-11 px-3 text-xs uppercase tracking-wider ${i === exi ? "border-b border-accent text-fg" : "text-muted"}`}
           >
             {e.label} {new Date(e.at).toISOString().slice(5, 10)}
           </button>
@@ -41,10 +41,10 @@ export function OptionChain() {
             const p = optionQuote(s, "put", k, ex.at);
             const atm = Math.abs(k - s.eth) < 60;
             return (
-              <tr key={k} className={atm ? "bg-elevated" : undefined}>
+              <tr key={k} className={atm ? "bg-elevated" : "hover:bg-elevated"}>
                 <td className="px-2 py-2 text-right text-muted">{c.blank ? "—" : fmtPx(c.bid)}</td>
                 <td className="px-2 py-2 text-right">
-                  <button className="text-up" disabled={!!c.blank} onClick={() => open("call", k, ex.at, 1)}>
+                  <button className="h-11 min-w-14 text-up disabled:opacity-40" disabled={!!c.blank} onClick={() => open("call", k, ex.at, 1)}>
                     {c.blank ? "—" : fmtPx(c.ask)}
                   </button>
                 </td>
@@ -53,7 +53,7 @@ export function OptionChain() {
                 <td className="px-2 py-2 text-center text-subtle">{p.delta.toFixed(2)}</td>
                 <td className="px-2 py-2 text-right text-muted">{p.blank ? "—" : fmtPx(p.bid)}</td>
                 <td className="px-2 py-2 text-right">
-                  <button className="text-down" disabled={!!p.blank} onClick={() => open("put", k, ex.at, 1)}>
+                  <button className="h-11 min-w-14 text-down disabled:opacity-40" disabled={!!p.blank} onClick={() => open("put", k, ex.at, 1)}>
                     {p.blank ? "—" : fmtPx(p.ask)}
                   </button>
                 </td>

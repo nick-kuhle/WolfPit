@@ -7,12 +7,15 @@ import { OptionChain } from "@/components/desk/option-chain";
 import { OrderTicket } from "@/components/desk/order-ticket";
 import { Watchlist } from "@/components/desk/watchlist";
 import { useWolf } from "@/lib/wolfpit/store";
-import { fmtPx } from "@/lib/utils";
+import { fmtPct, fmtPx } from "@/lib/utils";
 import { chainLabel } from "@/lib/wolfpit/chain";
 
 export function Desk() {
   const eth = useWolf((s) => s.eth);
   const candles = useWolf((s) => s.candles);
+  const iv = useWolf((s) => s.iv);
+  const ch =
+    candles.length >= 30 ? (candles[candles.length - 1]!.c - candles[candles.length - 30]!.c) / candles[candles.length - 30]!.c : 0;
   const [bottom, setBottom] = useState<"blotter" | "chain">("blotter");
   const [mobile, setMobile] = useState<"chart" | "ticket" | "book">("chart");
 
@@ -23,7 +26,9 @@ export function Desk() {
         <div className="flex items-baseline gap-3">
           <h1 className="text-sm font-medium">ETH-USD</h1>
           <span className="font-mono text-lg tabular-nums">{fmtPx(eth)}</span>
-          <span className="text-[10px] uppercase tracking-wider text-brass">Paper · {chainLabel()} · WOLFPIT-*-TEST</span>
+          <span className={`font-mono text-xs tabular-nums ${ch >= 0 ? "text-up" : "text-down"}`}>{fmtPct(ch)}</span>
+          <span className="hidden font-mono text-xs text-muted sm:inline">IV {(iv * 100).toFixed(0)}</span>
+          <span className="text-[10px] uppercase tracking-wider text-brass">Paper · {chainLabel()}</span>
         </div>
       </div>
 
@@ -58,8 +63,8 @@ export function Desk() {
           <Separator className="w-px bg-border" />
           <Panel defaultSize="56%" minSize="36%">
             <Group orientation="vertical" className="h-full">
-              <Panel defaultSize="58%" minSize="36%">
-                <PitChart candles={candles} height={340} />
+              <Panel defaultSize="58%" minSize="36%" className="h-full overflow-hidden">
+                <PitChart candles={candles} height={280} />
               </Panel>
               <Separator className="h-px bg-border" />
               <Panel defaultSize="42%" minSize="24%">
@@ -88,13 +93,13 @@ function BottomTabs({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex border-b border-border">
         <button
-          className={`h-10 px-4 text-xs uppercase tracking-wider ${bottom === "blotter" ? "text-fg" : "text-muted"}`}
+          className={`h-11 px-4 text-xs uppercase tracking-wider ${bottom === "blotter" ? "border-b border-accent text-fg" : "text-muted"}`}
           onClick={() => setBottom("blotter")}
         >
           Positions
         </button>
         <button
-          className={`h-10 px-4 text-xs uppercase tracking-wider ${bottom === "chain" ? "text-fg" : "text-muted"}`}
+          className={`h-11 px-4 text-xs uppercase tracking-wider ${bottom === "chain" ? "border-b border-accent text-fg" : "text-muted"}`}
           onClick={() => setBottom("chain")}
         >
           Option chain

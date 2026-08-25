@@ -2,7 +2,25 @@
 
 ## This preview
 
-`npm run dev`. Paper. localStorage `wolfpit-sim-v3`.
+`npm run dev`. Paper. localStorage `wolfpit-sim-v4`.
+
+## Vercel
+
+Nitro is already on the `vercel` preset (`vite.config.ts`). Connect [nick-kuhle/WolfPit](https://github.com/nick-kuhle/WolfPit) in the Vercel dashboard, or:
+
+```
+npx vercel
+```
+
+Env (Production + Preview):
+
+```
+VITE_CHAIN=sim
+```
+
+Do not set `VITE_CHAIN=base` until the live vault exists. Wrong env must not look like live.
+
+Root directory: repo root. Build: `npm run build`. Install: `npm install`.
 
 ## Target chain
 
@@ -30,4 +48,4 @@ Allowed only after:
 
 ## GitHub
 
-[github.com/nick-kuhle/WPplans](https://github.com/nick-kuhle/WPplans)
+[github.com/nick-kuhle/WolfPit](https://github.com/nick-kuhle/WolfPit) · plans: [WPplans](https://github.com/nick-kuhle/WPplans)

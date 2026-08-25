@@ -14,6 +14,10 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       { name: "description", content: "WolfPit — dated crypto futures and options. Simulation desk on test pools." },
       { name: "theme-color", content: "#0b0c0b" },
+      { property: "og:title", content: APP_NAME },
+      { property: "og:description", content: "Dated crypto futures and options. Inventory-backed. Never naked." },
+      { property: "og:image", content: "/brand/og-pit.jpg" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },

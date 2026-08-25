@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Shell } from "@/components/shell";
+import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { lpValue, utilEth } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
@@ -105,6 +106,7 @@ function PoolsPage() {
         </div>
         {err ? <p className="mt-4 text-sm text-down">{err}</p> : null}
       </main>
+      <SiteFooter />
     </Shell>
   );
 }

@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Shell } from "@/components/shell";
+import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { insuranceRatio } from "@/lib/wolfpit/risk";
 import { useWolf } from "@/lib/wolfpit/store";
@@ -76,6 +77,7 @@ function StakePage() {
           {err ? <p className="mt-3 text-sm text-down">{err}</p> : null}
         </div>
       </main>
+      <SiteFooter />
     </Shell>
   );
 }

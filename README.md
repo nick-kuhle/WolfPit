@@ -37,7 +37,9 @@ npm run test:engine   # golden G1–G6, RISK caps, drills D1–D5
 forge test --root contracts
 ```
 
-v0.1 is paper. Home chain: Base. Push target when Nick opens it: `nick-kuhle/WolfPit`.
+## Vercel
+
+Connect this repo in Vercel. Build is `npm run build` (Nitro `vercel` preset). Set `VITE_CHAIN=sim`. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Hard rules
 
