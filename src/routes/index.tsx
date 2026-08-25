@@ -56,8 +56,8 @@ function Home() {
             The pit for crypto futures and options with expiry.
           </h1>
           <p className="mt-5 max-w-xl text-base leading-relaxed text-muted">
-            Not perps. Weekly and monthly vanilla, inventory-backed, quoted off pool depth. Paper against
-            WOLFPIT-USDC-TEST and WOLFPIT-ETH-TEST. Same desk later points at live contracts.
+            Not perps. Live ETH mark. Paper funds: 1,000 ETH + 100,000 USDC. Weekly and monthly vanilla,
+            inventory-backed, quoted off pool depth.
           </p>
           <div className="mt-8 flex w-full max-w-sm flex-col gap-3 sm:max-w-none sm:flex-row">
             <Link to="/trade" className="w-full sm:w-auto">

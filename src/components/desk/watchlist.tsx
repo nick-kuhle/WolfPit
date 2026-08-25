@@ -11,6 +11,7 @@ export function Watchlist() {
   const wEth = s.pools["WPIT-ETH-TEST"];
   const rows = [
     { s: "ETH-USD", px: s.eth, ch: ch(s.candles) },
+    { s: "BTC-USD", px: s.btc || 0, ch: 0 },
     { s: "WPIT-USD", px: s.wpit, ch: ch(s.wpitCandles) },
     { s: "ETH-USDC pool", px: ethPool.quoteReserve / ethPool.baseReserve, ch: 0 },
     { s: "WPIT-USDC-TEST", px: wUsd.quoteReserve / wUsd.baseReserve, ch: 0 },
@@ -21,7 +22,7 @@ export function Watchlist() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
       <div className="border-b border-border px-3 py-2 text-[10px] uppercase tracking-wider text-subtle">
-        Markets · Base sim
+        Markets · {s.liveSource || "feed"}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {rows.map((r) => (

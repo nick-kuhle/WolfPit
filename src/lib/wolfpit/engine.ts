@@ -6,6 +6,8 @@ import {
   MINI_ETH,
   PoolId,
   STAKE_APR,
+  START_ETH,
+  START_USDC,
   UTIL_CAP,
   WPIT_EMIT_PER_SEC,
   type EngineState,
@@ -20,6 +22,7 @@ import {
   bsPut,
   bsVega,
   clamp,
+  ewmaRv,
   ivSmile,
   monthEnd,
   nextFriday,
@@ -58,16 +61,20 @@ export function initialState(now = T0): EngineState {
     clock: now,
     eth,
     wpit,
+    btc: 0,
+    liveAt: 0,
+    liveSource: "sim-fallback",
     iv: 0.62,
     realizedVol: 0.55,
     candles: seedCandles(now, eth, "eth"),
     wpitCandles: seedCandles(now, wpit, "wpit"),
     account: {
-      usdc: 100_000,
-      eth: 0,
+      usdc: START_USDC,
+      eth: START_ETH,
       wpit: 0,
+      tokens: {},
       realized: 0,
-      startEquity: 100_000,
+      startEquity: START_USDC + START_ETH * eth,
     },
     vault: {
       eth: 100,
@@ -140,37 +147,56 @@ function seedCandles(now: number, px: number, kind: "eth" | "wpit") {
 
 export function tick(s: EngineState, dtSec: number): EngineState {
   const next = { ...s, account: { ...s.account }, vault: { ...s.vault } };
-  const dt = dtSec / (365.25 * 24 * 3600);
-  const sigma = 0.7;
-  const shock = randn() * sigma * Math.sqrt(dt) + (Math.random() < 0.008 ? randn() * 0.012 : 0);
-  next.eth = Math.max(200, s.eth * Math.exp(shock));
-  const wShock = randn() * 1.1 * Math.sqrt(dt);
+  next.clock = s.liveAt > 0 ? Date.now() : s.clock + dtSec * 1000;
   const pool = s.pools["WPIT-USDC-TEST"];
-  const poolPx = pool.quoteReserve / pool.baseReserve;
-  next.wpit = Math.max(0.01, poolPx * 0.85 + next.wpit * 0.1 * Math.exp(wShock) + s.wpit * 0.05);
-  next.clock = s.clock + dtSec * 1000;
-  const instVol = Math.abs(shock) * Math.sqrt(365.25 * 24 * 3600);
-  next.realizedVol = clamp(s.realizedVol * 0.94 + instVol * 0.06, 0.2, 2);
-  next.iv = clamp(1.08 * next.realizedVol, 0.28, 1.6);
-
-  next.candles = pushCandle(s.candles, next.clock, next.eth);
+  if (pool && pool.baseReserve > 0) {
+    next.wpit = pool.quoteReserve / pool.baseReserve;
+  }
   next.wpitCandles = pushCandle(s.wpitCandles, next.clock, next.wpit);
 
   const u = utilEth(next);
   const emit = WPIT_EMIT_PER_SEC * dtSec * (0.3 + 0.7 * u);
-  const toFarm = emit * 0.9;
-  const toIns = emit * 0.1 * next.wpit;
-  next.farmWpit = s.farmWpit + toFarm;
-  next.insuranceUsdc = (s.insuranceUsdc ?? INSURANCE_SEED) + toIns;
-  const ethPool = { ...next.pools["ETH-USDC"], feeBps: spotFeeBps(next.realizedVol) };
-  next.pools = { ...s.pools, "ETH-USDC": ethPool };
+  next.farmWpit = s.farmWpit + emit * 0.9;
+  next.insuranceUsdc = (s.insuranceUsdc ?? INSURANCE_SEED) + emit * 0.1 * next.wpit;
+  const ethPool = s.pools["ETH-USDC"];
+  if (ethPool) {
+    next.pools = { ...s.pools, "ETH-USDC": { ...ethPool, feeBps: spotFeeBps(next.realizedVol) } };
+  }
   if (s.stake.amount > 0) {
     next.account = {
       ...next.account,
       wpit: next.account.wpit + (s.stake.amount * STAKE_APR * dtSec) / (365.25 * 24 * 3600),
     };
   }
+  return settleAndLiq(maybeCircuit(next));
+}
 
+export function applyLive(
+  s: EngineState,
+  feed: { eth: number; candles: EngineState["candles"]; btc?: number; at: number; source: string },
+): EngineState {
+  const rv = ewmaRv(feed.candles);
+  const pools = { ...s.pools };
+  const ethPool = pools["ETH-USDC"];
+  if (ethPool && s.liveAt === 0 && s.lp.every((p) => p.poolId !== "ETH-USDC")) {
+    pools["ETH-USDC"] = { ...ethPool, quoteReserve: ethPool.baseReserve * feed.eth };
+  }
+  const next: EngineState = {
+    ...s,
+    eth: feed.eth,
+    btc: feed.btc ?? s.btc,
+    candles: feed.candles,
+    realizedVol: clamp(rv, 0.15, 2),
+    iv: clamp(1.08 * rv, 0.28, 1.6),
+    clock: feed.at,
+    liveAt: feed.at,
+    liveSource: feed.source,
+    pools,
+    account: {
+      ...s.account,
+      startEquity: s.liveAt === 0 ? START_USDC + START_ETH * feed.eth : s.account.startEquity,
+    },
+  };
   return settleAndLiq(maybeCircuit(next));
 }
 
@@ -191,10 +217,11 @@ function pushCandle(candles: EngineState["candles"], t: number, px: number) {
 
 export function equity(s: EngineState) {
   const spot = s.account.usdc + s.account.eth * s.eth + s.account.wpit * s.wpit;
+  const extras = Object.entries(s.account.tokens ?? {}).reduce((a, [k, v]) => a + v * tokenPx(s, k), 0);
   const fut = s.futures.reduce((a, p) => a + p.margin + futPnl(p, s.eth), 0);
   const opt = s.options.reduce((a, p) => a + optMark(s, p) * p.sizeEth, 0);
   const lpVal = s.lp.reduce((a, p) => a + lpValue(s, p.poolId, p.shares), 0);
-  return spot + fut + opt + lpVal + s.stake.amount * s.wpit;
+  return spot + extras + fut + opt + lpVal + s.stake.amount * s.wpit;
 }
 
 export function futPnl(p: EngineState["futures"][number], mark: number) {
@@ -210,10 +237,20 @@ export function optMark(s: EngineState, p: EngineState["options"][number]) {
 
 export function lpValue(s: EngineState, id: PoolId, shares: number) {
   const pool = s.pools[id];
-  if (pool.lpSupply <= 0) return 0;
+  if (!pool || pool.lpSupply <= 0) return 0;
   const frac = shares / pool.lpSupply;
-  const quotePx = id === "WPIT-ETH-TEST" ? s.eth : 1;
-  return frac * (pool.quoteReserve * quotePx + pool.baseReserve * (id === "ETH-USDC" ? s.eth : s.wpit));
+  return frac * (pool.quoteReserve * tokenPx(s, pool.quote) + pool.baseReserve * tokenPx(s, pool.base));
+}
+
+export function tokenPx(s: EngineState, sym: string) {
+  if (sym === "USDC") return 1;
+  if (sym === "ETH") return s.eth;
+  if (sym === "WPIT") return s.wpit;
+  const vsUsdc = Object.values(s.pools).find((p) => p.base === sym && p.quote === "USDC");
+  if (vsUsdc && vsUsdc.baseReserve > 0) return vsUsdc.quoteReserve / vsUsdc.baseReserve;
+  const vsEth = Object.values(s.pools).find((p) => p.base === sym && p.quote === "ETH");
+  if (vsEth && vsEth.baseReserve > 0) return (vsEth.quoteReserve / vsEth.baseReserve) * s.eth;
+  return 0;
 }
 
 export function freeEth(s: EngineState) {
@@ -236,7 +273,16 @@ export function maxNetShortEth(s: EngineState) {
 export function spreadBps(s: EngineState) {
   const g = bookGreeks(s);
   const inv = Math.abs(g.delta) / Math.max(s.vault.eth, 1e-6);
-  return 8 + utilEth(s) * 80 + Math.max(0, s.iv - 0.4) * 40 + inv * 25;
+  const as = 8 + utilEth(s) * 80 + Math.max(0, s.realizedVol - 0.4) * 40 + inv * 25;
+  return as;
+}
+
+export function reservationPx(s: EngineState) {
+  const q = bookGreeks(s).delta / Math.max(s.vault.eth, 1);
+  const gamma = 0.08;
+  const tau = 1 / 24;
+  const shift = q * gamma * s.realizedVol * s.realizedVol * tau;
+  return s.eth * (1 - shift);
 }
 
 export function bookGreeks(s: EngineState) {
@@ -355,7 +401,8 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
   const why = rejectFuture(s, side, sizeEth, expiry);
   if (why) return why;
   const bps = spreadBps(s);
-  const px = side === "long" ? s.eth * (1 + bps / 10_000) : s.eth * (1 - bps / 10_000);
+  const mid = reservationPx(s);
+  const px = side === "long" ? mid * (1 + bps / 10_000) : mid * (1 - bps / 10_000);
   const notional = sizeEth * px;
   const margin = notional * FUT_IM;
   const fee = notional * DERIV_FEE;
@@ -550,34 +597,98 @@ export function exportTape(s: EngineState) {
 
 export function addLiquidity(s: EngineState, poolId: PoolId, quoteAmt: number): EngineState | string {
   if (quoteAmt <= 0) return "Size must be positive.";
-  const pool = { ...s.pools[poolId] };
-  const acc = { ...s.account };
-  const px = pool.quoteReserve / pool.baseReserve;
-  if (poolId === "WPIT-ETH-TEST") {
-    const ethIn = quoteAmt / s.eth;
-    const wpitIn = ethIn / px;
-    if (acc.eth < ethIn || acc.wpit < wpitIn) return "Need both WPIT and ETH.";
-    const shares = (ethIn / pool.quoteReserve) * pool.lpSupply;
-    acc.eth -= ethIn;
-    acc.wpit -= wpitIn;
-    pool.quoteReserve += ethIn;
-    pool.baseReserve += wpitIn;
-    pool.lpSupply += shares;
-    const lp = upsertLp(s.lp, poolId, shares);
-    return { ...s, account: acc, pools: { ...s.pools, [poolId]: pool }, lp };
-  }
+  const pool = s.pools[poolId];
+  if (!pool) return "Unknown pool.";
+  const copy = { ...pool };
+  const px = copy.quoteReserve / copy.baseReserve;
   const baseIn = quoteAmt / px;
-  const haveBase = poolId === "ETH-USDC" ? acc.eth : acc.wpit;
-  if (acc.usdc < quoteAmt || haveBase < baseIn) return `Need both ${pool.base} and USDC.`;
-  const shares = (quoteAmt / pool.quoteReserve) * pool.lpSupply;
-  acc.usdc -= quoteAmt;
-  if (poolId === "ETH-USDC") acc.eth -= baseIn;
-  else acc.wpit -= baseIn;
-  pool.quoteReserve += quoteAmt;
-  pool.baseReserve += baseIn;
-  pool.lpSupply += shares;
-  const lp = upsertLp(s.lp, poolId, shares);
-  return { ...s, account: acc, pools: { ...s.pools, [poolId]: pool }, lp };
+  if (tokenBal(s.account, copy.quote) < quoteAmt || tokenBal(s.account, copy.base) < baseIn) {
+    return `Need both ${copy.base} and ${copy.quote}.`;
+  }
+  const shares = copy.lpSupply > 0 ? (quoteAmt / copy.quoteReserve) * copy.lpSupply : Math.sqrt(baseIn * quoteAmt);
+  let acc = creditToken(s.account, copy.quote, -quoteAmt);
+  acc = creditToken(acc, copy.base, -baseIn);
+  copy.quoteReserve += quoteAmt;
+  copy.baseReserve += baseIn;
+  copy.lpSupply += shares;
+  return { ...s, account: acc, pools: { ...s.pools, [poolId]: copy }, lp: upsertLp(s.lp, poolId, shares) };
+}
+
+export function removeLiquidity(s: EngineState, poolId: PoolId, shares: number): EngineState | string {
+  if (shares <= 0) return "Size must be positive.";
+  const pos = s.lp.find((p) => p.poolId === poolId);
+  if (!pos || pos.shares + 1e-12 < shares) return "Not enough LP shares.";
+  const pool = s.pools[poolId];
+  if (!pool || pool.lpSupply <= 0) return "Empty pool.";
+  const frac = shares / pool.lpSupply;
+  const quoteOut = pool.quoteReserve * frac;
+  const baseOut = pool.baseReserve * frac;
+  const copy = { ...pool, quoteReserve: pool.quoteReserve - quoteOut, baseReserve: pool.baseReserve - baseOut, lpSupply: pool.lpSupply - shares };
+  let acc = creditToken(s.account, pool.quote, quoteOut);
+  acc = creditToken(acc, pool.base, baseOut);
+  const lp = s.lp
+    .map((p) => (p.poolId === poolId ? { ...p, shares: p.shares - shares } : p))
+    .filter((p) => p.shares > 1e-9);
+  return { ...s, account: acc, pools: { ...s.pools, [poolId]: copy }, lp };
+}
+
+export function tokenBal(acc: EngineState["account"], sym: string) {
+  if (sym === "USDC") return acc.usdc;
+  if (sym === "ETH") return acc.eth;
+  if (sym === "WPIT") return acc.wpit;
+  return acc.tokens?.[sym] ?? 0;
+}
+
+export function creditToken(acc: EngineState["account"], sym: string, amt: number): EngineState["account"] {
+  const next = { ...acc, tokens: { ...(acc.tokens ?? {}) } };
+  if (sym === "USDC") next.usdc += amt;
+  else if (sym === "ETH") next.eth += amt;
+  else if (sym === "WPIT") next.wpit += amt;
+  else next.tokens[sym] = (next.tokens[sym] ?? 0) + amt;
+  return next;
+}
+
+export function createPool(
+  s: EngineState,
+  base: string,
+  quote: string,
+  baseAmt: number,
+  quoteAmt: number,
+  feeBps = 30,
+): EngineState | string {
+  const b = base.trim().toUpperCase();
+  const q = quote.trim().toUpperCase();
+  if (!b || !q || b === q) return "Pick two different tokens.";
+  if (baseAmt <= 0 || quoteAmt <= 0) return "Both legs must be positive.";
+  const id = `${b}-${q}`;
+  if (s.pools[id]) return "Pool exists. Add liquidity instead.";
+  if (tokenBal(s.account, b) < baseAmt) return `Need ${b}.`;
+  if (tokenBal(s.account, q) < quoteAmt) return `Need ${q}.`;
+  let acc = creditToken(s.account, b, -baseAmt);
+  acc = creditToken(acc, q, -quoteAmt);
+  const pool = {
+    id,
+    base: b,
+    quote: q,
+    baseReserve: baseAmt,
+    quoteReserve: quoteAmt,
+    lpSupply: Math.sqrt(baseAmt * quoteAmt),
+    feeBps,
+  };
+  return {
+    ...s,
+    account: acc,
+    pools: { ...s.pools, [id]: pool },
+    lp: upsertLp(s.lp, id, pool.lpSupply),
+  };
+}
+
+export function issueToken(s: EngineState, symbol: string, amt: number): EngineState | string {
+  const sym = symbol.trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9]{1,9}$/.test(sym)) return "Symbol 2–10 letters.";
+  if (["ETH", "USDC", "WPIT"].includes(sym)) return "Reserved ticker.";
+  if (amt <= 0) return "Amount must be positive.";
+  return { ...s, account: creditToken(s.account, sym, amt) };
 }
 
 function upsertLp(lp: EngineState["lp"], poolId: PoolId, shares: number) {
@@ -586,35 +697,6 @@ function upsertLp(lp: EngineState["lp"], poolId: PoolId, shares: number) {
   const copy = lp.slice();
   copy[i] = { poolId, shares: copy[i]!.shares + shares };
   return copy;
-}
-
-export function removeLiquidity(s: EngineState, poolId: PoolId, shares: number): EngineState | string {
-  if (shares <= 0) return "Size must be positive.";
-  const pos = s.lp.find((p) => p.poolId === poolId);
-  if (!pos || pos.shares + 1e-12 < shares) return "Not enough LP shares.";
-  const pool = { ...s.pools[poolId] };
-  if (pool.lpSupply <= 0) return "Empty pool.";
-  const frac = shares / pool.lpSupply;
-  const acc = { ...s.account };
-  const quoteOut = pool.quoteReserve * frac;
-  const baseOut = pool.baseReserve * frac;
-  pool.quoteReserve -= quoteOut;
-  pool.baseReserve -= baseOut;
-  pool.lpSupply -= shares;
-  if (poolId === "WPIT-ETH-TEST") {
-    acc.eth += quoteOut;
-    acc.wpit += baseOut;
-  } else if (poolId === "ETH-USDC") {
-    acc.usdc += quoteOut;
-    acc.eth += baseOut;
-  } else {
-    acc.usdc += quoteOut;
-    acc.wpit += baseOut;
-  }
-  const lp = s.lp
-    .map((p) => (p.poolId === poolId ? { ...p, shares: p.shares - shares } : p))
-    .filter((p) => p.shares > 1e-9);
-  return { ...s, account: acc, pools: { ...s.pools, [poolId]: pool }, lp };
 }
 
 export function closeOption(s: EngineState, id: string): EngineState | string {

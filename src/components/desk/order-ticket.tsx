@@ -8,13 +8,7 @@ import { MINI_ETH, FUT_IM } from "@/lib/wolfpit/types";
 import { useAdmin } from "@/lib/admin/config";
 import { fmtPx, fmtUsd } from "@/lib/utils";
 
-const SPOT_POOLS: { id: PoolId; label: string }[] = [
-  { id: "ETH-USDC", label: "ETH / USDC" },
-  { id: "WPIT-USDC-TEST", label: "WPIT-USDC-TEST" },
-  { id: "WPIT-ETH-TEST", label: "WPIT-ETH-TEST" },
-];
-
-export function OrderTicket() {
+export function OrderTicket({ prefer: _prefer }: { prefer?: "buy" | "sell" | null }) {
   const [tab, setTab] = useState<"spot" | "future" | "option">("spot");
   const err = useWolf((s) => s.lastError);
   const clear = useWolf((s) => s.clearError);
@@ -66,15 +60,18 @@ function SpotForm() {
   const [base, setBase] = useState("0.5");
   const buy = useWolf((s) => s.buySpot);
   const sell = useWolf((s) => s.sellSpot);
-  const p = useWolf((s) => s.pools[pool]);
-  const px = p.baseReserve > 0 ? p.quoteReserve / p.baseReserve : 0;
+  const pools = useWolf((s) => s.pools);
+  const p = pools[pool];
+  const px = p && p.baseReserve > 0 ? p.quoteReserve / p.baseReserve : 0;
+  const ids = Object.keys(pools);
+  if (!p) return <p className="text-xs text-muted">No pool.</p>;
   return (
     <div>
       <Field label="Pool">
         <select className={inputCls} value={pool} onChange={(e) => setPool(e.target.value as PoolId)}>
-          {SPOT_POOLS.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.label}
+          {ids.map((id) => (
+            <option key={id} value={id}>
+              {id}
             </option>
           ))}
         </select>

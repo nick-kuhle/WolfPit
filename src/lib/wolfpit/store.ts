@@ -2,12 +2,15 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
   addLiquidity,
+  applyLive as applyLiveFeed,
   buyOption,
   closeFuture,
   closeOption,
+  createPool as createPoolEngine,
   equity,
   harvestFarm,
   initialState,
+  issueToken as issueTokenEngine,
   removeLiquidity,
   stakeWpit,
   tick,
@@ -37,6 +40,9 @@ type Actions = {
   reset: () => void;
   clearError: () => void;
   seedVault: (eth: number, usdc: number) => void;
+  applyLive: (feed: { eth: number; candles: EngineState["candles"]; btc?: number; at: number; source: string }) => void;
+  createPool: (base: string, quote: string, baseAmt: number, quoteAmt: number) => void;
+  issueToken: (sym: string, amt: number) => void;
 };
 
 type WolfStore = EngineState & Actions;
@@ -96,14 +102,20 @@ export const useWolf = create<WolfStore>()(
         set({
           vault: { ...get().vault, eth, usdc },
         }),
+      applyLive: (feed) => set(applyLiveFeed(get(), feed)),
+      createPool: (base, quote, baseAmt, quoteAmt) => apply(createPoolEngine(get(), base, quote, baseAmt, quoteAmt), set),
+      issueToken: (sym, amt) => apply(issueTokenEngine(get(), sym, amt), set),
     }),
     {
-      name: "wolfpit-sim-v4",
+      name: "wolfpit-sim-v5",
       skipHydration: true,
       partialize: (s) => ({
         clock: s.clock,
         eth: s.eth,
         wpit: s.wpit,
+        btc: s.btc,
+        liveAt: s.liveAt,
+        liveSource: s.liveSource,
         iv: s.iv,
         realizedVol: s.realizedVol,
         candles: s.candles,

@@ -7,6 +7,7 @@ import {
   buyOption,
   closeFuture,
   closeOption,
+  createPool,
   expiries,
   harvestFarm,
   initialState,
@@ -67,6 +68,8 @@ describe("golden G1–G6", () => {
 
   it("G5 liquidation when equity < 0.125 × size × S", () => {
     let s = initialState();
+    s.account.eth = 0;
+    s.account.startEquity = 100_000;
     const opened = tradeFuture(s, "long", 1, exp);
     assert.equal(typeof opened, "object");
     s = opened as typeof s;
@@ -226,6 +229,18 @@ describe("LP and option close", () => {
     s = closed as typeof s;
     assert.equal(s.options.length, 0);
     assert.ok(s.vault.reservedEth < reserved);
+  });
+});
+
+describe("AMM create pool", () => {
+  it("rejects duplicate ETH-USDC and creates WPIT-ETH extra", () => {
+    const s = initialState();
+    assert.equal(typeof createPool(s, "ETH", "USDC", 1, 4000), "string");
+    const issued = { ...s, account: { ...s.account, tokens: { PEPE: 1_000_000 } } };
+    const out = createPool(issued, "PEPE", "USDC", 1000, 10);
+    assert.equal(typeof out, "object", String(out));
+    const next = out as typeof s;
+    assert.ok(next.pools["PEPE-USDC"]);
   });
 });
 

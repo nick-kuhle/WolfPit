@@ -2,7 +2,7 @@ export type Side = "buy" | "sell";
 export type FutSide = "long" | "short";
 export type OptType = "call" | "put";
 export type Product = "spot" | "future" | "option";
-export type PoolId = "ETH-USDC" | "WPIT-USDC-TEST" | "WPIT-ETH-TEST";
+export type PoolId = string;
 
 export type Candle = {
   t: number;
@@ -82,6 +82,7 @@ export type PaperAccount = {
   usdc: number;
   eth: number;
   wpit: number;
+  tokens: Record<string, number>;
   realized: number;
   startEquity: number;
 };
@@ -94,6 +95,9 @@ export type EngineState = {
   realizedVol: number;
   candles: Candle[];
   wpitCandles: Candle[];
+  btc: number;
+  liveAt: number;
+  liveSource: string;
   account: PaperAccount;
   vault: VaultState;
   pools: Record<PoolId, PoolState>;
@@ -109,6 +113,8 @@ export type EngineState = {
   liquidations: number;
 };
 
+export const START_ETH = 1000;
+export const START_USDC = 100_000;
 export const MINI_ETH = 0.1;
 export const FUT_IM = 0.25;
 export const FUT_MM = 0.125;

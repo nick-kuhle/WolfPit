@@ -102,3 +102,19 @@ export function ivSmile(atm: number, S: number, K: number, T: number) {
   const z = Math.log(K / S) / Math.sqrt(Math.max(T, 1 / 365));
   return clamp(atm * (1 - 0.18 * z), 0.2, 2);
 }
+
+export function ewmaRv(candles: { t: number; c: number }[]) {
+  if (candles.length < 8) return 0.55;
+  const rets: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const a = candles[i - 1]!.c;
+    const b = candles[i]!.c;
+    if (a > 0 && b > 0) rets.push(Math.log(b / a));
+  }
+  const n = rets.length;
+  const mean = rets.reduce((x, y) => x + y, 0) / n;
+  const var_ = rets.reduce((x, y) => x + (y - mean) ** 2, 0) / Math.max(n - 1, 1);
+  const barSec = Math.max(1, (candles[1]!.t - candles[0]!.t) / 1000);
+  const annual = Math.sqrt(var_ * ((365.25 * 24 * 3600) / barSec));
+  return Math.min(2, Math.max(0.15, annual));
+}

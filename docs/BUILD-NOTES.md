@@ -6,6 +6,14 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-25 (Tue) — live prices + ToS mobile + Sushi pools
+
+- ETH/BTC from Coinbase → Binance → CoinGecko. Paper: 1000 ETH + 100k USDC.
+- Tick no longer GBMs ETH. RV from live candles. AMM x·y=k; create pool UI.
+- Desk: Quotes / Chart / Trade / Positions / More.
+
+---
+
 ## 2026-08-25 (Tue) — mobile + ops + term copy
 
 - Done: mobile bottom nav, landing seal, “term / vanilla / expiry” not “dated”.

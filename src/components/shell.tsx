@@ -67,9 +67,10 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
           </Link>
         </nav>
       </header>
-      <div className={cn("min-h-0 flex-1", desk ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>
+      <div className={cn("min-h-0 flex-1", desk ? "" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>
         {children}
       </div>
+      {desk ? null : (
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
         <div className="grid grid-cols-5">
           {NAV.map((n) => (
@@ -95,6 +96,7 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
           </Link>
         </div>
       </nav>
+      )}
     </div>
   );
 }

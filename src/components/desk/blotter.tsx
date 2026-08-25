@@ -13,6 +13,9 @@ export function Blotter() {
         <Row k="USDC" v={fmtUsd(s.account.usdc)} />
         <Row k="ETH" v={`${s.account.eth.toFixed(4)}  (${fmtUsd(s.account.eth * s.eth)})`} />
         <Row k="WPIT" v={`${s.account.wpit.toFixed(2)}  (${fmtUsd(s.account.wpit * s.wpit)})`} />
+        {Object.entries(s.account.tokens ?? {}).map(([k, v]) => (
+          <Row key={k} k={k} v={v.toLocaleString()} />
+        ))}
       </section>
       <section>
         <h3 className="mb-2 text-[10px] uppercase tracking-wider text-subtle">Mini futures</h3>
