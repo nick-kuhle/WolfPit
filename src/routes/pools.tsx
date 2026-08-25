@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
@@ -34,9 +35,10 @@ function PoolsPage() {
 
   return (
     <Shell>
+      <ProductGate product="farms">
       <main className="mx-auto max-w-4xl px-4 py-8">
-        <p className="font-mono text-[11px] uppercase tracking-wider text-brass">AMM · x·y=k · paper</p>
-        <h1 className="mt-2 text-2xl font-medium">Liquidity</h1>
+        <p className="font-mono text-[11px] uppercase tracking-wider text-brass">Farms · AMM · simulated APY</p>
+        <h1 className="mt-2 font-display text-3xl font-medium tracking-tight">Yield you can actually press.</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
           Constant-product pools. Pick two tokens, both legs. New pair creates the pool. ETH mark is live; pool
           price is its own curve.
@@ -149,6 +151,7 @@ function PoolsPage() {
         {err ? <p className="mt-4 text-sm text-down">{err}</p> : null}
       </main>
       <SiteFooter />
+      </ProductGate>
     </Shell>
   );
 }

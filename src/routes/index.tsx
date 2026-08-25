@@ -1,214 +1,177 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { BrandLockup, ChainChip } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
+import { LiveTicker } from "@/components/ticker";
 import { Button } from "@/components/ui/button";
 import { ping } from "@/lib/wolfpit/alerts";
-import { useDesk } from "@/lib/wolfpit/desk";
 import { equity } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
-import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
+import { STAKE_APR } from "@/lib/wolfpit/types";
+import { fmtPx, fmtUsd } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
   const s = useWolf();
-  const universe = useDesk((d) => d.universe);
-  const tape = universe.slice(0, 18);
-  const gainers = universe.filter((u) => u.change24 > 0).sort((a, b) => b.change24 - a.change24).slice(0, 4);
-  const losers = universe.filter((u) => u.change24 < 0).sort((a, b) => a.change24 - b.change24).slice(0, 4);
   return (
     <div className="min-h-dvh bg-bg pb-16 text-fg lg:pb-0">
-      <a
-        href="#floor"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-20 focus:bg-accent focus:px-3 focus:py-2 focus:text-accent-fg"
-      >
-        Skip to floor
-      </a>
-      <header className="flex h-12 items-center justify-between border-b border-border px-3 sm:px-4">
+      <header className="flex h-14 items-center justify-between px-3 sm:px-5">
         <BrandLockup />
         <div className="flex items-center gap-2">
           <span className="hidden sm:inline">
             <ChainChip />
           </span>
-          <Link to="/trade" onClick={() => ping("Walking onto the floor", "brass")}>
-            <Button size="sm">Floor</Button>
+          <Link to="/learn" className="hidden h-11 items-center px-3 text-sm text-muted hover:text-fg sm:flex">
+            Learn
+          </Link>
+          <Link to="/trade" onClick={() => ping("Try free", "up")}>
+            <Button size="sm">Try free</Button>
           </Link>
         </div>
       </header>
 
-      <div className="flex gap-8 overflow-hidden border-b border-border bg-elevated py-2 font-mono text-[11px]">
-        <div className="flex animate-none gap-8 px-4 whitespace-nowrap sm:animate-[ticker_40s_linear_infinite]">
-          {(tape.length ? tape : [{ symbol: "ETH", price: s.eth, change24: 0 }]).concat(tape).map((t, i) => (
-            <span key={`${t.symbol}-${i}`} className="shrink-0">
-              <span className="text-brass">{t.symbol}</span>{" "}
-              <span>{fmtPx(t.price || 0)}</span>{" "}
-              <span className={t.change24 >= 0 ? "text-up" : "text-down"}>{fmtPct(t.change24)}</span>
-            </span>
-          ))}
-        </div>
-      </div>
+      <LiveTicker />
 
-      <section className="relative overflow-hidden border-b border-border">
-        <img
-          src="/brand/og-pit.jpg"
-          alt=""
-          className="absolute inset-0 size-full object-cover object-[center_42%] opacity-50"
-        />
-        <div className="absolute inset-0 bg-bg/45" />
-        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-bg to-transparent" />
-        <div className="relative mx-auto max-w-5xl px-4 py-12 sm:py-16">
-          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">Open outcry · Base paper · live marks</p>
-          <h1 className="mt-3 max-w-xl text-4xl font-medium leading-[1.05] tracking-tight sm:text-6xl">
-            Step into the pit.
+      <section className="relative overflow-hidden">
+        <img src="/brand/hero-pit.jpg" alt="" className="absolute inset-0 size-full object-cover object-center" />
+        <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/55 to-bg/25" />
+        <div className="relative mx-auto max-w-5xl px-4 py-16 sm:py-24">
+          <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-brass">Paper pit · live tape · zero deposit</p>
+          <h1 className="mt-4 max-w-2xl font-display text-5xl font-medium leading-[0.95] tracking-tight sm:text-7xl">
+            Trade like the pit.
+            <span className="italic text-brass"> Farm like you mean it.</span>
           </h1>
-          <p className="mt-4 max-w-lg text-base leading-relaxed text-muted">
-            Three rings. One floor. Term futures and vanilla options, AMM pools, and staked WPIT — paper funds, live
-            tape.
+          <p className="mt-5 max-w-lg text-lg leading-relaxed text-muted">
+            1,000 ETH and $100,000 in paper. Live crypto prices. Farms that print simulated WPIT. Dated options —
+            not perps — so you can finally learn a call without lighting a wallet.
           </p>
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <Link to="/trade" className="sm:w-auto" onClick={() => ping("Desk — paper", "up")}>
+              <Button className="h-12 w-full px-6 text-base sm:w-auto">Start with fake money →</Button>
+            </Link>
+            <Link to="/pools" className="sm:w-auto" onClick={() => ping("Farms", "brass")}>
+              <Button variant="outline" className="h-12 w-full px-6 text-base sm:w-auto">
+                Show me the yield
+              </Button>
+            </Link>
+          </div>
+          <p className="mt-4 text-xs text-subtle">Simulation. You will accept Terms before the desk or farms.</p>
         </div>
       </section>
 
-      <main id="floor" className="mx-auto max-w-5xl px-4 py-8 sm:py-12">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Ring
-            n="01"
-            title="The desk"
-            to="/trade"
-            body="Board of the most traded names. Chart any ticker or 0x. Spot, minis, vanillas."
-            cta="Open the board"
-          />
-          <Ring
-            n="02"
-            title="The pools"
-            to="/pools"
-            body="Sushi-style add. Constant product. WPIT farms on TEST pairs. Create a new ring."
-            cta="Add liquidity"
-          />
-          <Ring
-            n="03"
-            title="The stake"
-            to="/stake"
-            body="WPIT first-loss junior to insurance. Harvest a 1% tax into the fund. Not a deposit."
-            cta="Stake WPIT"
-          />
+      <section className="mx-auto grid max-w-5xl gap-4 px-4 py-10 sm:grid-cols-3 sm:py-14">
+        <Wow
+          img="/brand/card-farm.jpg"
+          kicker="Farms"
+          title={`Stake ${(STAKE_APR * 100).toFixed(0)}%. Farm more.`}
+          body="WPIT-USDC and WPIT-ETH farms emit into LPs. Harvest. A 1% tax feeds insurance. It is supposed to feel like interest. It is still paper."
+          to="/pools"
+          cta="Open the farms"
+        />
+        <Wow
+          img="/brand/card-paper.jpg"
+          kicker="Free paper"
+          title="No wallet. No card. Press buy."
+          body={`${fmtUsd(equity(s))} on the book right now. Reset anytime. Live ETH at ${fmtPx(s.eth)}. The bruise is real. The money isn’t.`}
+          to="/trade"
+          cta="Take a seat"
+        />
+        <Wow
+          img="/brand/card-options.jpg"
+          kicker="Vanillas"
+          title="Calls and puts. With an expiry."
+          body="Covered, cash-settled, weekly and monthly. If you’ve only ever touched perps, this will feel like a different sport. That’s the idea."
+          to="/learn"
+          cta="How a call works"
+        />
+      </section>
+
+      <section className="border-y border-border bg-surface">
+        <div className="mx-auto grid max-w-5xl gap-8 px-4 py-12 sm:grid-cols-3 sm:py-16">
+          <Stat n="1,000 ETH" l="Paper stack" />
+          <Stat n="$100,000" l="Paper USDC" />
+          <Stat n="4×" l="Mini initial margin" />
         </div>
+      </section>
 
-        <dl className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-border bg-border sm:grid-cols-4">
-          <Stat k="ETH" v={fmtPx(s.eth)} />
-          <Stat k="WPIT" v={fmtPx(s.wpit)} />
-          <Stat k="Paper book" v={fmtUsd(equity(s))} />
-          <Stat k="Wallet" v={`${s.account.eth.toFixed(0)} ETH · ${fmtUsd(s.account.usdc)}`} />
-        </dl>
+      <section className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
+        <h2 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">Three rings. One floor.</h2>
+        <ol className="mt-8 grid gap-4 sm:grid-cols-3">
+          <Step n="01" title="Paper desk" body="Board of the world’s most traded coins. Chart any ticker or 0x. Spot, minis, vanillas." />
+          <Step n="02" title="Pools & farms" body="Add both legs. Watch APY. Harvest WPIT. Create a pair like Sushi." />
+          <Step n="03" title="Stake" body="Junior to insurance. 12% simulated APR. First-loss if the pit has a bad day." />
+        </ol>
+        <Link to="/learn" className="mt-8 inline-block text-brass">
+          Pit school — five minutes →
+        </Link>
+      </section>
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          <Tape title="Gainers" rows={gainers} up />
-          <Tape title="Losers" rows={losers} up={false} />
-        </div>
-
-        <section className="mt-10 grid gap-8 border-t border-border pt-8 sm:grid-cols-3">
-          <Note title="Spot" body="Trade any listed token vs USDC. Type a contract. The pit lists a paper pool at the live mark." />
-          <Note title="Minis" body="ETH term futures, 4× IM, weekly and monthly. Inventory-backed. Never naked." />
-          <Note title="Vanillas" body="You buy. Vault sells covered calls and cash-secured puts. European, cash-settled." />
-        </section>
-      </main>
       <SiteFooter />
-      <MobileDock />
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
+        <div className="grid grid-cols-4">
+          {[
+            { to: "/trade" as const, label: "Desk" },
+            { to: "/pools" as const, label: "Farms" },
+            { to: "/stake" as const, label: "Stake" },
+            { to: "/learn" as const, label: "Learn" },
+          ].map((n) => (
+            <Link
+              key={n.to}
+              to={n.to}
+              className="flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider text-muted"
+            >
+              {n.label}
+            </Link>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }
 
-function Ring({
-  n,
+function Wow({
+  img,
+  kicker,
   title,
-  to,
   body,
+  to,
   cta,
 }: {
-  n: string;
+  img: string;
+  kicker: string;
   title: string;
-  to: "/trade" | "/pools" | "/stake";
   body: string;
+  to: "/trade" | "/pools" | "/learn";
   cta: string;
 }) {
   return (
-    <Link
-      to={to}
-      onClick={() => ping(cta, "brass")}
-      className="group relative overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface p-5"
-    >
-      <div className="font-mono text-[11px] uppercase tracking-wider text-brass">{n} · ring</div>
-      <h2 className="mt-3 text-2xl font-medium">{title}</h2>
-      <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
-      <div className="mt-4 text-sm text-fg">{cta} →</div>
+    <Link to={to} className="group overflow-hidden rounded-[var(--radius-xl)] border border-border bg-panel">
+      <img src={img} alt="" className="aspect-[4/3] w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+      <div className="p-5">
+        <div className="font-mono text-[11px] uppercase tracking-wider text-brass">{kicker}</div>
+        <h2 className="mt-2 font-display text-2xl font-medium leading-tight">{title}</h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
+        <div className="mt-4 text-sm text-fg">{cta} →</div>
+      </div>
     </Link>
   );
 }
 
-function Tape({
-  title,
-  rows,
-  up,
-}: {
-  title: string;
-  rows: { symbol: string; price: number; change24: number }[];
-  up: boolean;
-}) {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-border bg-surface p-4">
-      <h2 className={`text-[10px] uppercase tracking-wider ${up ? "text-up" : "text-down"}`}>{title}</h2>
-      {rows.length === 0 ? <p className="mt-2 text-xs text-muted">Waiting on the tape…</p> : null}
-      {rows.map((r) => (
-        <div key={r.symbol} className="mt-2 flex justify-between font-mono text-xs">
-          <span>{r.symbol}</span>
-          <span>
-            {fmtPx(r.price)}{" "}
-            <span className={r.change24 >= 0 ? "text-up" : "text-down"}>{fmtPct(r.change24)}</span>
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MobileDock() {
-  return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
-      <div className="grid grid-cols-5">
-        {[
-          { to: "/trade" as const, label: "Board" },
-          { to: "/pools" as const, label: "Pools" },
-          { to: "/stake" as const, label: "Stake" },
-          { to: "/plan" as const, label: "Plan" },
-          { to: "/admin" as const, label: "Ops" },
-        ].map((n) => (
-          <Link
-            key={n.to}
-            to={n.to}
-            onClick={() => ping(n.label, "brass")}
-            className="flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider text-muted"
-          >
-            {n.label}
-          </Link>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
-function Stat({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="bg-surface px-3 py-3 sm:px-4 sm:py-4">
-      <dt className="text-[10px] uppercase tracking-wider text-subtle">{k}</dt>
-      <dd className="mt-1 font-mono text-base tabular-nums sm:text-lg">{v}</dd>
-    </div>
-  );
-}
-
-function Note({ title, body }: { title: string; body: string }) {
+function Stat({ n, l }: { n: string; l: string }) {
   return (
     <div>
-      <h2 className="text-sm font-medium">{title}</h2>
-      <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
+      <div className="font-display text-4xl font-medium tracking-tight text-brass sm:text-5xl">{n}</div>
+      <div className="mt-1 text-sm text-muted">{l}</div>
     </div>
+  );
+}
+
+function Step({ n, title, body }: { n: string; title: string; body: string }) {
+  return (
+    <li className="rounded-[var(--radius-lg)] border border-border bg-surface p-5">
+      <div className="font-mono text-[11px] text-brass">{n}</div>
+      <h3 className="mt-2 text-lg font-medium">{title}</h3>
+      <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
+    </li>
   );
 }

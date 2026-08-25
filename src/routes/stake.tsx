@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ function StakePage() {
   const [amt, setAmt] = useState("1000");
   return (
     <Shell>
+      <ProductGate product="stake">
       <main className="mx-auto max-w-xl px-4 py-8">
         <p className="font-mono text-[11px] uppercase tracking-wider text-brass">$WPIT · insurance junior</p>
         <h1 className="mt-2 text-2xl font-medium">Stake</h1>
@@ -78,6 +80,7 @@ function StakePage() {
         </div>
       </main>
       <SiteFooter />
+      </ProductGate>
     </Shell>
   );
 }

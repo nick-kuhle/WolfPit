@@ -2,17 +2,20 @@ import { useEffect } from "react";
 import { useDesk } from "@/lib/wolfpit/desk";
 import { getLiveMarket, getUniverse } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
+import { useTerms } from "@/lib/wolfpit/terms";
 
 export function SimLoop() {
   const speed = useWolf((s) => s.simSpeed);
   const step = useWolf((s) => s.step);
   const rehydrate = useWolf((s) => s.rehydrate);
+  const rehydrateTerms = useTerms((s) => s.rehydrate);
   const applyLive = useWolf((s) => s.applyLive);
   const setUniverse = useDesk((s) => s.setUniverse);
   const setFocus = useDesk((s) => s.setFocus);
   useEffect(() => {
     rehydrate();
-  }, [rehydrate]);
+    rehydrateTerms();
+  }, [rehydrate, rehydrateTerms]);
   useEffect(() => {
     let dead = false;
     const pull = () => {

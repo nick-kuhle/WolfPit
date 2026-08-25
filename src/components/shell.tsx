@@ -6,9 +6,9 @@ import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
 
 const NAV = [
   { to: "/trade" as const, label: "Desk" },
-  { to: "/pools" as const, label: "Pools" },
+  { to: "/pools" as const, label: "Farms" },
   { to: "/stake" as const, label: "Stake" },
-  { to: "/plan" as const, label: "Plan" },
+  { to: "/learn" as const, label: "Learn" },
 ];
 
 export function BrandLockup({ className, markClass }: { className?: string; markClass?: string }) {

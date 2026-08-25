@@ -11,9 +11,11 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as LearnRouteImport } from './routes/learn'
 import { Route as PlanRouteImport } from './routes/plan'
 import { Route as PoolsRouteImport } from './routes/pools'
 import { Route as StakeRouteImport } from './routes/stake'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TradeRouteImport } from './routes/trade'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 
@@ -25,6 +27,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LearnRoute = LearnRouteImport.update({
+  id: '/learn',
+  path: '/learn',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlanRoute = PlanRouteImport.update({
@@ -42,6 +49,11 @@ const StakeRoute = StakeRouteImport.update({
   path: '/stake',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TradeRoute = TradeRouteImport.update({
   id: '/trade',
   path: '/trade',
@@ -56,18 +68,22 @@ const AdminLoginRoute = AdminLoginRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/learn': typeof LearnRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
+  '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
   '/admin/login': typeof AdminLoginRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/learn': typeof LearnRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
+  '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
   '/admin/login': typeof AdminLoginRoute
 }
@@ -75,25 +91,46 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/learn': typeof LearnRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
+  '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
   '/admin/login': typeof AdminLoginRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/admin' | '/plan' | '/pools' | '/stake' | '/trade' | '/admin/login'
+    | '/'
+    | '/admin'
+    | '/learn'
+    | '/plan'
+    | '/pools'
+    | '/stake'
+    | '/terms'
+    | '/trade'
+    | '/admin/login'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/plan' | '/pools' | '/stake' | '/trade' | '/admin/login'
+  to:
+    | '/'
+    | '/admin'
+    | '/learn'
+    | '/plan'
+    | '/pools'
+    | '/stake'
+    | '/terms'
+    | '/trade'
+    | '/admin/login'
   id:
     | '__root__'
     | '/'
     | '/admin'
+    | '/learn'
     | '/plan'
     | '/pools'
     | '/stake'
+    | '/terms'
     | '/trade'
     | '/admin/login'
   fileRoutesById: FileRoutesById
@@ -101,9 +138,11 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
+  LearnRoute: typeof LearnRoute
   PlanRoute: typeof PlanRoute
   PoolsRoute: typeof PoolsRoute
   StakeRoute: typeof StakeRoute
+  TermsRoute: typeof TermsRoute
   TradeRoute: typeof TradeRoute
 }
 
@@ -121,6 +160,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/learn': {
+      id: '/learn'
+      path: '/learn'
+      fullPath: '/learn'
+      preLoaderRoute: typeof LearnRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/plan': {
@@ -142,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/stake'
       fullPath: '/stake'
       preLoaderRoute: typeof StakeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/trade': {
@@ -174,9 +227,11 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
+  LearnRoute: LearnRoute,
   PlanRoute: PlanRoute,
   PoolsRoute: PoolsRoute,
   StakeRoute: StakeRoute,
+  TermsRoute: TermsRoute,
   TradeRoute: TradeRoute,
 }
 export const routeTree = rootRouteImport
