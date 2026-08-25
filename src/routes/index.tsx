@@ -2,6 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { BrandLockup, ChainChip } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
+import { ping } from "@/lib/wolfpit/alerts";
+import { useDesk } from "@/lib/wolfpit/desk";
 import { equity } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
@@ -10,14 +12,17 @@ export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
   const s = useWolf();
-  const chg = change(s.candles);
+  const universe = useDesk((d) => d.universe);
+  const tape = universe.slice(0, 18);
+  const gainers = universe.filter((u) => u.change24 > 0).sort((a, b) => b.change24 - a.change24).slice(0, 4);
+  const losers = universe.filter((u) => u.change24 < 0).sort((a, b) => a.change24 - b.change24).slice(0, 4);
   return (
-    <div className="min-h-dvh bg-bg text-fg">
+    <div className="min-h-dvh bg-bg pb-16 text-fg lg:pb-0">
       <a
-        href="#main"
+        href="#floor"
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-20 focus:bg-accent focus:px-3 focus:py-2 focus:text-accent-fg"
       >
-        Skip to content
+        Skip to floor
       </a>
       <header className="flex h-12 items-center justify-between border-b border-border px-3 sm:px-4">
         <BrandLockup />
@@ -25,75 +30,142 @@ function Home() {
           <span className="hidden sm:inline">
             <ChainChip />
           </span>
-          <Link to="/trade">
-            <Button size="sm">Desk</Button>
+          <Link to="/trade" onClick={() => ping("Walking onto the floor", "brass")}>
+            <Button size="sm">Floor</Button>
           </Link>
         </div>
       </header>
+
+      <div className="flex gap-8 overflow-hidden border-b border-border bg-elevated py-2 font-mono text-[11px]">
+        <div className="flex animate-none gap-8 px-4 whitespace-nowrap sm:animate-[ticker_40s_linear_infinite]">
+          {(tape.length ? tape : [{ symbol: "ETH", price: s.eth, change24: 0 }]).concat(tape).map((t, i) => (
+            <span key={`${t.symbol}-${i}`} className="shrink-0">
+              <span className="text-brass">{t.symbol}</span>{" "}
+              <span>{fmtPx(t.price || 0)}</span>{" "}
+              <span className={t.change24 >= 0 ? "text-up" : "text-down"}>{fmtPct(t.change24)}</span>
+            </span>
+          ))}
+        </div>
+      </div>
 
       <section className="relative overflow-hidden border-b border-border">
         <img
           src="/brand/og-pit.jpg"
           alt=""
-          className="absolute inset-0 size-full object-cover object-[center_40%] opacity-45"
-          width={1792}
-          height={1008}
+          className="absolute inset-0 size-full object-cover object-[center_42%] opacity-50"
         />
-        <div className="absolute inset-0 bg-bg/50" />
+        <div className="absolute inset-0 bg-bg/45" />
         <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-bg to-transparent" />
-        <div className="relative mx-auto flex min-h-[28rem] max-w-5xl flex-col items-center px-4 py-12 text-center sm:min-h-[36rem] sm:justify-end sm:py-16 sm:text-left sm:items-start">
-          <img
-            src="/brand/emblem-seal.jpg"
-            alt="WolfPit pit seal"
-            className="mb-6 size-20 rounded-full border border-border object-cover sm:size-24"
-            width={128}
-            height={128}
-          />
-          <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.28em] text-brass">
-            Term markets · vanilla · never naked
-          </p>
-          <h1 className="max-w-xl text-4xl font-medium leading-[1.05] tracking-tight sm:text-6xl">
-            The pit for crypto futures and options with expiry.
+        <div className="relative mx-auto max-w-5xl px-4 py-12 sm:py-16">
+          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">Open outcry · Base paper · live marks</p>
+          <h1 className="mt-3 max-w-xl text-4xl font-medium leading-[1.05] tracking-tight sm:text-6xl">
+            Step into the pit.
           </h1>
-          <p className="mt-5 max-w-xl text-base leading-relaxed text-muted">
-            Not perps. Live ETH mark. Paper funds: 1,000 ETH + 100,000 USDC. Weekly and monthly vanilla,
-            inventory-backed, quoted off pool depth.
+          <p className="mt-4 max-w-lg text-base leading-relaxed text-muted">
+            Three rings. One floor. Term futures and vanilla options, AMM pools, and staked WPIT — paper funds, live
+            tape.
           </p>
-          <div className="mt-8 flex w-full max-w-sm flex-col gap-3 sm:max-w-none sm:flex-row">
-            <Link to="/trade" className="w-full sm:w-auto">
-              <Button className="w-full">Open the desk</Button>
-            </Link>
-            <Link to="/pools" className="w-full sm:w-auto">
-              <Button variant="outline" className="w-full">
-                Add liquidity
-              </Button>
-            </Link>
-          </div>
         </div>
       </section>
 
-      <main id="main" className="mx-auto max-w-5xl px-4 py-10 sm:py-16">
-        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-border bg-border sm:grid-cols-4">
-          <Stat k="ETH mark" v={fmtPx(s.eth)} sub={fmtPct(chg)} up={chg >= 0} />
+      <main id="floor" className="mx-auto max-w-5xl px-4 py-8 sm:py-12">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Ring
+            n="01"
+            title="The desk"
+            to="/trade"
+            body="Board of the most traded names. Chart any ticker or 0x. Spot, minis, vanillas."
+            cta="Open the board"
+          />
+          <Ring
+            n="02"
+            title="The pools"
+            to="/pools"
+            body="Sushi-style add. Constant product. WPIT farms on TEST pairs. Create a new ring."
+            cta="Add liquidity"
+          />
+          <Ring
+            n="03"
+            title="The stake"
+            to="/stake"
+            body="WPIT first-loss junior to insurance. Harvest a 1% tax into the fund. Not a deposit."
+            cta="Stake WPIT"
+          />
+        </div>
+
+        <dl className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-border bg-border sm:grid-cols-4">
+          <Stat k="ETH" v={fmtPx(s.eth)} />
           <Stat k="WPIT" v={fmtPx(s.wpit)} />
-          <Stat k="Paper equity" v={fmtUsd(equity(s))} />
-          <Stat k="Mini" v="0.1 ETH · 4×" />
+          <Stat k="Paper book" v={fmtUsd(equity(s))} />
+          <Stat k="Wallet" v={`${s.account.eth.toFixed(0)} ETH · ${fmtUsd(s.account.usdc)}`} />
         </dl>
 
-        <ol className="mt-10 grid gap-3 sm:mt-14 sm:grid-cols-3 sm:gap-4">
-          <Step n="01" title="Desk" to="/trade" body="Spot, mini futures, mini options. Vault hedges 1:1. If inventory is gone, the quote blanks." />
-          <Step n="02" title="Pools" to="/pools" body="Buy WPIT or ETH on the desk, then add both legs. Gauges 70 / 20 / 10. ETH-USDC is unfarmed." />
-          <Step n="03" title="Stake" to="/stake" body="WPIT is first-loss junior to insurance. Harvest takes a 1% tax into the fund." />
-        </ol>
+        <div className="mt-8 grid gap-4 sm:grid-cols-2">
+          <Tape title="Gainers" rows={gainers} up />
+          <Tape title="Losers" rows={losers} up={false} />
+        </div>
 
-        <section className="mt-12 grid gap-8 border-t border-border pt-10 sm:mt-16 sm:grid-cols-3 sm:pt-12">
-          <Note title="Spot" body="Constant-product pools. Fee 5–30 bps on ETH-USDC from realized vol. Test pairs: WPIT-USDC-TEST, WPIT-ETH-TEST." />
-          <Note title="Mini futures" body="Expiry, variation, 4× initial margin. Size dies when util hits 40%. Circuit can halt new shorts." />
-          <Note title="Mini options" body="You buy. Vault sells covered calls and cash-secured puts only. European, cash-settled. Never naked." />
+        <section className="mt-10 grid gap-8 border-t border-border pt-8 sm:grid-cols-3">
+          <Note title="Spot" body="Trade any listed token vs USDC. Type a contract. The pit lists a paper pool at the live mark." />
+          <Note title="Minis" body="ETH term futures, 4× IM, weekly and monthly. Inventory-backed. Never naked." />
+          <Note title="Vanillas" body="You buy. Vault sells covered calls and cash-secured puts. European, cash-settled." />
         </section>
       </main>
       <SiteFooter />
       <MobileDock />
+    </div>
+  );
+}
+
+function Ring({
+  n,
+  title,
+  to,
+  body,
+  cta,
+}: {
+  n: string;
+  title: string;
+  to: "/trade" | "/pools" | "/stake";
+  body: string;
+  cta: string;
+}) {
+  return (
+    <Link
+      to={to}
+      onClick={() => ping(cta, "brass")}
+      className="group relative overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface p-5"
+    >
+      <div className="font-mono text-[11px] uppercase tracking-wider text-brass">{n} · ring</div>
+      <h2 className="mt-3 text-2xl font-medium">{title}</h2>
+      <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
+      <div className="mt-4 text-sm text-fg">{cta} →</div>
+    </Link>
+  );
+}
+
+function Tape({
+  title,
+  rows,
+  up,
+}: {
+  title: string;
+  rows: { symbol: string; price: number; change24: number }[];
+  up: boolean;
+}) {
+  return (
+    <div className="rounded-[var(--radius-lg)] border border-border bg-surface p-4">
+      <h2 className={`text-[10px] uppercase tracking-wider ${up ? "text-up" : "text-down"}`}>{title}</h2>
+      {rows.length === 0 ? <p className="mt-2 text-xs text-muted">Waiting on the tape…</p> : null}
+      {rows.map((r) => (
+        <div key={r.symbol} className="mt-2 flex justify-between font-mono text-xs">
+          <span>{r.symbol}</span>
+          <span>
+            {fmtPx(r.price)}{" "}
+            <span className={r.change24 >= 0 ? "text-up" : "text-down"}>{fmtPct(r.change24)}</span>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -103,7 +175,7 @@ function MobileDock() {
     <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
       <div className="grid grid-cols-5">
         {[
-          { to: "/trade" as const, label: "Desk" },
+          { to: "/trade" as const, label: "Board" },
           { to: "/pools" as const, label: "Pools" },
           { to: "/stake" as const, label: "Stake" },
           { to: "/plan" as const, label: "Plan" },
@@ -112,6 +184,7 @@ function MobileDock() {
           <Link
             key={n.to}
             to={n.to}
+            onClick={() => ping(n.label, "brass")}
             className="flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider text-muted"
           >
             {n.label}
@@ -122,33 +195,12 @@ function MobileDock() {
   );
 }
 
-function change(candles: { c: number }[]) {
-  if (candles.length < 30) return 0;
-  const a = candles[candles.length - 30]!.c;
-  const b = candles[candles.length - 1]!.c;
-  return a > 0 ? (b - a) / a : 0;
-}
-
-function Stat({ k, v, sub, up }: { k: string; v: string; sub?: string; up?: boolean }) {
+function Stat({ k, v }: { k: string; v: string }) {
   return (
     <div className="bg-surface px-3 py-3 sm:px-4 sm:py-4">
       <dt className="text-[10px] uppercase tracking-wider text-subtle">{k}</dt>
       <dd className="mt-1 font-mono text-base tabular-nums sm:text-lg">{v}</dd>
-      {sub ? <dd className={`font-mono text-xs tabular-nums ${up ? "text-up" : "text-down"}`}>{sub}</dd> : null}
     </div>
-  );
-}
-
-function Step({ n, title, to, body }: { n: string; title: string; to: "/trade" | "/pools" | "/stake"; body: string }) {
-  return (
-    <Link
-      to={to}
-      className="block rounded-[var(--radius-lg)] border border-border bg-surface p-4 sm:p-5"
-    >
-      <div className="font-mono text-[11px] uppercase tracking-wider text-brass">{n}</div>
-      <h2 className="mt-2 text-lg font-medium">{title}</h2>
-      <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
-    </Link>
   );
 }
 

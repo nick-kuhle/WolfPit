@@ -796,6 +796,31 @@ export function createPool(
   };
 }
 
+export function ensureListed(s: EngineState, symbol: string, mark: number): EngineState {
+  const sym = symbol.trim().toUpperCase();
+  if (!sym || sym === "USDC") return s;
+  const id = `${sym}-USDC`;
+  if (s.pools[id]) return s;
+  const px = Math.max(mark, 1e-9);
+  const baseReserve = sym === "ETH" ? s.pools["ETH-USDC"]?.baseReserve ?? 250 : 10_000;
+  const quoteReserve = baseReserve * px;
+  return {
+    ...s,
+    pools: {
+      ...s.pools,
+      [id]: {
+        id,
+        base: sym,
+        quote: "USDC",
+        baseReserve,
+        quoteReserve,
+        lpSupply: Math.sqrt(baseReserve * quoteReserve),
+        feeBps: 30,
+      },
+    },
+  };
+}
+
 export function issueToken(s: EngineState, symbol: string, amt: number): EngineState | string {
   const sym = symbol.trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9]{1,9}$/.test(sym)) return "Symbol 2–10 letters.";

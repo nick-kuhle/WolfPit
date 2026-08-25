@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { Candle } from "./types";
+import type { Listing } from "./desk";
 
 export type ChartInterval = "1m" | "5m" | "15m" | "1h" | "1d";
 
@@ -128,3 +129,221 @@ async function coingecko(): Promise<LiveFeed | null> {
     return null;
   }
 }
+
+const BINANCE_MAP: Record<string, string> = {
+  BTC: "BTCUSDT",
+  ETH: "ETHUSDT",
+  SOL: "SOLUSDT",
+  XRP: "XRPUSDT",
+  BNB: "BNBUSDT",
+  DOGE: "DOGEUSDT",
+  ADA: "ADAUSDT",
+  AVAX: "AVAXUSDT",
+  LINK: "LINKUSDT",
+  SUI: "SUIUSDT",
+  PEPE: "PEPEUSDT",
+  TON: "TONUSDT",
+  DOT: "DOTUSDT",
+  NEAR: "NEARUSDT",
+  APT: "APTUSDT",
+  ARB: "ARBUSDT",
+  OP: "OPUSDT",
+  UNI: "UNIUSDT",
+  AAVE: "AAVEUSDT",
+  LTC: "LTCUSDT",
+  TRX: "TRXUSDT",
+  SHIB: "SHIBUSDT",
+  WLD: "WLDUSDT",
+  INJ: "INJUSDT",
+  TIA: "TIAUSDT",
+  FET: "FETUSDT",
+  ATOM: "ATOMUSDT",
+  FIL: "FILUSDT",
+  HYPE: "HYPEUSDT",
+  WIF: "WIFUSDT",
+};
+
+const CHAIN_HINT: Record<string, string> = {
+  BTC: "Bitcoin",
+  ETH: "Base / Ethereum",
+  SOL: "Solana",
+  BNB: "BNB Chain",
+  AVAX: "Avalanche",
+  SUI: "Sui",
+  TON: "TON",
+  TRX: "Tron",
+  ARB: "Arbitrum",
+  OP: "Optimism",
+  DOT: "Polkadot",
+  NEAR: "NEAR",
+  APT: "Aptos",
+  ATOM: "Cosmos",
+};
+
+export const getUniverse = createServerFn({ method: "GET" }).handler(async (): Promise<Listing[]> => {
+  const cg = await geckoMarkets();
+  if (cg.length) return cg;
+  return binanceTickers();
+});
+
+export const lookupToken = createServerFn({ method: "GET" })
+  .validator((d: { q: string }) => d)
+  .handler(async ({ data }): Promise<Listing> => {
+    const q = data.q.trim();
+    if (/^0x[a-fA-F0-9]{40}$/.test(q)) {
+      const dex = await dexToken(q);
+      if (dex) return dex;
+    }
+    const rows = await geckoMarkets();
+    const hit = rows.find((r) => r.symbol === q.toUpperCase() || r.name.toLowerCase() === q.toLowerCase());
+    if (hit) return hit;
+    const search = await geckoSearch(q);
+    if (search) return search;
+    throw new Error("Token not found.");
+  });
+
+export const getSymbolCandles = createServerFn({ method: "GET" })
+  .validator((d: { symbol: string; interval?: ChartInterval; binance?: string }) => d)
+  .handler(async ({ data }): Promise<Candle[]> => {
+    const interval: ChartInterval = data.interval ?? "1m";
+    const pair = data.binance || BINANCE_MAP[data.symbol.toUpperCase()];
+    if (pair) {
+      const bars = await binanceKlines(pair, interval);
+      if (bars.length) return bars;
+    }
+    return [];
+  });
+
+async function geckoMarkets(): Promise<Listing[]> {
+  try {
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=40&page=1&price_change_percentage=24h",
+    );
+    if (!res.ok) return [];
+    const j = (await res.json()) as {
+      id: string;
+      symbol: string;
+      name: string;
+      image?: string;
+      current_price: number;
+      price_change_percentage_24h: number;
+      total_volume: number;
+    }[];
+    return j.map((c) => {
+      const symbol = c.symbol.toUpperCase();
+      return {
+        symbol,
+        name: c.name,
+        price: c.current_price,
+        change24: (c.price_change_percentage_24h ?? 0) / 100,
+        volume24: c.total_volume,
+        image: c.image,
+        chain: CHAIN_HINT[symbol] ?? "Multi-chain",
+        binance: BINANCE_MAP[symbol],
+        geckoId: c.id,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function geckoSearch(q: string): Promise<Listing | null> {
+  try {
+    const res = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`);
+    if (!res.ok) return null;
+    const j = (await res.json()) as { coins?: { id: string; symbol: string; name: string; large?: string }[] };
+    const c = j.coins?.[0];
+    if (!c) return null;
+    return {
+      symbol: c.symbol.toUpperCase(),
+      name: c.name,
+      price: 0,
+      change24: 0,
+      volume24: 0,
+      image: c.large,
+      geckoId: c.id,
+      binance: BINANCE_MAP[c.symbol.toUpperCase()],
+      chain: CHAIN_HINT[c.symbol.toUpperCase()] ?? "Multi-chain",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function dexToken(addr: string): Promise<Listing | null> {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${addr}`);
+    if (!res.ok) return null;
+    const j = (await res.json()) as {
+      pairs?: {
+        chainId: string;
+        priceUsd?: string;
+        priceChange?: { h24?: number };
+        volume?: { h24?: number };
+        baseToken: { symbol: string; name: string; address: string };
+      }[];
+    };
+    const p = j.pairs?.[0];
+    if (!p) return null;
+    const symbol = p.baseToken.symbol.toUpperCase();
+    return {
+      symbol,
+      name: p.baseToken.name,
+      price: Number(p.priceUsd) || 0,
+      change24: (p.priceChange?.h24 ?? 0) / 100,
+      volume24: p.volume?.h24 ?? 0,
+      chain: p.chainId,
+      contract: p.baseToken.address,
+      binance: BINANCE_MAP[symbol],
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function binanceTickers(): Promise<Listing[]> {
+  try {
+    const res = await fetch("https://api.binance.com/api/v3/ticker/24hr");
+    if (!res.ok) return [];
+    const j = (await res.json()) as { symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume: string }[];
+    const want = new Set(Object.values(BINANCE_MAP));
+    return j
+      .filter((t) => want.has(t.symbol))
+      .map((t) => {
+        const symbol = Object.keys(BINANCE_MAP).find((k) => BINANCE_MAP[k] === t.symbol) ?? t.symbol.replace("USDT", "");
+        return {
+          symbol,
+          name: symbol,
+          price: Number(t.lastPrice),
+          change24: Number(t.priceChangePercent) / 100,
+          volume24: Number(t.quoteVolume),
+          binance: t.symbol,
+          chain: CHAIN_HINT[symbol] ?? "CEX",
+        };
+      })
+      .sort((a, b) => b.volume24 - a.volume24);
+  } catch {
+    return [];
+  }
+}
+
+async function binanceKlines(pair: string, interval: ChartInterval): Promise<Candle[]> {
+  try {
+    const iv = GRAN[interval].binance;
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${iv}&limit=300`);
+    if (!res.ok) return [];
+    const raw = (await res.json()) as (string | number)[][];
+    return raw.map((r) => ({
+      t: Number(r[0]),
+      o: Number(r[1]),
+      h: Number(r[2]),
+      l: Number(r[3]),
+      c: Number(r[4]),
+      v: Number(r[5]),
+    }));
+  } catch {
+    return [];
+  }
+}
+

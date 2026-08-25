@@ -6,6 +6,7 @@ import { useWolf } from "@/lib/wolfpit/store";
 import type { DeskSide, OrderKind, OptType, PoolId, Product, Tif } from "@/lib/wolfpit/types";
 import { FUT_IM, MINI_ETH } from "@/lib/wolfpit/types";
 import { useAdmin } from "@/lib/admin/config";
+import { useDesk } from "@/lib/wolfpit/desk";
 import { cn, fmtPx, fmtUsd } from "@/lib/utils";
 
 const KINDS: { id: OrderKind; label: string }[] = [
@@ -40,10 +41,18 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
   const s = useWolf();
   const send = useWolf((st) => st.sendOrder);
   const cancel = useWolf((st) => st.cancelOrder);
+  const listToken = useWolf((st) => st.listToken);
+  const focus = useDesk((d) => d.focus);
 
   useEffect(() => {
     if (prefer) setSide(prefer);
   }, [prefer]);
+
+  useEffect(() => {
+    const id = focus.symbol === "ETH" ? "ETH-USDC" : `${focus.symbol}-USDC`;
+    setPoolId(id);
+    listToken(focus.symbol, focus.price || s.eth);
+  }, [focus.symbol, focus.price, listToken, s.eth]);
 
   useEffect(() => {
     if (!limit && s.ethAsk) setLimit(s.ethAsk.toFixed(2));

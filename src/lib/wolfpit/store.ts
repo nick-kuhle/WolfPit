@@ -8,6 +8,7 @@ import {
   closeOption,
   cancelWorking,
   createPool as createPoolEngine,
+  ensureListed,
   equity,
   harvestFarm,
   initialState,
@@ -22,6 +23,7 @@ import {
 } from "./engine";
 import type { EngineState, FutSide, OptType, PoolId, WorkingOrder } from "./types";
 import { useAdmin } from "@/lib/admin/config";
+import { ping } from "./alerts";
 
 type Actions = {
   lastError: string | null;
@@ -55,6 +57,7 @@ type Actions = {
   issueToken: (sym: string, amt: number) => void;
   sendOrder: (o: Omit<WorkingOrder, "id" | "created">) => void;
   cancelOrder: (id: string) => void;
+  listToken: (symbol: string, mark: number) => void;
 };
 
 type WolfStore = EngineState & Actions;
@@ -67,8 +70,16 @@ function gated(): string | null {
 
 function apply(result: EngineState | string, set: (p: Partial<WolfStore>) => void) {
   if (typeof result === "string") {
+    ping(result, "down");
     set({ lastError: result });
     return;
+  }
+  const fill = result.fills[0];
+  const prev = useWolf.getState().fills[0]?.id;
+  if (fill && fill.id !== prev) {
+    ping(`${fill.side} ${fill.symbol} ${fill.size.toPrecision(4)} @ ${fill.price.toPrecision(6)}`, "up");
+  } else if ((result.working?.length ?? 0) > (useWolf.getState().working?.length ?? 0)) {
+    ping("Order working", "brass");
   }
   set({ ...result, lastError: null });
 }
@@ -107,9 +118,10 @@ export const useWolf = create<WolfStore>()(
       lpRemove: (pool, shares) => apply(removeLiquidity(get(), pool, shares), set),
       lockStake: (amt) => apply(stakeWpit(get(), amt), set),
       unstake: () => set(unstakeWpit(get())),
-      harvest: () => set(harvestFarm(get())),
-      reset: () => set({ ...initialState(), lastError: null }),
-      clearError: () => set({ lastError: null }),
+      harvest: () => {
+        ping("Harvested WPIT", "up");
+        set(harvestFarm(get()));
+      },
       seedVault: (eth, usdc) =>
         set({
           vault: { ...get().vault, eth, usdc },
@@ -118,7 +130,16 @@ export const useWolf = create<WolfStore>()(
       createPool: (base, quote, baseAmt, quoteAmt) => apply(createPoolEngine(get(), base, quote, baseAmt, quoteAmt), set),
       issueToken: (sym, amt) => apply(issueTokenEngine(get(), sym, amt), set),
       sendOrder: (o) => apply(placeDeskOrder(get(), o), set),
-      cancelOrder: (id) => set(cancelWorking(get(), id)),
+      cancelOrder: (id) => {
+        ping("Order cancelled", "brass");
+        set(cancelWorking(get(), id));
+      },
+      listToken: (symbol, mark) => set(ensureListed(get(), symbol, mark)),
+      reset: () => {
+        ping("Paper reset", "brass");
+        set({ ...initialState(), lastError: null });
+      },
+      clearError: () => set({ lastError: null }),
     }),
     {
       name: "wolfpit-sim-v6",

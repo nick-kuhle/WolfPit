@@ -1,71 +1,80 @@
 import { useEffect, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { AccountBar } from "@/components/desk/account-bar";
-import { Blotter } from "@/components/desk/blotter";
+import { History } from "@/components/desk/history";
 import { PitChart } from "@/components/desk/chart";
 import { OptionChain } from "@/components/desk/option-chain";
 import { OrderTicket } from "@/components/desk/order-ticket";
+import { Portfolio } from "@/components/desk/portfolio";
 import { Watchlist } from "@/components/desk/watchlist";
 import { Button } from "@/components/ui/button";
-import { getLiveMarket, type ChartInterval } from "@/lib/wolfpit/market";
+import { ping } from "@/lib/wolfpit/alerts";
+import { useDesk, type Listing } from "@/lib/wolfpit/desk";
+import { getSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { Candle } from "@/lib/wolfpit/types";
 import { fmtPct, fmtPx } from "@/lib/utils";
 import { chainLabel } from "@/lib/wolfpit/chain";
 import { cn } from "@/lib/utils";
 
-type Pane = "watch" | "chart" | "trade" | "pos" | "menu";
+type Pane = "watch" | "chart" | "trade" | "port" | "hist";
 
 export function Desk() {
-  const eth = useWolf((s) => s.eth);
-  const candles = useWolf((s) => s.candles);
-  const iv = useWolf((s) => s.iv);
+  const ethCandles = useWolf((s) => s.candles);
   const live = useWolf((s) => s.liveSource);
   const liveAt = useWolf((s) => s.liveAt);
-  const ch =
-    candles.length >= 2
-      ? (candles[candles.length - 1]!.c - candles[0]!.c) / candles[0]!.c
-      : 0;
-  const [pane, setPane] = useState<Pane>("chart");
-  const [bottom, setBottom] = useState<"blotter" | "chain">("blotter");
+  const focus = useDesk((s) => s.focus);
+  const [pane, setPane] = useState<Pane>("watch");
+  const [bottom, setBottom] = useState<"port" | "chain">("port");
   const [interval, setInterval] = useState<ChartInterval>("1m");
-  const [chartBars, setChartBars] = useState<Candle[]>(candles);
+  const [chartBars, setChartBars] = useState<Candle[]>(ethCandles);
   const [sidePref, setSidePref] = useState<"buy" | "sell" | null>(null);
 
+  const px = focus.price || useWolf.getState().eth;
+  const ch = focus.change24;
+
   useEffect(() => {
-    if (interval === "1m") {
-      setChartBars(candles);
+    if (focus.symbol === "ETH" && interval === "1m") {
+      setChartBars(ethCandles);
       return;
     }
     let dead = false;
-    void getLiveMarket({ data: { interval } })
-      .then((f) => {
-        if (!dead) setChartBars(f.candles);
+    void getSymbolCandles({ data: { symbol: focus.symbol, interval, binance: focus.binance } })
+      .then((bars) => {
+        if (!dead && bars.length) setChartBars(bars);
+        else if (!dead && focus.symbol === "ETH") setChartBars(ethCandles);
       })
       .catch(() => undefined);
     return () => {
       dead = true;
     };
-  }, [interval, candles]);
+  }, [focus.symbol, focus.binance, interval, ethCandles]);
+
+  function openChart(l?: Listing) {
+    void l;
+    setPane("chart");
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <AccountBar />
       <div className="flex items-center gap-2 overflow-x-auto border-b border-border px-3 py-1.5">
-        <h1 className="shrink-0 text-sm font-medium">ETH-USD</h1>
-        <span className="font-mono text-lg tabular-nums">{fmtPx(eth)}</span>
+        <h1 className="shrink-0 text-sm font-medium">
+          {focus.symbol}-USD
+        </h1>
+        <span className="font-mono text-lg tabular-nums">{fmtPx(px)}</span>
         <span className={`font-mono text-xs tabular-nums ${ch >= 0 ? "text-up" : "text-down"}`}>{fmtPct(ch)}</span>
-        <span className="hidden font-mono text-xs text-muted sm:inline">IV {(iv * 100).toFixed(0)}</span>
+        <span className="hidden truncate text-xs text-muted sm:inline">{focus.name} · {focus.chain}</span>
         <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-wider text-brass">
           {liveAt ? live : "Connecting"} · paper · {chainLabel()}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 lg:hidden">
-        {pane === "watch" && <Watchlist />}
+        {pane === "watch" && <Watchlist onPick={() => setPane("chart")} />}
         {pane === "chart" && (
           <div className="flex h-full min-h-0 flex-col">
+            <TokenMeta />
             <IntervalBar interval={interval} setInterval={setInterval} />
             <div className="relative min-h-0 flex-1">
               <PitChart candles={chartBars} height={320} />
@@ -75,6 +84,7 @@ export function Desk() {
                   onClick={() => {
                     setSidePref("buy");
                     setPane("trade");
+                    ping("Buy ticket", "up");
                   }}
                 >
                   Buy
@@ -84,6 +94,7 @@ export function Desk() {
                   onClick={() => {
                     setSidePref("sell");
                     setPane("trade");
+                    ping("Sell ticket", "down");
                   }}
                 >
                   Sell
@@ -93,70 +104,67 @@ export function Desk() {
           </div>
         )}
         {pane === "trade" && <OrderTicket prefer={sidePref} />}
-        {pane === "pos" && (
-          <div className="flex h-full min-h-0 flex-col">
-            <div className="flex border-b border-border">
-              <button
-                className={cn("h-11 flex-1 text-xs uppercase tracking-wider", bottom === "blotter" ? "border-b border-accent text-fg" : "text-muted")}
-                onClick={() => setBottom("blotter")}
-              >
-                Positions
-              </button>
-              <button
-                className={cn("h-11 flex-1 text-xs uppercase tracking-wider", bottom === "chain" ? "border-b border-accent text-fg" : "text-muted")}
-                onClick={() => setBottom("chain")}
-              >
-                Chain
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto">{bottom === "blotter" ? <Blotter /> : <OptionChain />}</div>
-          </div>
-        )}
-        {pane === "menu" && <DeskMenu />}
+        {pane === "port" && <Portfolio onPick={() => setPane("chart")} />}
+        {pane === "hist" && <History />}
       </div>
 
       <nav className="grid grid-cols-5 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
-        {(["watch", "chart", "trade", "pos", "menu"] as const).map((k) => (
+        {(["watch", "chart", "trade", "port", "hist"] as const).map((k) => (
           <button
             key={k}
-            onClick={() => setPane(k)}
-            className={cn("flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider", pane === k ? "text-fg" : "text-muted")}
+            onClick={() => {
+              setPane(k);
+              ping(k === "watch" ? "Board" : k === "port" ? "Wallet" : k === "hist" ? "History" : k, "brass");
+            }}
+            className={cn(
+              "flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
+              pane === k ? "text-fg" : "text-muted",
+            )}
           >
-            {k === "watch" ? "Quotes" : k === "chart" ? "Chart" : k === "trade" ? "Trade" : k === "pos" ? "Positions" : "More"}
+            {k === "watch" ? "Board" : k === "chart" ? "Chart" : k === "trade" ? "Trade" : k === "port" ? "Wallet" : "History"}
           </button>
         ))}
       </nav>
 
       <div className="hidden min-h-0 flex-1 lg:block">
         <Group orientation="horizontal" className="h-full">
-          <Panel defaultSize="18%" minSize="14%" maxSize="28%" className="h-full overflow-hidden">
-            <Watchlist />
+          <Panel defaultSize="22%" minSize="16%" maxSize="32%" className="h-full overflow-hidden">
+            <Watchlist onPick={openChart} />
           </Panel>
           <Separator className="w-px bg-border" />
-          <Panel defaultSize="56%" minSize="36%">
+          <Panel defaultSize="52%" minSize="36%">
             <Group orientation="vertical" className="h-full">
-              <Panel defaultSize="62%" minSize="36%" className="h-full overflow-hidden">
+              <Panel defaultSize="58%" minSize="36%" className="h-full overflow-hidden">
+                <TokenMeta />
                 <IntervalBar interval={interval} setInterval={setInterval} />
                 <PitChart candles={chartBars} height={280} />
               </Panel>
               <Separator className="h-px bg-border" />
-              <Panel defaultSize="38%" minSize="24%">
+              <Panel defaultSize="42%" minSize="24%">
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="flex border-b border-border">
-                    <button
-                      className={cn("h-11 px-4 text-xs uppercase tracking-wider", bottom === "blotter" ? "border-b border-accent text-fg" : "text-muted")}
-                      onClick={() => setBottom("blotter")}
-                    >
-                      Positions
-                    </button>
-                    <button
-                      className={cn("h-11 px-4 text-xs uppercase tracking-wider", bottom === "chain" ? "border-b border-accent text-fg" : "text-muted")}
-                      onClick={() => setBottom("chain")}
-                    >
-                      Option chain
-                    </button>
+                    {(["port", "chain", "hist"] as const).map((k) => (
+                      <button
+                        key={k}
+                        className={cn(
+                          "h-11 px-4 text-xs uppercase tracking-wider",
+                          (k === "hist" ? pane === "hist" : bottom === k) ? "border-b border-accent text-fg" : "text-muted",
+                        )}
+                        onClick={() => {
+                          if (k === "hist") setPane("hist");
+                          else {
+                            setBottom(k);
+                            setPane("chart");
+                          }
+                        }}
+                      >
+                        {k === "port" ? "Wallet" : k === "chain" ? "Chain" : "History"}
+                      </button>
+                    ))}
                   </div>
-                  <div className="min-h-0 flex-1 overflow-auto">{bottom === "blotter" ? <Blotter /> : <OptionChain />}</div>
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    {pane === "hist" ? <History /> : bottom === "port" ? <Portfolio onPick={openChart} /> : <OptionChain />}
+                  </div>
                 </div>
               </Panel>
             </Group>
@@ -167,6 +175,18 @@ export function Desk() {
           </Panel>
         </Group>
       </div>
+    </div>
+  );
+}
+
+function TokenMeta() {
+  const focus = useDesk((s) => s.focus);
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border px-3 py-1.5 text-[11px] text-muted">
+      <span className="text-fg">{focus.name}</span>
+      <span>{focus.chain}</span>
+      {focus.contract ? <span className="font-mono">{focus.contract.slice(0, 6)}…{focus.contract.slice(-4)}</span> : null}
+      <span className="ml-auto font-mono">Vol {focus.volume24 ? `$${(focus.volume24 / 1e6).toFixed(1)}M` : "—"}</span>
     </div>
   );
 }
@@ -183,31 +203,6 @@ function IntervalBar({ interval, setInterval }: { interval: ChartInterval; setIn
           {k}
         </button>
       ))}
-    </div>
-  );
-}
-
-function DeskMenu() {
-  const reset = useWolf((s) => s.reset);
-  const src = useWolf((s) => s.liveSource);
-  return (
-    <div className="space-y-2 p-4">
-      <p className="font-mono text-[11px] uppercase tracking-wider text-brass">Live {src || "—"} · paper funds</p>
-      <Link to="/pools" className="block rounded-[var(--radius-md)] border border-border bg-surface px-4 py-3">
-        Pools
-      </Link>
-      <Link to="/stake" className="block rounded-[var(--radius-md)] border border-border bg-surface px-4 py-3">
-        Stake
-      </Link>
-      <Link to="/plan" className="block rounded-[var(--radius-md)] border border-border bg-surface px-4 py-3">
-        Plan
-      </Link>
-      <Link to="/admin" className="block rounded-[var(--radius-md)] border border-border bg-surface px-4 py-3">
-        Ops
-      </Link>
-      <Button variant="outline" className="w-full" onClick={reset}>
-        Reset paper
-      </Button>
     </div>
   );
 }

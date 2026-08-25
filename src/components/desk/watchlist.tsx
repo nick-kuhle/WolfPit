@@ -1,73 +1,134 @@
-import { bookGreeks, freeEth, freeUsdc, maxNetLongEth, maxNetShortEth, utilEth } from "@/lib/wolfpit/engine";
-import { circuitActive, haltShortGamma, insuranceRatio } from "@/lib/wolfpit/risk";
+import { useMemo, useState } from "react";
+import { ping } from "@/lib/wolfpit/alerts";
+import { useDesk, type Listing } from "@/lib/wolfpit/desk";
+import { lookupToken } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
-export function Watchlist() {
-  const s = useWolf();
-  const g = bookGreeks(s);
-  const ethPool = s.pools["ETH-USDC"];
-  const wUsd = s.pools["WPIT-USDC-TEST"];
-  const wEth = s.pools["WPIT-ETH-TEST"];
-  const rows = [
-    { s: "ETH-USD", px: s.eth, ch: ch(s.candles) },
-    { s: "BTC-USD", px: s.btc || 0, ch: 0 },
-    { s: "WPIT-USD", px: s.wpit, ch: ch(s.wpitCandles) },
-    { s: "ETH-USDC pool", px: ethPool.quoteReserve / ethPool.baseReserve, ch: 0 },
-    { s: "WPIT-USDC-TEST", px: wUsd.quoteReserve / wUsd.baseReserve, ch: 0 },
-    { s: "WPIT-ETH-TEST", px: (wEth.quoteReserve / wEth.baseReserve) * s.eth, ch: 0 },
-  ];
-  const circ = circuitActive(s);
-  const halt = haltShortGamma(s);
+type Tab = "hot" | "gainers" | "losers" | "chains";
+
+export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
+  const universe = useDesk((s) => s.universe);
+  const focus = useDesk((s) => s.focus);
+  const setFocus = useDesk((s) => s.setFocus);
+  const [tab, setTab] = useState<Tab>("hot");
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const listToken = useWolf((s) => s.listToken);
+
+  const rows = useMemo(() => {
+    const u = universe.slice();
+    if (tab === "gainers") return u.sort((a, b) => b.change24 - a.change24);
+    if (tab === "losers") return u.sort((a, b) => a.change24 - b.change24);
+    if (tab === "chains") {
+      const seen = new Set<string>();
+      return u.filter((r) => {
+        const c = r.chain ?? r.symbol;
+        if (seen.has(c)) return false;
+        seen.add(c);
+        return true;
+      });
+    }
+    return u.sort((a, b) => b.volume24 - a.volume24);
+  }, [universe, tab]);
+
+  function pick(l: Listing) {
+    setFocus(l);
+    listToken(l.symbol, l.price || 1);
+    ping(`${l.symbol} on the board`, "brass");
+    onPick?.(l);
+  }
+
+  async function lookup() {
+    const query = q.trim();
+    if (!query) return;
+    setBusy(true);
+    ping(`Looking up ${query}`, "brass");
+    try {
+      const l = await lookupToken({ data: { q: query } });
+      pick(l);
+      setQ("");
+    } catch {
+      ping("Token not found", "down");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
-      <div className="border-b border-border px-3 py-2 text-[10px] uppercase tracking-wider text-subtle">
-        Markets · {s.liveSource || "feed"}
+      <div className="border-b border-border px-3 py-2">
+        <div className="text-[10px] uppercase tracking-wider text-subtle">The board · live</div>
+        <form
+          className="mt-2 flex gap-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void lookup();
+          }}
+        >
+          <input
+            className="h-11 min-w-0 flex-1 rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono text-xs"
+            placeholder="Ticker or 0x contract"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <button
+            type="submit"
+            disabled={busy}
+            className="h-11 px-3 text-xs uppercase tracking-wider text-brass"
+          >
+            Go
+          </button>
+        </form>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {rows.map((r) => (
-          <div key={r.s} className="flex items-center justify-between border-b border-border px-3 py-2">
-            <div className="text-xs text-fg">{r.s}</div>
-            <div className="text-right">
-              <div className="font-mono text-xs tabular-nums">{fmtPx(r.px)}</div>
-              <div className={`font-mono text-[10px] tabular-nums ${r.ch >= 0 ? "text-up" : "text-down"}`}>{fmtPct(r.ch)}</div>
-            </div>
-          </div>
+      <div className="flex border-b border-border">
+        {(["hot", "gainers", "losers", "chains"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => {
+              setTab(t);
+              ping(`${t} tape`, "brass");
+            }}
+            className={cn(
+              "h-11 flex-1 text-[10px] uppercase tracking-wider",
+              tab === t ? "border-b border-accent text-fg" : "text-muted",
+            )}
+          >
+            {t}
+          </button>
         ))}
       </div>
-      <div className="border-t border-border p-3">
-        <div className="mb-1 text-[10px] uppercase tracking-wider text-subtle">Risk / hedge</div>
-        <p className="mb-2 text-[11px] leading-snug text-muted">Covered. α=40%. 4× IM. Never naked.</p>
-        {circ ? <p className="mb-2 text-[11px] text-down">Circuit: new shorts halted.</p> : null}
-        {halt && !circ ? <p className="mb-2 text-[11px] text-down">Short gamma halted (insurance).</p> : null}
-        <Stat k="ETH free / total" v={`${freeEth(s).toFixed(2)} / ${s.vault.eth.toFixed(2)}`} />
-        <Stat k="USDC free" v={fmtUsd(freeUsdc(s))} />
-        <Stat k="Util" v={`${(utilEth(s) * 100).toFixed(0)}% / 40%`} />
-        <Stat k="Max net long" v={`${maxNetLongEth(s).toFixed(2)} ETH`} />
-        <Stat k="Max net short" v={`${maxNetShortEth(s).toFixed(2)} ETH`} />
-        <Stat k="Book Δ" v={`${g.delta >= 0 ? "+" : ""}${g.delta.toFixed(3)} ETH`} />
-        <Stat k="Book Γ" v={g.gamma.toFixed(4)} />
-        <Stat k="IV / RV" v={`${(s.iv * 100).toFixed(0)}% / ${(s.realizedVol * 100).toFixed(0)}%`} />
-        <Stat k="Insurance" v={fmtUsd(s.insuranceUsdc ?? 0)} />
-        <Stat k="Ins / NAV" v={`${(insuranceRatio(s) * 100).toFixed(2)}%`} />
-        <Stat k="Spot fee" v={`${ethPool.feeBps} bps`} />
+      <div className="min-h-0 flex-1 overflow-auto">
+        {rows.length === 0 ? (
+          <p className="p-3 text-xs text-muted">Loading the tape…</p>
+        ) : null}
+        {rows.map((r) => (
+          <button
+            key={`${r.symbol}-${r.contract ?? r.geckoId ?? ""}`}
+            onClick={() => pick(r)}
+            className={cn(
+              "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left",
+              focus.symbol === r.symbol && "bg-elevated",
+            )}
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs">{r.symbol}</span>
+                <span className="truncate text-[10px] text-subtle">{r.chain}</span>
+              </div>
+              <div className="truncate text-[11px] text-muted">{r.name}</div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="font-mono text-xs tabular-nums">{r.price ? fmtPx(r.price) : "—"}</div>
+              <div className={`font-mono text-[10px] tabular-nums ${r.change24 >= 0 ? "text-up" : "text-down"}`}>
+                {fmtPct(r.change24)}
+              </div>
+              <div className="font-mono text-[10px] text-subtle">{fmtUsd(r.volume24)}</div>
+            </div>
+          </button>
+        ))}
       </div>
-    </div>
-  );
-}
-
-function ch(candles: { c: number }[]) {
-  if (candles.length < 30) return 0;
-  const a = candles[candles.length - 30]!.c;
-  const b = candles[candles.length - 1]!.c;
-  return (b - a) / a;
-}
-
-function Stat({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex justify-between py-0.5 text-[11px]">
-      <span className="text-muted">{k}</span>
-      <span className="font-mono tabular-nums">{v}</span>
     </div>
   );
 }
