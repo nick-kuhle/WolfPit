@@ -87,9 +87,31 @@ export type PaperAccount = {
   startEquity: number;
 };
 
+export type OrderKind = "mkt" | "lmt" | "stp" | "stl";
+export type Tif = "day" | "gtc" | "ioc";
+export type DeskSide = "buy" | "sell";
+
+export type WorkingOrder = {
+  id: string;
+  product: Product;
+  side: DeskSide;
+  kind: OrderKind;
+  tif: Tif;
+  qty: number;
+  limit?: number;
+  stop?: number;
+  poolId?: PoolId;
+  expiry?: number;
+  strike?: number;
+  optType?: OptType;
+  created: number;
+};
+
 export type EngineState = {
   clock: number;
   eth: number;
+  ethBid: number;
+  ethAsk: number;
   wpit: number;
   iv: number;
   realizedVol: number;
@@ -106,6 +128,7 @@ export type EngineState = {
   futures: FuturePos[];
   options: OptionPos[];
   fills: OrderFill[];
+  working: WorkingOrder[];
   farmWpit: number;
   insuranceUsdc: number;
   circuitUntil: number;

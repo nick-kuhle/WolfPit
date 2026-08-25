@@ -70,6 +70,18 @@ export function Blotter() {
         })}
       </section>
       <section className="lg:col-span-3">
+        <h3 className="mb-2 text-[10px] uppercase tracking-wider text-subtle">Working</h3>
+        {(s.working ?? []).length === 0 ? <p className="text-xs text-muted">No working orders.</p> : null}
+        {(s.working ?? []).map((w) => (
+          <div key={w.id} className="flex justify-between border-b border-border py-1.5 text-xs">
+            <span>
+              {w.side} {w.qty} {w.product} {w.kind}
+            </span>
+            <span className="font-mono text-muted">{w.tif}</span>
+          </div>
+        ))}
+      </section>
+      <section className="lg:col-span-3">
         <h3 className="mb-2 text-[10px] uppercase tracking-wider text-subtle">Fills</h3>
         <div className="max-h-40 overflow-auto font-mono text-[11px] text-muted">
           {s.fills.slice(0, 16).map((f) => (

@@ -6,11 +6,13 @@ import {
   buyOption,
   closeFuture,
   closeOption,
+  cancelWorking,
   createPool as createPoolEngine,
   equity,
   harvestFarm,
   initialState,
   issueToken as issueTokenEngine,
+  placeDeskOrder,
   removeLiquidity,
   stakeWpit,
   tick,
@@ -18,7 +20,7 @@ import {
   tradeSpot,
   unstakeWpit,
 } from "./engine";
-import type { EngineState, FutSide, OptType, PoolId } from "./types";
+import type { EngineState, FutSide, OptType, PoolId, WorkingOrder } from "./types";
 import { useAdmin } from "@/lib/admin/config";
 
 type Actions = {
@@ -40,9 +42,19 @@ type Actions = {
   reset: () => void;
   clearError: () => void;
   seedVault: (eth: number, usdc: number) => void;
-  applyLive: (feed: { eth: number; candles: EngineState["candles"]; btc?: number; at: number; source: string }) => void;
+  applyLive: (feed: {
+    eth: number;
+    candles: EngineState["candles"];
+    btc?: number;
+    at: number;
+    source: string;
+    ethBid?: number;
+    ethAsk?: number;
+  }) => void;
   createPool: (base: string, quote: string, baseAmt: number, quoteAmt: number) => void;
   issueToken: (sym: string, amt: number) => void;
+  sendOrder: (o: Omit<WorkingOrder, "id" | "created">) => void;
+  cancelOrder: (id: string) => void;
 };
 
 type WolfStore = EngineState & Actions;
@@ -105,13 +117,17 @@ export const useWolf = create<WolfStore>()(
       applyLive: (feed) => set(applyLiveFeed(get(), feed)),
       createPool: (base, quote, baseAmt, quoteAmt) => apply(createPoolEngine(get(), base, quote, baseAmt, quoteAmt), set),
       issueToken: (sym, amt) => apply(issueTokenEngine(get(), sym, amt), set),
+      sendOrder: (o) => apply(placeDeskOrder(get(), o), set),
+      cancelOrder: (id) => set(cancelWorking(get(), id)),
     }),
     {
-      name: "wolfpit-sim-v5",
+      name: "wolfpit-sim-v6",
       skipHydration: true,
       partialize: (s) => ({
         clock: s.clock,
         eth: s.eth,
+        ethBid: s.ethBid,
+        ethAsk: s.ethAsk,
         wpit: s.wpit,
         btc: s.btc,
         liveAt: s.liveAt,
@@ -128,6 +144,7 @@ export const useWolf = create<WolfStore>()(
         futures: s.futures,
         options: s.options,
         fills: s.fills,
+        working: s.working,
         farmWpit: s.farmWpit,
         insuranceUsdc: s.insuranceUsdc,
         circuitUntil: s.circuitUntil,

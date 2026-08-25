@@ -13,6 +13,10 @@ import {
   type EngineState,
   type FutSide,
   type OptType,
+  type WorkingOrder,
+  type DeskSide,
+  type OrderKind,
+  type Tif,
 } from "./types";
 import {
   ammOut,
@@ -60,6 +64,8 @@ export function initialState(now = T0): EngineState {
   return {
     clock: now,
     eth,
+    ethBid: eth,
+    ethAsk: eth,
     wpit,
     btc: 0,
     liveAt: 0,
@@ -116,6 +122,7 @@ export function initialState(now = T0): EngineState {
     futures: [],
     options: [],
     fills: [],
+    working: [],
     farmWpit: 0,
     insuranceUsdc: INSURANCE_SEED,
     circuitUntil: 0,
@@ -168,12 +175,20 @@ export function tick(s: EngineState, dtSec: number): EngineState {
       wpit: next.account.wpit + (s.stake.amount * STAKE_APR * dtSec) / (365.25 * 24 * 3600),
     };
   }
-  return settleAndLiq(maybeCircuit(next));
+  return matchWorking(settleAndLiq(maybeCircuit(next)));
 }
 
 export function applyLive(
   s: EngineState,
-  feed: { eth: number; candles: EngineState["candles"]; btc?: number; at: number; source: string },
+  feed: {
+    eth: number;
+    candles: EngineState["candles"];
+    btc?: number;
+    at: number;
+    source: string;
+    ethBid?: number;
+    ethAsk?: number;
+  },
 ): EngineState {
   const rv = ewmaRv(feed.candles);
   const pools = { ...s.pools };
@@ -184,6 +199,8 @@ export function applyLive(
   const next: EngineState = {
     ...s,
     eth: feed.eth,
+    ethBid: feed.ethBid ?? feed.eth,
+    ethAsk: feed.ethAsk ?? feed.eth,
     btc: feed.btc ?? s.btc,
     candles: feed.candles,
     realizedVol: clamp(rv, 0.15, 2),
@@ -197,7 +214,7 @@ export function applyLive(
       startEquity: s.liveAt === 0 ? START_USDC + START_ETH * feed.eth : s.account.startEquity,
     },
   };
-  return settleAndLiq(maybeCircuit(next));
+  return matchWorking(settleAndLiq(maybeCircuit(next)));
 }
 
 function pushCandle(candles: EngineState["candles"], t: number, px: number) {
@@ -283,6 +300,102 @@ export function reservationPx(s: EngineState) {
   const tau = 1 / 24;
   const shift = q * gamma * s.realizedVol * s.realizedVol * tau;
   return s.eth * (1 - shift);
+}
+
+export function quoteInForBaseOut(pool: EngineState["pools"][string], baseOut: number) {
+  if (!pool || baseOut <= 0 || baseOut >= pool.baseReserve * 0.99) return Number.POSITIVE_INFINITY;
+  const fee = 1 - pool.feeBps / 10_000;
+  return (pool.quoteReserve * baseOut) / (fee * (pool.baseReserve - baseOut));
+}
+
+export function placeDeskOrder(
+  s: EngineState,
+  o: Omit<WorkingOrder, "id" | "created">,
+): EngineState | string {
+  if (o.qty <= 0) return "Quantity must be positive.";
+  if ((o.kind === "lmt" || o.kind === "stl") && !(o.limit && o.limit > 0)) return "Limit price required.";
+  if ((o.kind === "stp" || o.kind === "stl") && !(o.stop && o.stop > 0)) return "Stop price required.";
+  const order: WorkingOrder = { ...o, id: uid("ord"), created: s.clock };
+  if (order.kind === "mkt" || order.tif === "ioc") {
+    const filled = tryFill(s, order);
+    if (typeof filled !== "string") return { ...filled, working: s.working };
+    if (order.tif === "ioc") return filled;
+    if (order.kind === "mkt") return filled;
+  }
+  if (wouldCross(s, order)) {
+    const filled = tryFill(s, order);
+    if (typeof filled !== "string") return { ...filled, working: s.working };
+    return filled;
+  }
+  return { ...s, working: [order, ...(s.working ?? [])].slice(0, 40) };
+}
+
+export function cancelWorking(s: EngineState, id: string): EngineState {
+  return { ...s, working: (s.working ?? []).filter((w) => w.id !== id) };
+}
+
+function wouldCross(s: EngineState, o: WorkingOrder) {
+  const bid = s.ethBid || s.eth;
+  const ask = s.ethAsk || s.eth;
+  if (o.kind === "lmt") {
+    if (o.side === "buy") return ask <= (o.limit ?? 0);
+    return bid >= (o.limit ?? Infinity);
+  }
+  if (o.kind === "stp") {
+    if (o.side === "buy") return s.eth >= (o.stop ?? Infinity);
+    return s.eth <= (o.stop ?? 0);
+  }
+  if (o.kind === "stl") {
+    if (o.side === "buy") return s.eth >= (o.stop ?? Infinity) && ask <= (o.limit ?? 0);
+    return s.eth <= (o.stop ?? 0) && bid >= (o.limit ?? Infinity);
+  }
+  return true;
+}
+
+function tryFill(s: EngineState, o: WorkingOrder): EngineState | string {
+  if (o.product === "spot") {
+    const poolId = o.poolId ?? "ETH-USDC";
+    const pool = s.pools[poolId];
+    if (!pool) return "Unknown pool.";
+    if (o.side === "buy") {
+      const quote = quoteInForBaseOut(pool, o.qty);
+      if (!Number.isFinite(quote)) return "Size too large for pool.";
+      return tradeSpot(s, poolId, "buy", quote);
+    }
+    return tradeSpot(s, poolId, "sell", o.qty);
+  }
+  if (o.product === "future") {
+    const contracts = o.qty;
+    const side = o.side === "buy" ? "long" : "short";
+    return tradeFuture(s, side, contracts, o.expiry ?? expiries(s.clock)[0]!.at);
+  }
+  if (o.product === "option") {
+    if (o.side === "sell") return "Close longs from Positions. Vault does not buy options.";
+    return buyOption(s, o.optType ?? "call", o.strike ?? Math.round(s.eth / 100) * 100, o.expiry ?? expiries(s.clock)[0]!.at, o.qty);
+  }
+  return "Unknown product.";
+}
+
+export function matchWorking(s: EngineState): EngineState {
+  let cur = s;
+  const keep: WorkingOrder[] = [];
+  const dayCut = utcDay(s.clock);
+  for (const o of s.working ?? []) {
+    if (o.tif === "day" && utcDay(o.created) !== dayCut) continue;
+    if (wouldCross(cur, o) || o.kind === "mkt") {
+      const r = tryFill(cur, o);
+      if (typeof r === "string") {
+        keep.push(o);
+      } else {
+        cur = r;
+      }
+    } else keep.push(o);
+  }
+  return { ...cur, working: keep };
+}
+
+function utcDay(t: number) {
+  return new Date(t).toISOString().slice(0, 10);
 }
 
 export function bookGreeks(s: EngineState) {
