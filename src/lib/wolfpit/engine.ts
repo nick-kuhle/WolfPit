@@ -256,7 +256,32 @@ export function lpValue(s: EngineState, id: PoolId, shares: number) {
   const pool = s.pools[id];
   if (!pool || pool.lpSupply <= 0) return 0;
   const frac = shares / pool.lpSupply;
-  return frac * (pool.quoteReserve * tokenPx(s, pool.quote) + pool.baseReserve * tokenPx(s, pool.base));
+  return frac * poolTvl(s, id);
+}
+
+export function poolTvl(s: EngineState, id: PoolId) {
+  const pool = s.pools[id];
+  if (!pool) return 0;
+  return pool.quoteReserve * tokenPx(s, pool.quote) + pool.baseReserve * tokenPx(s, pool.base);
+}
+
+export function farmShare(s: EngineState, id: PoolId) {
+  if (id === "WPIT-USDC" || id === "WPIT-USDC-TEST") return 0.2;
+  if (id === "WPIT-ETH" || id === "WPIT-ETH-TEST") return 0.1;
+  if (id === "ETH-USDC") return 0.55;
+  const custom = Object.keys(s.pools).filter(
+    (k) => k !== "ETH-USDC" && !k.startsWith("WPIT-USDC") && !k.startsWith("WPIT-ETH"),
+  );
+  return custom.length ? 0.15 / custom.length : 0;
+}
+
+export function farmApy(s: EngineState, id: PoolId) {
+  const tvl = poolTvl(s, id);
+  if (tvl < 1) return 0;
+  const u = 0.3 + 0.7 * utilEth(s);
+  const usdYear = WPIT_EMIT_PER_SEC * 0.9 * u * 365.25 * 86400 * Math.max(s.wpit, 0.01);
+  const volAdj = 1 + Math.min(0.5, s.realizedVol);
+  return (usdYear * farmShare(s, id) * volAdj) / tvl;
 }
 
 export function tokenPx(s: EngineState, sym: string) {

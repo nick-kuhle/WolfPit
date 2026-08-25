@@ -30,7 +30,7 @@ export function SimLoop() {
           setUniverse(rows);
           const cur = useDesk.getState().focus;
           const same = rows.find((r) => r.symbol === cur.symbol);
-          if (same) setFocus({ ...cur, ...same });
+          if (same && !cur.network) setFocus({ ...cur, ...same });
         })
         .catch(() => undefined);
     };

@@ -3,7 +3,6 @@ import { BrandLockup, ChainChip } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { LiveTicker } from "@/components/ticker";
 import { Button } from "@/components/ui/button";
-import { ping } from "@/lib/wolfpit/alerts";
 import { equity } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
@@ -24,7 +23,7 @@ function Home() {
           <Link to="/learn" className="hidden h-11 items-center px-3 text-sm text-muted hover:text-fg sm:flex">
             Learn
           </Link>
-          <Link to="/trade" onClick={() => ping("Try free", "up")}>
+          <Link to="/trade">
             <Button size="sm">Try free</Button>
           </Link>
         </div>
@@ -46,10 +45,10 @@ function Home() {
             not perps — so you can finally learn a call without lighting a wallet.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link to="/trade" className="sm:w-auto" onClick={() => ping("Desk — paper", "up")}>
+            <Link to="/trade" className="sm:w-auto">
               <Button className="h-12 w-full px-6 text-base sm:w-auto">Start with fake money →</Button>
             </Link>
-            <Link to="/pools" className="sm:w-auto" onClick={() => ping("Farms", "brass")}>
+            <Link to="/pools" className="sm:w-auto">
               <Button variant="outline" className="h-12 w-full px-6 text-base sm:w-auto">
                 Show me the yield
               </Button>

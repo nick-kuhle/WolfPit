@@ -114,8 +114,16 @@ export const useWolf = create<WolfStore>()(
         }
         apply(buyOption(get(), type, strike, expiry, contracts), set);
       },
-      lpAdd: (pool, usd) => apply(addLiquidity(get(), pool, usd), set),
-      lpRemove: (pool, shares) => apply(removeLiquidity(get(), pool, shares), set),
+      lpAdd: (pool, usd) => {
+        const r = addLiquidity(get(), pool, usd);
+        apply(r, set);
+        if (typeof r !== "string") ping(`Liquidity added · ${pool}`, "up");
+      },
+      lpRemove: (pool, shares) => {
+        const r = removeLiquidity(get(), pool, shares);
+        apply(r, set);
+        if (typeof r !== "string") ping(`Liquidity removed · ${pool}`, "brass");
+      },
       lockStake: (amt) => apply(stakeWpit(get(), amt), set),
       unstake: () => set(unstakeWpit(get())),
       harvest: () => {
@@ -127,7 +135,11 @@ export const useWolf = create<WolfStore>()(
           vault: { ...get().vault, eth, usdc },
         }),
       applyLive: (feed) => set(applyLiveFeed(get(), feed)),
-      createPool: (base, quote, baseAmt, quoteAmt) => apply(createPoolEngine(get(), base, quote, baseAmt, quoteAmt), set),
+      createPool: (base, quote, baseAmt, quoteAmt) => {
+        const r = createPoolEngine(get(), base, quote, baseAmt, quoteAmt);
+        apply(r, set);
+        if (typeof r !== "string") ping(`Pool created · ${base}-${quote}`, "up");
+      },
       issueToken: (sym, amt) => apply(issueTokenEngine(get(), sym, amt), set),
       sendOrder: (o) => apply(placeDeskOrder(get(), o), set),
       cancelOrder: (id) => {

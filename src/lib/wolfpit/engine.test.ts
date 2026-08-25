@@ -8,6 +8,8 @@ import {
   closeFuture,
   closeOption,
   createPool,
+  farmApy,
+  poolTvl,
   expiries,
   harvestFarm,
   initialState,
@@ -241,6 +243,17 @@ describe("AMM create pool", () => {
     assert.equal(typeof out, "object", String(out));
     const next = out as typeof s;
     assert.ok(next.pools["PEPE-USDC"]);
+  });
+
+  it("farm APY falls as TVL rises", () => {
+    const s = initialState();
+    const thin = farmApy(s, "WPIT-USDC-TEST");
+    s.pools["WPIT-USDC-TEST"]!.quoteReserve *= 4;
+    s.pools["WPIT-USDC-TEST"]!.baseReserve *= 4;
+    const fat = farmApy(s, "WPIT-USDC-TEST");
+    assert.ok(poolTvl(s, "WPIT-USDC-TEST") > 0);
+    assert.ok(thin > fat);
+    assert.ok(thin > 0);
   });
 });
 

@@ -203,11 +203,45 @@ const CHAIN_HINT: Record<string, string> = {
   ATOM: "Cosmos",
 };
 
+export const CHAINS: { id: string; label: string }[] = [
+  { id: "eth", label: "Ethereum" },
+  { id: "bsc", label: "BNB" },
+  { id: "base", label: "Base" },
+  { id: "solana", label: "Solana" },
+  { id: "arbitrum", label: "Arbitrum" },
+  { id: "optimism", label: "Optimism" },
+  { id: "polygon_pos", label: "Polygon" },
+  { id: "avax", label: "Avalanche" },
+  { id: "fantom", label: "Fantom" },
+  { id: "cronos", label: "Cronos" },
+  { id: "blast", label: "Blast" },
+  { id: "linea", label: "Linea" },
+  { id: "scroll", label: "Scroll" },
+  { id: "zksync", label: "zkSync" },
+  { id: "mantle", label: "Mantle" },
+  { id: "sui-network", label: "Sui" },
+  { id: "ton", label: "TON" },
+  { id: "aptos", label: "Aptos" },
+  { id: "hyperliquid", label: "Hyperliquid" },
+  { id: "sonic", label: "Sonic" },
+  { id: "berachain", label: "Berachain" },
+  { id: "unichain", label: "Unichain" },
+  { id: "world-chain", label: "World" },
+  { id: "celo", label: "Celo" },
+  { id: "gnosis", label: "Gnosis" },
+  { id: "mode", label: "Mode" },
+];
+
+export const getChainTape = createServerFn({ method: "GET" })
+  .validator((d: { network: string }) => d)
+  .handler(async ({ data }): Promise<Listing[]> => geckoTerminalTape(data.network));
+
 export const getUniverse = createServerFn({ method: "GET" }).handler(async (): Promise<Listing[]> => {
   const cg = await geckoMarkets();
   if (cg.length) return cg;
   return binanceTickers();
 });
+
 
 export const lookupToken = createServerFn({ method: "GET" })
   .validator((d: { q: string }) => d)
@@ -226,7 +260,7 @@ export const lookupToken = createServerFn({ method: "GET" })
   });
 
 export const getSymbolCandles = createServerFn({ method: "GET" })
-  .validator((d: { symbol: string; interval?: ChartInterval; binance?: string; geckoId?: string }) => d)
+  .validator((d: { symbol: string; interval?: ChartInterval; binance?: string; geckoId?: string; network?: string; poolAddress?: string }) => d)
   .handler(async ({ data }): Promise<Candle[]> => {
     const interval: ChartInterval = data.interval ?? "1m";
     const sym = data.symbol.toUpperCase();
@@ -242,6 +276,10 @@ export const getSymbolCandles = createServerFn({ method: "GET" })
     }
     if (data.geckoId) {
       const bars = await geckoOhlc(data.geckoId, interval);
+      if (bars.length) return bars;
+    }
+    if (data.network && data.poolAddress) {
+      const bars = await geckoTerminalOhlcv(data.network, data.poolAddress, interval);
       if (bars.length) return bars;
     }
     return [];
@@ -421,5 +459,79 @@ async function geckoOhlc(id: string, interval: ChartInterval): Promise<Candle[]>
     return [];
   }
 }
+
+async function geckoTerminalTape(network: string): Promise<Listing[]> {
+  try {
+    const res = await fetch(
+      `https://api.geckoterminal.com/api/v2/networks/${network}/trending_pools?include=base_token`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) return [];
+    const j = (await res.json()) as {
+      data?: {
+        id: string;
+        attributes: {
+          name: string;
+          address: string;
+          base_token_price_usd?: string;
+          price_change_percentage?: { h24?: string };
+          volume_usd?: { h24?: string };
+        };
+        relationships?: { base_token?: { data?: { id: string } } };
+      }[];
+      included?: { id: string; attributes?: { symbol?: string; name?: string; address?: string; image_url?: string } }[];
+    };
+    const tokens = new Map((j.included ?? []).map((t) => [t.id, t.attributes ?? {}]));
+    const label = CHAINS.find((c) => c.id === network)?.label ?? network;
+    return (j.data ?? [])
+      .map((p) => {
+        const tok = tokens.get(p.relationships?.base_token?.data?.id ?? "") ?? {};
+        const symbol = (tok.symbol ?? p.attributes.name.split(" / ")[0] ?? "?").toUpperCase();
+        return {
+          symbol,
+          name: tok.name ?? symbol,
+          price: Number(p.attributes.base_token_price_usd ?? 0),
+          change24: Number(p.attributes.price_change_percentage?.h24 ?? 0) / 100,
+          volume24: Number(p.attributes.volume_usd?.h24 ?? 0),
+          image: tok.image_url,
+          chain: label,
+          contract: tok.address,
+          network,
+          poolAddress: p.attributes.address,
+        } satisfies Listing;
+      })
+      .filter((r) => r.price > 0)
+      .slice(0, 40);
+  } catch {
+    return [];
+  }
+}
+
+async function geckoTerminalOhlcv(network: string, pool: string, interval: ChartInterval): Promise<Candle[]> {
+  try {
+    const tf = interval === "1d" ? "day" : interval === "1h" ? "hour" : "minute";
+    const agg = interval === "5m" ? 5 : interval === "15m" ? 15 : 1;
+    const res = await fetch(
+      `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${pool}/ohlcv/${tf}?aggregate=${agg}&limit=200`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) return [];
+    const j = (await res.json()) as { data?: { attributes?: { ohlcv_list?: number[][] } } };
+    const rows = j.data?.attributes?.ohlcv_list ?? [];
+    return rows
+      .map((r) => ({
+        t: (r[0] ?? 0) * (r[0]! < 1e12 ? 1000 : 1),
+        o: r[1] ?? 0,
+        h: r[2] ?? 0,
+        l: r[3] ?? 0,
+        c: r[4] ?? 0,
+        v: r[5] ?? 0,
+      }))
+      .sort((a, b) => a.t - b.t);
+  } catch {
+    return [];
+  }
+}
+
 
 

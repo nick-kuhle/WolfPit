@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ping } from "@/lib/wolfpit/alerts";
 import { useDesk, type Listing } from "@/lib/wolfpit/desk";
-import { lookupToken } from "@/lib/wolfpit/market";
+import { CHAINS, getChainTape, lookupToken } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -10,34 +10,49 @@ type Tab = "hot" | "gainers" | "losers" | "chains";
 
 export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   const universe = useDesk((s) => s.universe);
+  const chainTape = useDesk((s) => s.chainTape);
+  const chainId = useDesk((s) => s.chainId);
+  const setChainId = useDesk((s) => s.setChainId);
+  const setChainTape = useDesk((s) => s.setChainTape);
   const focus = useDesk((s) => s.focus);
   const openCard = useDesk((s) => s.openCard);
   const cardOpen = useDesk((s) => s.cardOpen);
   const [tab, setTab] = useState<Tab>("hot");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const [chainBusy, setChainBusy] = useState(false);
   const listToken = useWolf((s) => s.listToken);
 
+  useEffect(() => {
+    if (tab !== "chains") return;
+    let dead = false;
+    setChainBusy(true);
+    void getChainTape({ data: { network: chainId } })
+      .then((rows) => {
+        if (!dead) setChainTape(rows);
+      })
+      .catch(() => {
+        if (!dead) setChainTape([]);
+      })
+      .finally(() => {
+        if (!dead) setChainBusy(false);
+      });
+    return () => {
+      dead = true;
+    };
+  }, [tab, chainId, setChainTape]);
+
   const rows = useMemo(() => {
+    if (tab === "chains") return chainTape;
     const u = universe.slice();
     if (tab === "gainers") return u.sort((a, b) => b.change24 - a.change24);
     if (tab === "losers") return u.sort((a, b) => a.change24 - b.change24);
-    if (tab === "chains") {
-      const seen = new Set<string>();
-      return u.filter((r) => {
-        const c = r.chain ?? r.symbol;
-        if (seen.has(c)) return false;
-        seen.add(c);
-        return true;
-      });
-    }
     return u.sort((a, b) => b.volume24 - a.volume24);
-  }, [universe, tab]);
+  }, [universe, chainTape, tab]);
 
   function pick(l: Listing) {
     openCard(l);
     listToken(l.symbol, l.price || 1);
-    ping(`${l.symbol} card`, "brass");
     onPick?.(l);
   }
 
@@ -45,7 +60,6 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
     const query = q.trim();
     if (!query) return;
     setBusy(true);
-    ping(`Looking up ${query}`, "brass");
     try {
       const l = await lookupToken({ data: { q: query } });
       pick(l);
@@ -59,40 +73,30 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
-      <div className="border-b border-border px-3 py-2">
-        <div className="font-display text-lg font-medium">Names in play</div>
-        <form
-          className="mt-2 flex gap-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void lookup();
-          }}
-        >
-          <input
-            className="h-11 min-w-0 flex-1 rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono text-xs"
-            placeholder="Ticker or 0x contract"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={busy}
-            className="h-11 px-3 text-xs uppercase tracking-wider text-brass"
-          >
-            Go
-          </button>
-        </form>
-      </div>
+      <form
+        className="flex gap-1 border-b border-border px-3 py-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void lookup();
+        }}
+      >
+        <input
+          className="h-11 min-w-0 flex-1 rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono text-xs"
+          placeholder="Ticker or 0x"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button type="submit" disabled={busy} className="h-11 px-3 text-xs uppercase tracking-wider text-brass">
+          Go
+        </button>
+      </form>
       <div className="flex border-b border-border">
         {(["hot", "gainers", "losers", "chains"] as const).map((t) => (
           <button
             key={t}
-            onClick={() => {
-              setTab(t);
-              ping(`${t} tape`, "brass");
-            }}
+            onClick={() => setTab(t)}
             className={cn(
-              "h-11 flex-1 text-[10px] uppercase tracking-wider",
+              "h-11 flex-1 text-[11px] uppercase tracking-wider",
               tab === t ? "border-b border-accent text-fg" : "text-muted",
             )}
           >
@@ -100,13 +104,33 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
           </button>
         ))}
       </div>
-      <div className={cn("min-h-0 flex-1 overflow-auto", cardOpen && "pb-72 lg:pb-4 lg:pr-[min(440px,44vw)]")}>
-        {rows.length === 0 ? (
-          <p className="p-3 text-xs text-muted">Loading the tape…</p>
-        ) : null}
+      {tab === "chains" ? (
+        <div className="flex gap-1 overflow-x-auto border-b border-border px-2 py-2">
+          {CHAINS.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setChainId(c.id)}
+              className={cn(
+                "h-9 shrink-0 rounded-full border px-3 text-[11px]",
+                chainId === c.id ? "border-brass bg-elevated text-fg" : "border-border text-muted",
+              )}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-auto",
+          cardOpen && "max-lg:pb-[min(72dvh,28rem)] landscape:max-lg:pb-0 landscape:max-lg:pr-[min(28rem,50vw)] lg:pr-[min(440px,42vw)]",
+        )}
+      >
+        {chainBusy && tab === "chains" ? <p className="p-3 text-xs text-muted">Loading {chainId}…</p> : null}
+        {!chainBusy && rows.length === 0 ? <p className="p-3 text-xs text-muted">No names on this tape.</p> : null}
         {rows.map((r) => (
           <button
-            key={`${r.symbol}-${r.contract ?? r.geckoId ?? ""}`}
+            key={`${r.network ?? ""}-${r.symbol}-${r.contract ?? r.poolAddress ?? r.geckoId ?? ""}`}
             onClick={() => pick(r)}
             className={cn(
               "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left",

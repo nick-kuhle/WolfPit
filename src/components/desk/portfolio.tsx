@@ -1,5 +1,4 @@
 import { futPnl, lpValue, optMark, tokenPx } from "@/lib/wolfpit/engine";
-import { ping } from "@/lib/wolfpit/alerts";
 import { useDesk, type Listing } from "@/lib/wolfpit/desk";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtPx, fmtUsd } from "@/lib/utils";
@@ -35,7 +34,6 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
     };
     openCard(l);
     listToken(sym, l.price || 1);
-    ping(`${sym} from wallet`, "brass");
     onPick?.(l);
   }
 
@@ -90,13 +88,7 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
             </div>
             <div className="text-right">
               <div className={`font-mono ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</div>
-              <button
-                className="h-10 text-muted"
-                onClick={() => {
-                  ping("Closing future", "brass");
-                  closeFut(p.id);
-                }}
-              >
+              <button className="h-10 text-muted" onClick={() => closeFut(p.id)}>
                 Close
               </button>
             </div>
@@ -115,13 +107,7 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
             </div>
             <div className="text-right">
               <div className={`font-mono ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</div>
-              <button
-                className="h-10 text-muted"
-                onClick={() => {
-                  ping("Closing option", "brass");
-                  closeOpt(p.id);
-                }}
-              >
+              <button className="h-10 text-muted" onClick={() => closeOpt(p.id)}>
                 Close
               </button>
             </div>

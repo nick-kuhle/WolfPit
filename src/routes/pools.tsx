@@ -1,12 +1,12 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
-import { lpValue, tokenBal, utilEth } from "@/lib/wolfpit/engine";
+import { farmApy, lpValue, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
-import { fmtUsd } from "@/lib/utils";
+import { cn, fmtPct, fmtUsd } from "@/lib/utils";
 
 export const Route = createFileRoute("/pools")({ component: PoolsPage });
 
@@ -18,6 +18,7 @@ function PoolsPage() {
   const issue = useWolf((st) => st.issueToken);
   const harvest = useWolf((st) => st.harvest);
   const err = useWolf((st) => st.lastError);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [base, setBase] = useState("ETH");
   const [quote, setQuote] = useState("USDC");
   const [baseAmt, setBaseAmt] = useState("1");
@@ -31,137 +32,150 @@ function PoolsPage() {
     return ["ETH", "USDC", "WPIT", ...extra];
   }, [s.account.tokens]);
   const tax = s.farmWpit * 0.01;
-  const u = utilEth(s);
+
+  function openFarm(id: string) {
+    setOpenId(id === openId ? null : id);
+    const p = s.pools[id];
+    if (p) {
+      setBase(p.base);
+      setQuote(p.quote);
+    }
+  }
 
   return (
     <Shell>
       <ProductGate product="farms">
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        <p className="font-mono text-[11px] uppercase tracking-wider text-brass">Farms · AMM · simulated APY</p>
-        <h1 className="mt-2 font-display text-3xl font-medium tracking-tight">Yield you can actually press.</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-          Constant-product pools. Pick two tokens, both legs. New pair creates the pool. ETH mark is live; pool
-          price is its own curve.
-        </p>
+        <main className="mx-auto max-w-2xl px-4 py-8">
+          <p className="font-mono text-[11px] uppercase tracking-wider text-brass">Farms · paper APY</p>
+          <h1 className="mt-2 font-display text-3xl font-medium tracking-tight">Pick a farm. Add both legs.</h1>
 
-        <section className="mt-6 rounded-[var(--radius-lg)] border border-border bg-surface p-4 sm:p-5">
-          <h2 className="text-sm font-medium">Add / create</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <TokenPick label="Token A" value={base} tokens={tokens} onChange={setBase} />
-            <TokenPick label="Token B" value={quote} tokens={tokens} onChange={setQuote} />
-            <label className="text-xs">
-              {base} amount
-              <input
-                className="mt-1 h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono"
-                value={baseAmt}
-                onChange={(e) => setBaseAmt(e.target.value)}
-              />
-              <span className="mt-1 block text-muted">Wallet {fmtAmt(tokenBal(s.account, base))}</span>
-            </label>
-            <label className="text-xs">
-              {quote} amount
-              <input
-                className="mt-1 h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono"
-                value={quoteAmt}
-                onChange={(e) => setQuoteAmt(e.target.value)}
-              />
-              <span className="mt-1 block text-muted">Wallet {fmtAmt(tokenBal(s.account, quote))}</span>
-            </label>
+          <div className="mt-6 flex items-center justify-between gap-4 rounded-[var(--radius-xl)] border border-border bg-elevated px-4 py-4">
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-wider text-brass">Ripe</div>
+              <div className="font-display text-2xl font-medium tabular-nums">{s.farmWpit.toFixed(2)} WPIT</div>
+              <p className="text-xs text-muted">1% harvest tax → insurance ({tax.toFixed(2)})</p>
+            </div>
+            <Button
+              disabled={s.farmWpit <= 0}
+              onClick={() => {
+                harvest();
+              }}
+            >
+              Harvest
+            </Button>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {exists ? (
-              <Button onClick={() => add(pair, Number(quoteAmt) || 0)}>Add liquidity</Button>
-            ) : (
-              <Button onClick={() => create(base, quote, Number(baseAmt) || 0, Number(quoteAmt) || 0)}>
-                Create pool
-              </Button>
-            )}
-          </div>
-          <p className="mt-2 text-xs text-muted">{exists ? `${pair} · add both legs at the pool price` : `New pair ${pair}`}</p>
 
-          <div className="mt-6 border-t border-border pt-4">
-            <h3 className="text-xs font-medium">Issue paper token</h3>
-            <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-6 divide-y divide-border rounded-[var(--radius-xl)] border border-border bg-panel">
+            {ids.map((id) => {
+              const p = s.pools[id]!;
+              const tvl = poolTvl(s, id);
+              const apy = farmApy(s, id);
+              const mine = s.lp.find((x) => x.poolId === id);
+              const open = openId === id;
+              return (
+                <article key={id}>
+                  <button className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left" onClick={() => openFarm(id)}>
+                    <div className="min-w-0">
+                      <div className="font-mono text-sm">{id}</div>
+                      <div className="text-xs text-muted">
+                        TVL {fmtUsd(tvl)} · fee {p.feeBps / 100}%
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="font-display text-2xl font-medium text-brass">{fmtPct(apy)}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-subtle">APY</div>
+                    </div>
+                  </button>
+                  {open ? (
+                    <div className="border-t border-border bg-surface px-4 py-4">
+                      <p className="text-xs text-muted">
+                        Existing pool. Add at the current curve. Your LP {mine ? fmtUsd(lpValue(s, id, mine.shares)) : "$0.00"}.
+                      </p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <Amt label={p.base} value={baseAmt} wallet={tokenBal(s.account, p.base)} onChange={setBaseAmt} />
+                        <Amt label={p.quote} value={quoteAmt} wallet={tokenBal(s.account, p.quote)} onChange={setQuoteAmt} />
+                      </div>
+                      <div className="mt-3 flex gap-2">
+                        <Button onClick={() => add(id, Number(quoteAmt) || 0)}>Add liquidity</Button>
+                        <Button variant="outline" disabled={!mine} onClick={() => mine && remove(id, mine.shares)}>
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+
+          <section className="mt-8 rounded-[var(--radius-xl)] border border-border bg-surface p-4">
+            <h2 className="text-sm font-medium">New pair</h2>
+            <p className={cn("mt-1 text-xs", exists ? "text-brass" : "text-muted")}>
+              {exists ? `${pair} already lives here — adding will join that farm.` : `${pair} does not exist yet. This creates a new pool.`}
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <TokenPick label="Token A" value={base} tokens={tokens} onChange={setBase} />
+              <TokenPick label="Token B" value={quote} tokens={tokens} onChange={setQuote} />
+              <Amt label={base} value={baseAmt} wallet={tokenBal(s.account, base)} onChange={setBaseAmt} />
+              <Amt label={quote} value={quoteAmt} wallet={tokenBal(s.account, quote)} onChange={setQuoteAmt} />
+            </div>
+            <div className="mt-3">
+              {exists ? (
+                <Button
+                  onClick={() => {
+                    add(pair, Number(quoteAmt) || 0);
+                    setOpenId(pair);
+                  }}
+                >
+                  Add to {pair}
+                </Button>
+              ) : (
+                <Button onClick={() => create(base, quote, Number(baseAmt) || 0, Number(quoteAmt) || 0)}>
+                  Create {pair}
+                </Button>
+              )}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
               <input
-                className="h-11 flex-1 rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono uppercase"
-                placeholder="TICKER"
+                className="h-11 min-w-0 flex-1 rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono uppercase"
+                placeholder="Mint paper ticker"
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
               />
               <Button variant="outline" onClick={() => issue(custom, 1_000_000)}>
-                Mint 1M paper
+                Mint 1M
               </Button>
             </div>
-          </div>
-        </section>
-
-        <ul className="mt-6 grid gap-3 sm:grid-cols-3">
-          <li className="rounded-[var(--radius-xl)] border border-border bg-elevated p-4">
-            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">Stake</div>
-            <div className="mt-1 font-display text-3xl font-medium text-brass">12%</div>
-            <p className="mt-1 text-xs text-muted">Simulated APR on WPIT</p>
-          </li>
-          <li className="rounded-[var(--radius-xl)] border border-border bg-elevated p-4">
-            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">WPIT-USDC</div>
-            <div className="mt-1 font-display text-3xl font-medium text-brass">48%</div>
-            <p className="mt-1 text-xs text-muted">Farm share 20% · paper APY</p>
-          </li>
-          <li className="rounded-[var(--radius-xl)] border border-border bg-elevated p-4">
-            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">WPIT-ETH</div>
-            <div className="mt-1 font-display text-3xl font-medium text-brass">36%</div>
-            <p className="mt-1 text-xs text-muted">Farm share 10% · paper APY</p>
-          </li>
-        </ul>
-
-        <div className="mt-6 grid gap-3">
-          {ids.map((id) => {
-            const p = s.pools[id]!;
-            const tvl = p.quoteReserve * quotePx(s, p.quote) + p.baseReserve * quotePx(s, p.base);
-            const mine = s.lp.find((x) => x.poolId === id);
-            return (
-              <article key={id} className="rounded-[var(--radius-lg)] border border-border bg-surface p-4 sm:p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-mono text-sm">{id}</h2>
-                    <p className="mt-1 text-xs text-muted">
-                      {p.base}/{p.quote} · fee {p.feeBps / 100}% · mid{" "}
-                      {(p.quoteReserve / p.baseReserve).toPrecision(6)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] uppercase tracking-wider text-subtle">TVL</div>
-                    <div className="font-mono tabular-nums">{fmtUsd(tvl)}</div>
-                  </div>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <Button variant="outline" disabled={!mine} onClick={() => mine && remove(id, mine.shares)}>
-                    Remove all
-                  </Button>
-                  <Link to="/trade" className="text-sm text-muted hover:text-fg">
-                    Trade
-                  </Link>
-                </div>
-                <p className="mt-2 text-xs text-muted">Your LP {mine ? fmtUsd(lpValue(s, id, mine.shares)) : "$0.00"}</p>
-              </article>
-            );
-          })}
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-xl)] border border-brass/40 bg-elevated p-5">
-          <div>
-            <div className="font-mono text-[11px] uppercase tracking-wider text-brass">Ripe to harvest</div>
-            <div className="font-display text-3xl font-medium tabular-nums">{s.farmWpit.toFixed(2)} WPIT</div>
-            <p className="mt-1 text-xs text-muted">1% tax → insurance ({tax.toFixed(2)} WPIT) · util {(0.3 + 0.7 * u).toFixed(2)}×</p>
-          </div>
-          <Button disabled={s.farmWpit <= 0} onClick={harvest}>
-            Harvest
-          </Button>
-        </div>
-        {err ? <p className="mt-4 text-sm text-down">{err}</p> : null}
-      </main>
-      <SiteFooter />
+          </section>
+          {err ? <p className="mt-4 text-sm text-down">{err}</p> : null}
+        </main>
+        <SiteFooter />
       </ProductGate>
     </Shell>
+  );
+}
+
+function Amt({
+  label,
+  value,
+  wallet,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  wallet: number;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="text-xs">
+      {label}
+      <input
+        className="mt-1 h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <span className="mt-1 block text-muted">Wallet {fmtAmt(wallet)}</span>
+    </label>
   );
 }
 
@@ -190,13 +204,6 @@ function TokenPick({
       </select>
     </label>
   );
-}
-
-function quotePx(s: { eth: number; wpit: number }, sym: string) {
-  if (sym === "USDC") return 1;
-  if (sym === "ETH") return s.eth;
-  if (sym === "WPIT") return s.wpit;
-  return 0;
 }
 
 function fmtAmt(n: number) {
