@@ -588,6 +588,69 @@ function upsertLp(lp: EngineState["lp"], poolId: PoolId, shares: number) {
   return copy;
 }
 
+export function removeLiquidity(s: EngineState, poolId: PoolId, shares: number): EngineState | string {
+  if (shares <= 0) return "Size must be positive.";
+  const pos = s.lp.find((p) => p.poolId === poolId);
+  if (!pos || pos.shares + 1e-12 < shares) return "Not enough LP shares.";
+  const pool = { ...s.pools[poolId] };
+  if (pool.lpSupply <= 0) return "Empty pool.";
+  const frac = shares / pool.lpSupply;
+  const acc = { ...s.account };
+  const quoteOut = pool.quoteReserve * frac;
+  const baseOut = pool.baseReserve * frac;
+  pool.quoteReserve -= quoteOut;
+  pool.baseReserve -= baseOut;
+  pool.lpSupply -= shares;
+  if (poolId === "WPIT-ETH-TEST") {
+    acc.eth += quoteOut;
+    acc.wpit += baseOut;
+  } else if (poolId === "ETH-USDC") {
+    acc.usdc += quoteOut;
+    acc.eth += baseOut;
+  } else {
+    acc.usdc += quoteOut;
+    acc.wpit += baseOut;
+  }
+  const lp = s.lp
+    .map((p) => (p.poolId === poolId ? { ...p, shares: p.shares - shares } : p))
+    .filter((p) => p.shares > 1e-9);
+  return { ...s, account: acc, pools: { ...s.pools, [poolId]: pool }, lp };
+}
+
+export function closeOption(s: EngineState, id: string): EngineState | string {
+  const pos = s.options.find((p) => p.id === id);
+  if (!pos) return "Position not found.";
+  const mid = optMark(s, pos);
+  const bps = spreadBps(s);
+  const px = Math.max(0.05, mid * (1 - bps / 10_000));
+  const credit = px * pos.sizeEth;
+  const vault = { ...s.vault };
+  if (pos.type === "call") vault.reservedEth = Math.max(0, vault.reservedEth - pos.sizeEth);
+  else vault.reservedUsdc = Math.max(0, vault.reservedUsdc - pos.strike * pos.sizeEth);
+  const pnl = (px - pos.premium) * pos.sizeEth;
+  const next: EngineState = {
+    ...s,
+    account: {
+      ...s.account,
+      usdc: s.account.usdc + credit,
+      realized: s.account.realized + pnl,
+    },
+    vault,
+    options: s.options.filter((p) => p.id !== id),
+  };
+  return pushFill(next, {
+    id: uid("f"),
+    t: s.clock,
+    product: "option",
+    symbol: `ETH ${pos.strike} ${pos.type} close`,
+    side: "sell",
+    size: pos.sizeEth,
+    price: px,
+    fee: 0,
+    note: `PnL ${pnl.toFixed(2)}`,
+  });
+}
+
 export function stakeWpit(s: EngineState, amt: number): EngineState | string {
   if (amt <= 0) return "Amount must be positive.";
   if (s.account.wpit < amt) return "Insufficient WPIT.";

@@ -5,6 +5,7 @@ import { fmtPx, fmtUsd } from "@/lib/utils";
 export function Blotter() {
   const s = useWolf();
   const closeFut = useWolf((st) => st.closeFut);
+  const closeOpt = useWolf((st) => st.closeOpt);
   return (
     <div className="grid min-h-0 gap-4 overflow-auto p-3 lg:grid-cols-3">
       <section>
@@ -15,7 +16,7 @@ export function Blotter() {
       </section>
       <section>
         <h3 className="mb-2 text-[10px] uppercase tracking-wider text-subtle">Mini futures</h3>
-        {s.futures.length === 0 ? <p className="text-xs text-muted">No futures.</p> : null}
+        {s.futures.length === 0 ? <p className="text-xs text-muted">No futures. Ticket → Mini fut.</p> : null}
         {s.futures.map((p) => {
           const pnl = futPnl(p, s.eth);
           return (
@@ -30,7 +31,7 @@ export function Blotter() {
               </div>
               <div className="text-right">
                 <div className={`font-mono tabular-nums ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</div>
-                <button className="text-muted hover:text-fg" onClick={() => closeFut(p.id)}>
+                <button className="h-8 text-muted hover:text-fg" onClick={() => closeFut(p.id)}>
                   Close
                 </button>
               </div>
@@ -40,20 +41,27 @@ export function Blotter() {
       </section>
       <section>
         <h3 className="mb-2 text-[10px] uppercase tracking-wider text-subtle">Mini options</h3>
-        {s.options.length === 0 ? <p className="text-xs text-muted">No options.</p> : null}
+        {s.options.length === 0 ? <p className="text-xs text-muted">No options. Ticket → Mini opt.</p> : null}
         {s.options.map((p) => {
           const m = optMark(s, p) * p.sizeEth;
           const cost = p.premium * p.sizeEth;
           const pnl = m - cost;
           return (
-            <div key={p.id} className="mb-2 border-b border-border pb-2 text-xs">
-              <div className="font-medium">
-                LONG {p.sizeEth} {p.strike} {p.type}
+            <div key={p.id} className="mb-2 flex items-center justify-between gap-2 border-b border-border pb-2 text-xs">
+              <div>
+                <div className="font-medium">
+                  LONG {p.sizeEth} {p.strike} {p.type}
+                </div>
+                <div className="font-mono text-muted">
+                  paid {fmtPx(p.premium)} · mark {fmtPx(optMark(s, p))} · {new Date(p.expiry).toISOString().slice(5, 10)}
+                </div>
               </div>
-              <div className="font-mono text-muted">
-                paid {fmtPx(p.premium)} · mark {fmtPx(optMark(s, p))} · {new Date(p.expiry).toISOString().slice(5, 10)}
+              <div className="text-right">
+                <div className={`font-mono tabular-nums ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</div>
+                <button className="h-8 text-muted hover:text-fg" onClick={() => closeOpt(p.id)}>
+                  Close
+                </button>
               </div>
-              <div className={`font-mono tabular-nums ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</div>
             </div>
           );
         })}
@@ -71,7 +79,7 @@ export function Blotter() {
               </span>
             </div>
           ))}
-          {s.fills.length === 0 ? <p>No fills yet.</p> : null}
+          {s.fills.length === 0 ? <p>No fills yet. Send from the ticket.</p> : null}
         </div>
       </section>
     </div>
@@ -86,4 +94,3 @@ function Row({ k, v }: { k: string; v: string }) {
     </div>
   );
 }
-

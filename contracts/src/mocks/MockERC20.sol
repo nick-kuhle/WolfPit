@@ -15,7 +15,7 @@ contract MockERC20 {
         decimals = decimals_;
     }
 
-    function mint(address to, uint256 amt) external {
+    function mint(address to, uint256 amt) external virtual {
         totalSupply += amt;
         balanceOf[to] += amt;
     }

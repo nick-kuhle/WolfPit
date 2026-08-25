@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  addLiquidity,
   advanceClock,
   bookGreeks,
   buyOption,
   closeFuture,
+  closeOption,
   expiries,
   harvestFarm,
   initialState,
+  removeLiquidity,
   setMark,
   settleNow,
   tradeFuture,
+  tradeSpot,
 } from "./engine.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
 import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
@@ -195,6 +199,37 @@ describe("desk engine has no hedgeLater", () => {
   });
 });
 
+describe("LP and option close", () => {
+  it("remove LP returns both legs", () => {
+    let s = initialState();
+    s.account.eth = 10;
+    const added = addLiquidity(s, "ETH-USDC", 4000);
+    assert.equal(typeof added, "object", String(added));
+    s = added as typeof s;
+    const sh = s.lp[0]!.shares;
+    const r = removeLiquidity(s, "ETH-USDC", sh);
+    assert.equal(typeof r, "object", String(r));
+    s = r as typeof s;
+    assert.equal(s.lp.length, 0);
+    assert.ok(s.account.eth > 9);
+  });
+
+  it("close option releases cover", () => {
+    let s = initialState();
+    const opened = buyOption(s, "call", 4000, exp, 1);
+    assert.equal(typeof opened, "object", String(opened));
+    s = opened as typeof s;
+    const id = s.options[0]!.id;
+    const reserved = s.vault.reservedEth;
+    const closed = closeOption(s, id);
+    assert.equal(typeof closed, "object", String(closed));
+    s = closed as typeof s;
+    assert.equal(s.options.length, 0);
+    assert.ok(s.vault.reservedEth < reserved);
+  });
+});
+
 void closeFuture;
 void settleNow;
 void advanceClock;
+void tradeSpot;

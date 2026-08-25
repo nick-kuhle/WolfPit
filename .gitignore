@@ -13,4 +13,6 @@ screenshots/
 AGENTS.md
 contracts/out/
 contracts/cache/
+target/
+crates/**/target/
 

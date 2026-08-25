@@ -17,6 +17,11 @@ contract DealerVault {
     uint256 public reservedUsdc;
     uint256 public shares;
     bool public paused;
+    uint256 public insuranceUsdc;
+    uint256 public insuranceWpit;
+    uint256 public constant INSURANCE_NAV_MIN_BPS = 100; // 1%
+
+    error InsuranceHalt();
 
     mapping(address => uint256) public shareOf;
 
@@ -63,8 +68,33 @@ contract DealerVault {
         return usdcBal > reservedUsdc ? usdcBal - reservedUsdc : 0;
     }
 
+    function creditInsurance(uint256 usdcAmt) external {
+        insuranceUsdc += usdcAmt;
+    }
+
+    function creditInsuranceWpit(uint256 amt) external {
+        insuranceWpit += amt;
+    }
+
+    function utilBps() public view returns (uint256) {
+        if (ethBal == 0) return 10_000;
+        return (reservedEth * 10_000) / ethBal;
+    }
+
+    function navUsdc(uint256 spot) public view returns (uint256) {
+        return usdcBal + (ethBal * spot) / WAD;
+    }
+
+    function haltShortGamma(uint256 spot) public view returns (bool) {
+        if (insuranceUsdc == 0) return false;
+        uint256 nav = navUsdc(spot);
+        if (nav == 0) return true;
+        return insuranceUsdc * 10_000 < nav * INSURANCE_NAV_MIN_BPS;
+    }
+
     function writeCall(uint256 size) external live {
         if (size == 0) revert Zero();
+        if (haltShortGamma(4_000e6)) revert InsuranceHalt();
         if (size > freeEth()) revert NakedCall();
         reservedEth += size;
         if (reservedEth * 10_000 > ethBal * ALPHA_BPS) revert UtilCap();

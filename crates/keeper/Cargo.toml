@@ -1,0 +1,13 @@
+[package]
+name = "wolfpit-keeper"
+version = "0.1.0"
+edition = "2021"
+description = "Alloy keeper for WolfPit TEST vault — pause, cover, insurance halt"
+license = "MIT"
+publish = false
+
+[dependencies]
+alloy = "2.4"
+clap = { version = "4", features = ["derive", "env"] }
+eyre = "0.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

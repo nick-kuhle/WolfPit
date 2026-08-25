@@ -4,9 +4,11 @@ import {
   addLiquidity,
   buyOption,
   closeFuture,
+  closeOption,
   equity,
   harvestFarm,
   initialState,
+  removeLiquidity,
   stakeWpit,
   tick,
   tradeFuture,
@@ -26,6 +28,8 @@ type Actions = {
   closeFut: (id: string) => void;
   openOpt: (type: OptType, strike: number, expiry: number, contracts: number) => void;
   lpAdd: (pool: PoolId, usd: number) => void;
+  lpRemove: (pool: PoolId, shares: number) => void;
+  closeOpt: (id: string) => void;
   lockStake: (amt: number) => void;
   unstake: () => void;
   harvest: () => void;
@@ -57,8 +61,10 @@ export const useWolf = create<WolfStore>()(
       sellSpot: (pool, baseAmt) => apply(tradeSpot(get(), pool, "sell", baseAmt), set),
       openFut: (side, contracts, expiry) => apply(tradeFuture(get(), side, contracts, expiry), set),
       closeFut: (id) => apply(closeFuture(get(), id), set),
+      closeOpt: (id) => apply(closeOption(get(), id), set),
       openOpt: (type, strike, expiry, contracts) => apply(buyOption(get(), type, strike, expiry, contracts), set),
       lpAdd: (pool, usd) => apply(addLiquidity(get(), pool, usd), set),
+      lpRemove: (pool, shares) => apply(removeLiquidity(get(), pool, shares), set),
       lockStake: (amt) => apply(stakeWpit(get(), amt), set),
       unstake: () => set(unstakeWpit(get())),
       harvest: () => set(harvestFarm(get())),

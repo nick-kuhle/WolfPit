@@ -1,18 +1,37 @@
 # WolfPit contracts (TEST)
 
-Foundry skeleton for the dealer vault. **Base Sepolia later. Not Ethereum L1. Not funded.**
+Foundry + **Alloy** keeper. Base Sepolia later. **Not Ethereum L1. Not funded.**
 
 ```
-forge test
+forge test --root contracts
+cargo test --manifest-path crates/keeper/Cargo.toml
 ```
 
-Inventory law (same as the sim):
+## Layout
 
-- `writeCall(size)` reverts if `size > freeEth` (no naked calls)
-- `writePut(size, K)` reverts if `K*size > freeUsdc` (no naked puts)
-- `openLong` / `openShort` respect α = 40%
-- `pause` stops listings
+| Contract | Role |
+| --- | --- |
+| `DealerVault` | Cover, α=0.40, pause, insurance halt |
+| `SimplePair` | x·y=k TEST pools (WPIT-USDC, WPIT-ETH) |
+| `Farm` | Gauges 70/20/10, harvest tax 1% |
+| `Stake` | First-loss WPIT |
+| `WPIT` | TEST token, cap, minter |
 
-No Uniswap v4 hook. No ERC-1155 series. Those are week 2.
+No Uniswap v4 hook. No ERC-1155 series yet (Q1).
 
-Tokens: MockUSDC, MockWETH. WPIT-TEST is not required to encode cover.
+## Deploy (Sepolia, unfunded)
+
+```
+cd contracts
+forge script script/Deploy.s.sol --rpc-url $BASE_SEPOLIA_RPC --broadcast
+```
+
+Until `forge-std` is installed, `test/System.t.sol` is the wiring diagram.
+
+## Alloy keeper
+
+`crates/keeper` — reads vault, encodes `pause` / `writeCall`, dry-runs without RPC.
+
+```
+WOLFPIT_RPC=https://sepolia.base.org WOLFPIT_VAULT=0x... cargo run -p wolfpit-keeper
+```

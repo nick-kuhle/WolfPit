@@ -22,13 +22,13 @@ npm run dev
 | --- | --- |
 | `/` | Venue |
 | `/trade` | Desk |
-| `/pools` | LP + farms |
+| `/pools` | LP add/remove + farms |
 | `/stake` | WPIT (insurance junior) |
-| `/plan` | Briefing, quant, **week 1 work order** |
+| `/plan` | Briefing, Week 1, **Q1** |
 
 ## Docs
 
-Start with [docs/WEEK1.md](docs/WEEK1.md) and [docs/CHAIN.md](docs/CHAIN.md).
+Start with [docs/DEV.md](docs/DEV.md), [docs/Q1.md](docs/Q1.md), [docs/CHAIN.md](docs/CHAIN.md).
 
 ## Tests
 

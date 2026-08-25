@@ -8,6 +8,7 @@ export function AccountBar() {
   const start = useWolf((s) => s.account.startEquity);
   const usdc = useWolf((s) => s.account.usdc);
   const realized = useWolf((s) => s.account.realized);
+  const clock = useWolf((s) => s.clock);
   const speed = useWolf((s) => s.simSpeed);
   const setSpeed = useWolf((s) => s.setSpeed);
   const reset = useWolf((s) => s.reset);
@@ -36,8 +37,12 @@ export function AccountBar() {
           {fmtUsd(realized)}
         </div>
       </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-subtle">Clock</div>
+        <div className="font-mono tabular-nums text-sm">{new Date(clock).toISOString().slice(11, 19)}</div>
+      </div>
       <div className="ml-auto flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-subtle">Clock</span>
+        <span className="text-[10px] uppercase tracking-wider text-subtle">Speed</span>
         {([1, 10, 60] as const).map((n) => (
           <Button key={n} size="sm" variant={speed === n ? "default" : "outline"} onClick={() => setSpeed(n)}>
             {n}×

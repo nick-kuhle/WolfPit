@@ -6,6 +6,18 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-25 (Tue) — brand polish + Alloy keeper
+
+- Done:
+  - Landing pit plate, three doors (desk/pools/stake). LP remove, option close, harvest tax on pools.
+  - Contracts: WPIT, SimplePair, Farm, Stake, Deployer. Insurance halt on vault.
+  - Alloy 2.x keeper `crates/keeper` (calldata + optional RPC).
+  - `docs/DEV.md`, `.env.example`, Makefile.
+- Blocked: waiting on nick-kuhle/WolfPit PAT.
+- Tape: still sim. Ready to push v0.1.1 when Nick opens the repo.
+
+---
+
 ## 2026-08-25 (Tue) — Q1 scoped + v0.1 on WPplans
 
 - Done:

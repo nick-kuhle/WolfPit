@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Shell } from "@/components/shell";
 import { Button } from "@/components/ui/button";
+import { insuranceRatio } from "@/lib/wolfpit/risk";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtUsd } from "@/lib/utils";
 
@@ -16,12 +17,18 @@ function StakePage() {
   return (
     <Shell>
       <main className="mx-auto max-w-xl px-4 py-8">
-        <p className="font-mono text-[11px] uppercase tracking-wider text-subtle">$WPIT · insurance + fees</p>
+        <p className="font-mono text-[11px] uppercase tracking-wider text-brass">$WPIT · insurance junior</p>
         <h1 className="mt-2 text-2xl font-medium">Stake</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          Staked WPIT is first-loss junior to the insurance fund: insurance USDC → staked WPIT haircut →
-          pause listings → LP NAV. Simulated emission at 12% is a placeholder funded by emissions, not by
-          selling naked vol. Not a deposit. Not risk-free.
+          Staked WPIT is first-loss junior: insurance USDC → staked WPIT haircut → pause listings → LP NAV.
+          Simulated emission is a placeholder funded by emissions, not by selling naked vol. Not a deposit.
+        </p>
+        <p className="mt-2 text-sm text-muted">
+          Need WPIT?{" "}
+          <Link to="/trade" className="text-fg underline-offset-2 hover:underline">
+            Buy it on the desk
+          </Link>
+          .
         </p>
         <div className="mt-8 rounded-[var(--radius-lg)] border border-border bg-surface p-5">
           <dl className="grid grid-cols-2 gap-4 text-sm">
@@ -36,6 +43,14 @@ function StakePage() {
             <div>
               <dt className="text-[10px] uppercase tracking-wider text-subtle">Mark</dt>
               <dd className="font-mono tabular-nums">{fmtUsd(s.wpit, 4)}</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] uppercase tracking-wider text-subtle">Insurance / NAV</dt>
+              <dd className="font-mono tabular-nums">{(insuranceRatio(s) * 100).toFixed(2)}%</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] uppercase tracking-wider text-subtle">Insurance USDC</dt>
+              <dd className="font-mono tabular-nums">{fmtUsd(s.insuranceUsdc)}</dd>
             </div>
             <div>
               <dt className="text-[10px] uppercase tracking-wider text-subtle">Sim emission</dt>
@@ -54,7 +69,7 @@ function StakePage() {
             <Button className="flex-1" onClick={() => lockStake(Number(amt) || 0)}>
               Stake
             </Button>
-            <Button className="flex-1" variant="outline" onClick={unstake}>
+            <Button className="flex-1" variant="outline" disabled={s.stake.amount <= 0} onClick={unstake}>
               Unstake all
             </Button>
           </div>
