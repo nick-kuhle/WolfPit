@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export function YieldNav({ on }: { on: "farms" | "stake" | "track" }) {
   const tabs = [
     { to: "/pools" as const, id: "farms", label: "Farms" },
-    { to: "/games" as const, id: "track", label: "Track" },
+    { to: "/games" as const, id: "track", label: "Racetrack" },
     { to: "/stake" as const, id: "stake", label: "Stake" },
   ];
   return (

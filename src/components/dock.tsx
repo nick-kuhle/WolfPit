@@ -10,7 +10,7 @@ import { useWallet, truncAddr } from "@/lib/wallet/session";
 
 const TABS = [
   { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
-  { to: "/pools" as const, label: "Farms", Icon: IconFarm, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games" },
+  { to: "/pools" as const, label: "Farm/Racetrack", Icon: IconFarm, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games" },
   { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset") },
   { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book" },
 ] as const;
@@ -45,7 +45,7 @@ export function PitDock() {
                 )}
               >
                 <t.Icon className="size-[22px]" />
-                <span className="text-[10px] leading-none tracking-tight">{t.label}</span>
+                <span className="px-0.5 text-center text-[8px] leading-[1.05] tracking-tight">{t.label}</span>
                 {farmBadge ? (
                   <span className="absolute right-[18%] top-0.5 h-1.5 w-1.5 rounded-full bg-brass" />
                 ) : null}

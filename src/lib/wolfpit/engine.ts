@@ -917,8 +917,16 @@ export function hedgeDelta(s: EngineState): EngineState {
   return arbToSpot(refreshQuotes({ ...s, vault, pools: { ...s.pools, "ETH-USDC": pool } }));
 }
 
-function pushFill(s: EngineState, fill: EngineState["fills"][number]): EngineState {
-  return { ...s, fills: [fill, ...s.fills].slice(0, 80) };
+function cashShot(s: EngineState) {
+  return { usdc: s.account.usdc, eth: s.account.eth, wpit: s.account.wpit };
+}
+
+function pushFill(s: EngineState, fill: EngineState["fills"][number], before?: { usdc: number; eth: number; wpit: number }): EngineState {
+  const after = cashShot(s);
+  return {
+    ...s,
+    fills: [{ ...fill, before: before ?? fill.before ?? after, after }, ...s.fills].slice(0, 80),
+  };
 }
 
 export function tradeSpot(s: EngineState, poolId: PoolId, side: "buy" | "sell", amt: number): EngineState | string {
@@ -950,7 +958,7 @@ export function tradeSpot(s: EngineState, poolId: PoolId, side: "buy" | "sell", 
       size: out,
       price: quoteIn / out,
       fee: quoteIn * (pool.feeBps / 10_000),
-    });
+    }, cashShot(s));
   }
   const baseIn = amt;
   if (tokenBal(s.account, pool.base) + 1e-12 < baseIn) return `Insufficient ${pool.base}.`;
@@ -972,7 +980,7 @@ export function tradeSpot(s: EngineState, poolId: PoolId, side: "buy" | "sell", 
     size: baseIn,
     price: out / baseIn,
     fee: out * (pool.feeBps / 10_000),
-  });
+  }, cashShot(s));
 }
 
 function syncPoolMark(s: EngineState, poolId: PoolId): EngineState {
@@ -1135,7 +1143,7 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
         price: px,
         fee: fee * (cut / size),
         note: "flatten",
-      }),
+      }, cashShot(s)),
       fee * (cut / size),
     );
     const rem = size - cut;
@@ -1173,7 +1181,7 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
       price: px,
       fee,
       note: under === "ETH" ? "covered · delta-hedged · netted" : "cash-settled · USDC IM · netted",
-    }),
+    }, cashShot(s)),
     fee,
   );
   return under === "ETH" ? hedgeDelta(filled) : filled;
@@ -1198,7 +1206,7 @@ export function closeFuture(s: EngineState, id: string): EngineState | string {
     price: mark,
     fee: 0,
     note: `PnL ${pnl.toFixed(2)}`,
-  });
+  }, cashShot(s));
   return under === "ETH" ? hedgeDelta(filled) : filled;
 }
 
@@ -1249,7 +1257,7 @@ function commitOption(
       price: pos.premium,
       fee,
       note: hedge ? "covered / cash-secured · delta-hedged · netted" : "cash-settled · cash-secured · netted",
-    }),
+    }, cashShot(s)),
     fee,
   );
   return hedge ? hedgeDelta(filled) : filled;
@@ -1571,7 +1579,7 @@ export function closeOption(s: EngineState, id: string): EngineState | string {
       price: px,
       fee: 0,
       note: `PnL ${pnl.toFixed(2)}`,
-    }),
+    }, cashShot(s)),
   );
 }
 

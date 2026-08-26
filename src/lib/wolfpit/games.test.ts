@@ -31,7 +31,7 @@ describe("pit racetrack", () => {
     const h = makeCard("horse", t);
     const d = makeCard("dog", t);
     assert.notEqual(h.start, d.start);
-    assert.equal(Math.abs(h.start - d.start), 150_000);
+    assert.equal(Math.abs(h.start - d.start), 30_000);
   });
 
   it("takes a ticket from WPIT into the games vault", () => {
@@ -47,6 +47,8 @@ describe("pit racetrack", () => {
     assert.equal(r.games?.vaultWpit, GAMES_VAULT_SEED + 100);
     assert.equal(r.games?.bets[0]?.status, "open");
     assert.equal(r.games?.bets[0]?.stake, 100);
+    assert.equal(r.fills[0]?.before?.wpit, 1_000);
+    assert.equal(r.fills[0]?.after?.wpit, 900);
   });
 
   it("rejects a bet after post", () => {

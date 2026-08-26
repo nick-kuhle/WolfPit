@@ -53,6 +53,14 @@ export type OrderFill = {
   price: number;
   fee: number;
   note?: string;
+  before?: CashShot;
+  after?: CashShot;
+};
+
+export type CashShot = {
+  usdc: number;
+  eth: number;
+  wpit: number;
 };
 
 export type VaultState = {

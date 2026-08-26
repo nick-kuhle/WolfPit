@@ -3,9 +3,9 @@ import { requireFinitePositive } from "./limits";
 import type { EngineState } from "./types";
 import type { GameBet, GameMeet, GamesState, RaceKind } from "./types";
 
-export const RACE_MS = 300_000;
-export const POST_AT = 220_000;
-export const RUN_MS = 72_000;
+export const RACE_MS = 60_000;
+export const POST_AT = 38_000;
+export const RUN_MS = 18_000;
 export const GAMES_VAULT_SEED = 200_000;
 export const MIN_BET = 10;
 export const MAX_BET = 5_000;
@@ -13,21 +13,33 @@ export const OVERROUND_HORSE = 1.14;
 export const OVERROUND_DOG = 1.12;
 
 const HORSES = [
-  "Thunderclap", "Lady Brass", "Red Ticket", "Iron Pit", "Night Whistle",
-  "Golden Curb", "Fast Ledger", "Copper Stampede", "Pit Wolf", "Silk Hedge",
-  "Midnight Fill", "Curb Appeal", "Brass Monkey", "Delta Queen", "Railbird",
-  "Photo Finish", "Mudlark", "Whistlejacket", "Stub Ticket", "Open Outcry",
-  "Blackboard", "Yellow Pad", "Two Dollar", "Clubhouse", "Longshot Lil",
-  "Favorite Son", "Gate Crash", "Turn of Foot", "Homestretch", "Wire to Wire",
-  "Paddock Ghost", "Stewards' Cup", "Furlong Fever", "Oatbag", "Haymaker",
-  "Saddle Soap", "Blinkers Off", "Crop Duster", "Lead Pony", "Call to Post",
+  "Hot to Trot", "Lady Godiva", "Bareback", "Slow Hands", "Velvet Rope",
+  "Midnight Heat", "Come Hither", "Silk Sheets", "Last Call", "Red Light",
+  "Sugar Daddy", "Night Nurse", "Bad Influence", "French Kiss", "Pit Tease",
+  "Loose Cannon", "After Hours", "Dirty Martini", "Low Cut", "On the House",
+  "Sweet Spot", "Fast Company", "No Panties", "Bedroom Eyes", "Sin Tax",
+  "Open Kimono", "Lap Dance", "Honey Trap", "Backseat", "Whiskey Dick",
+  "Easy Virtue", "She Bites", "Full Monty", "Tease the Wire", "Pink Slip",
+  "One Night", "Heat Check", "Unbuttoned", "Call Girl", "Wolf Whistle",
 ];
 
 const DOGS = [
-  "Zip", "Copper", "Blitz", "Nudge", "Flea", "Rocket",
-  "Cinder", "Pepper", "Dash", "Nitro", "Scoot", "Brass",
-  "Wicket", "Pebble", "Streak", "Jinx", "Hustle", "Grit",
-  "Sparky", "Muzzle", "Trapdoor", "Lure", "Tin Cup", "Rake",
+  "Bad Bitch", "Fast Tail", "Hot Mess", "Lickety Split", "Trouble",
+  "Nasty Habit", "Sugar Fang", "Heat Wave", "Side Piece", "Pony Play",
+  "Bite Me", "Red Collar", "Night Howl", "Slick", "Tramp Stamp",
+  "Underdog", "Filthy Rich", "Kiss Kiss", "Wrecked", "Saliva",
+  "Tease", "Muzzle Me", "Quickie", "All Night",
+];
+
+const TRAINERS = [
+  "Vic Moretti", "Sable Quinn", "Hank Devereaux", "Lola Finch", "Cal Rourke",
+  "Nico Vane", "Maeve Brass", "Jules Hart", "Rio Santos", "Wren Hollow",
+  "Dex Lang", "Ivy Crowe",
+];
+
+const BARNS = [
+  "Pit & Paddock", "Brass Stables", "Night Rail", "Curb Club", "Wolf Barn",
+  "Ticket Yard", "Open Outcry", "Red Board",
 ];
 
 const SILKS = ["#f0c14b", "#3dcc7a", "#ef5a4e", "#e6e2d6", "#6ea8fe", "#c084fc", "#fb923c", "#22d3ee"];
@@ -47,6 +59,10 @@ export type Runner = {
   odds: number;
   silk: string;
   form: number;
+  trainer: string;
+  barn: string;
+  portrait: string;
+  sprite: string;
 };
 
 export type RaceCard = {
@@ -114,7 +130,18 @@ export function makeCard(kind: RaceKind, now = Date.now()): RaceCard {
   const runners: Runner[] = form.map((f, i) => {
     const p = f / sum;
     const odds = Math.min(50, Math.max(1.2, Math.round((1 / (p * over)) * 20) / 20));
-    return { no: i + 1, name: pool[i]!, odds, silk: SILKS[i]!, form: f };
+    const art = i % (kind === "horse" ? 4 : 3) + 1;
+    return {
+      no: i + 1,
+      name: pool[i]!,
+      odds,
+      silk: SILKS[i]!,
+      form: f,
+      trainer: TRAINERS[Math.floor(r() * TRAINERS.length)]!,
+      barn: BARNS[Math.floor(r() * BARNS.length)]!,
+      portrait: `/brand/races/port-${kind === "horse" ? "horse" : "dog"}-${art}.jpg`,
+      sprite: `/brand/races/sprite-${kind === "horse" ? "horse" : "dog"}-${art}.jpg`,
+    };
   });
   const places = runners
     .map((x) => x.no)
@@ -138,10 +165,19 @@ export function fieldAt(card: RaceCard, now: number) {
   return card.runners.map((r) => {
     const place = card.places.indexOf(r.no);
     const finish = 1 - place * (card.kind === "horse" ? 0.035 : 0.045);
-    const wobble = 0.07 * Math.sin(t * 14 + r.no * 1.7) * t * (1 - t);
-    const x = Math.min(1, Math.max(0, ease * finish + wobble));
+    const chaos = t > 0 && t < 1 ? 1 : 0;
+    const wobble =
+      0.28 * Math.sin(t * 31 + r.no * 2.4) * chaos +
+      0.16 * Math.sin(t * 53 + r.form * 9) * chaos +
+      0.1 * Math.sin(now / 90 + r.no) * chaos;
+    const x = Math.min(0.98, Math.max(0, ease * finish + wobble * t * (1 - t) * 4));
     return { ...r, x, place };
   });
+}
+
+export function flashOdds(odds: number, now: number, no: number) {
+  const wob = Math.sin(now / 140 + no * 1.7) * 0.22 + Math.sin(now / 70 + no * 3) * 0.1;
+  return Math.min(50, Math.max(1.15, Math.round(odds * (1 + wob) * 20) / 20));
 }
 
 export function liability(odds: number, stake: number) {
@@ -182,9 +218,11 @@ export function placeBet(
     status: "open",
     payout: 0,
   };
+  const before = { usdc: s.account.usdc, eth: s.account.eth, wpit: s.account.wpit };
+  const after = { ...before, wpit: before.wpit - stake };
   return {
     ...s,
-    account: { ...s.account, wpit: s.account.wpit - stake },
+    account: { ...s.account, wpit: after.wpit },
     games: {
       ...games,
       vaultWpit: games.vaultWpit + stake,
@@ -201,6 +239,8 @@ export function placeBet(
         price: run.odds,
         fee: 0,
         note: `${fracOdds(run.odds)} · ${card.id}`,
+        before,
+        after,
       },
       ...s.fills,
     ].slice(0, 80),
@@ -230,9 +270,26 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
     if (now < card.settleAt) return b;
     changed = true;
     const win = b.runner === card.winner;
-    if (!win) return { ...b, status: "lost" as const, payout: 0 };
+    if (!win) {
+      const before = { usdc: s.account.usdc, eth: s.account.eth, wpit };
+      fills.unshift({
+        id: uid("f"),
+        t: s.clock,
+        product: "spot",
+        symbol: `${b.kind} ${b.name}`,
+        side: "lose",
+        size: b.stake,
+        price: b.odds,
+        fee: 0,
+        note: `Official ${card.id}`,
+        before,
+        after: before,
+      });
+      return { ...b, status: "lost" as const, payout: 0 };
+    }
     const payout = b.stake * b.odds;
     const pay = Math.min(payout, vault);
+    const before = { usdc: s.account.usdc, eth: s.account.eth, wpit };
     vault -= pay;
     wpit += pay;
     realized += pay - b.stake;
@@ -246,6 +303,8 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
       price: b.odds,
       fee: 0,
       note: `Official ${card.id} · ${fracOdds(b.odds)}`,
+      before,
+      after: { ...before, wpit },
     });
     if (!meets.some((m) => m.raceId === card!.id)) {
       meets.unshift({

@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { LiveTicker } from "@/components/ticker";
+import { HomeTrack } from "@/components/home-track";
 import { Button } from "@/components/ui/button";
 import { PIT_OPEN, compBoard, compLive } from "@/lib/wolfpit/comp";
 import { equity, farmApy } from "@/lib/wolfpit/engine";
@@ -24,6 +25,7 @@ function Home() {
   return (
     <Shell>
       <LiveTicker />
+      <HomeTrack />
 
       <section className="relative overflow-hidden border-b border-brass/40 bg-brass text-bg">
         <div className="pointer-events-none absolute inset-0 opacity-30">

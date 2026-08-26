@@ -43,7 +43,11 @@ function cleanPool(p: PoolState | undefined, id: string): PoolState | null {
   };
 }
 
-/** Rebuild a ledger from persisted JSON. Drops NaN, negatives, and phantom books. */
+function shotOf(v: unknown): { usdc: number; eth: number; wpit: number } | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as { usdc?: unknown; eth?: unknown; wpit?: unknown };
+  return { usdc: nn(o.usdc), eth: nn(o.eth), wpit: nn(o.wpit) };
+}
 export function sanitizeState(raw: Partial<EngineState> | null | undefined, fallback: EngineState): EngineState {
   const base = fallback;
   if (!raw || typeof raw !== "object") return base;
@@ -147,7 +151,13 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     stake: { amount: nn(raw.stake?.amount), since: nn(raw.stake?.since, base.clock) },
     futures,
     options,
-    fills: Array.isArray(raw.fills) ? raw.fills.slice(0, 80) : [],
+    fills: Array.isArray(raw.fills)
+      ? raw.fills.slice(0, 80).map((f) => ({
+          ...f,
+          before: shotOf((f as { before?: unknown }).before),
+          after: shotOf((f as { after?: unknown }).after),
+        }))
+      : [],
     working: Array.isArray(raw.working) ? raw.working.slice(0, 40) : [],
     farmWpit: nn(raw.farmWpit),
     harvestedWpit: nn(raw.harvestedWpit),
