@@ -9,10 +9,10 @@ import { cn } from "@/lib/utils";
 import { useWallet, truncAddr } from "@/lib/wallet/session";
 
 const TABS = [
-  { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/", catchy: false },
-  { to: "/games" as const, label: "The Ranch", Icon: IconRanch, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games", catchy: true },
-  { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset"), catchy: false },
-  { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book", catchy: false },
+  { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
+  { to: "/games" as const, label: "The Ranch", Icon: IconRanch, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games" },
+  { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset") },
+  { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book" },
 ] as const;
 
 export function PitDock() {
@@ -51,16 +51,10 @@ export function PitDock() {
                 className={cn(
                   "relative flex min-h-[3.2rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl border px-1 pt-1",
                   on ? "border-brass bg-brass/15 text-brass" : "border-[#2a2a2a] bg-[#141414] text-[#8e8e8e]",
-                  t.catchy && !on && "border-brass/50 text-brass/80",
                 )}
               >
                 <t.Icon className="size-[20px]" />
                 <span className="px-0.5 text-center text-[9px] font-medium leading-[1.05] tracking-tight">{t.label}</span>
-                {t.catchy ? (
-                  <span className="absolute -top-1 right-1 rounded-full bg-brass px-1 font-mono text-[7px] font-bold uppercase leading-4 text-bg">
-                    Live
-                  </span>
-                ) : null}
                 {farmBadge ? (
                   <span className="absolute left-1.5 top-1 h-1.5 w-1.5 rounded-full bg-brass" />
                 ) : null}
