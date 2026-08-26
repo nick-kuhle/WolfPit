@@ -329,9 +329,66 @@
   animation: alert-pop 0.38s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
+@keyframes alert-grow {
+  0% {
+    opacity: 0;
+    transform: scale(0.22) rotate(-5deg);
+  }
+  38% {
+    opacity: 1;
+    transform: scale(1.16) rotate(1.2deg);
+  }
+  62% {
+    transform: scale(0.94) rotate(-0.5deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+.alert-grow {
+  animation: alert-grow 0.55s cubic-bezier(0.16, 0.86, 0.28, 1) both;
+}
+
+@keyframes confetti-spray {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg) scale(0.35);
+  }
+  14% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--dx) * 0.22), calc(-50% + var(--dy) * 0.22)) rotate(var(--rot)) scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(calc(var(--rot) * 2.6)) scale(0.55);
+  }
+}
+
+.confetti-spray {
+  animation: confetti-spray 1.35s cubic-bezier(0.08, 0.72, 0.18, 1) forwards;
+}
+
+@keyframes fill-dim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fill-dim {
+  animation: fill-dim 0.18s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .slip-fly,
   .alert-pop,
+  .alert-grow,
+  .confetti-spray,
+  .fill-dim,
   .runner-body,
   .runner-legs,
   .runner-idle,

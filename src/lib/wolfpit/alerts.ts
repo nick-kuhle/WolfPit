@@ -24,7 +24,7 @@ export const useAlerts = create<Alerts>((set, get) => ({
     const id = `a${++n}`;
     set({ items: [{ id, msg, tone, t: Date.now(), burst }, ...get().items].slice(0, 6) });
     if (typeof window !== "undefined") {
-      window.setTimeout(() => get().dismiss(id), burst ? 5600 : 4200);
+      window.setTimeout(() => get().dismiss(id), burst ? 7200 : 4200);
     }
   },
   dismiss: (id) => set({ items: get().items.filter((x) => x.id !== id) }),
