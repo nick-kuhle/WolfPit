@@ -93,7 +93,21 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
-      <AccountBar />
+      <div className="hidden lg:block">
+        <AccountBar />
+      </div>
+      <div className="flex h-9 items-center justify-between gap-3 border-b border-border px-3 lg:hidden">
+        <span className="font-mono text-[11px] text-muted">
+          Net {fmtUsd(eq)}
+        </span>
+        <span className={cn("font-mono text-[11px]", day >= 0 ? "text-up" : "text-down")}>
+          Day {day >= 0 ? "+" : "−"}
+          {fmtUsd(Math.abs(day))}
+        </span>
+        <span className={cn("font-mono text-[11px]", health.tone === "up" ? "text-up" : health.tone === "down" ? "text-down" : "text-warn")}>
+          {health.label}
+        </span>
+      </div>
       {!pane ? (
         <div className="flex border-b border-border lg:hidden">
           {(["list", "trade", "pos"] as const).map((t) => (
@@ -138,7 +152,7 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
         </aside>
 
         <section className={cn("flex min-h-0 flex-col overflow-hidden", view === "trade" ? "flex" : "hidden lg:flex")}>
-          <div className="shrink-0 border-b border-border px-3 py-2">
+          <div className="shrink-0 border-b border-border px-3 py-1.5">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-baseline gap-2">
@@ -179,7 +193,7 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
             </div>
           </div>
           <div className="shrink-0 border-b border-border">
-            <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={132} />
+            <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={96} />
           </div>
           <div className="min-h-0 flex-1">
             <OrderTicket prefer={prefer} under={under} want={want} />

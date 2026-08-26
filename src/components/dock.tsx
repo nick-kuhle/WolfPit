@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 const TABS = [
   { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
-  { to: "/watch" as const, label: "Watch", Icon: IconStar, match: (p: string) => p === "/watch" },
+  { to: "/pools" as const, label: "Farms", Icon: IconFarm, match: (p: string) => p === "/pools" || p === "/stake" },
   { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset") },
   { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book" },
 ] as const;
@@ -20,7 +20,7 @@ export function PitDock() {
   const ripe = useWolf(harvestDue);
   const working = useWolf((s) => (s.working ?? []).length);
   const alerts = useAlerts((s) => s.items.length);
-  const badge = (ripe > 0 ? 1 : 0) + working + (alerts > 0 ? 1 : 0);
+  const badge = working + (alerts > 0 ? 1 : 0);
   const moreActive = more || !TABS.some((t) => t.match(pathname));
 
   return (
@@ -32,18 +32,22 @@ export function PitDock() {
         <div className="grid h-[3.35rem] grid-cols-5">
           {TABS.map((t) => {
             const on = t.match(pathname);
+            const farmBadge = t.to === "/pools" && ripe > 0;
             return (
               <Link
                 key={t.to}
                 to={t.to}
                 onClick={() => setMore(false)}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 pt-1",
+                  "relative flex flex-col items-center justify-center gap-0.5 pt-1",
                   on ? "text-brass" : "text-[#8e8e8e]",
                 )}
               >
                 <t.Icon className="size-[22px]" />
                 <span className="text-[10px] leading-none tracking-tight">{t.label}</span>
+                {farmBadge ? (
+                  <span className="absolute right-[18%] top-0.5 h-1.5 w-1.5 rounded-full bg-brass" />
+                ) : null}
               </Link>
             );
           })}
@@ -73,9 +77,8 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   const s = useWolf();
   const reset = useWolf((st) => st.reset);
   const setSpeed = useWolf((st) => st.setSpeed);
-  const ripe = harvestDue(s);
 
-  function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin") {
+  function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch") {
     onClose();
     void nav({ to });
   }
@@ -103,7 +106,7 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
 
         <div className="px-3 pb-3">
           <p className="px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-subtle">Pit</p>
-          <Row icon="🌾" label="Farms" hint={ripe > 0 ? `${ripe.toFixed(1)} WPIT ripe` : "Yield stalls"} onClick={() => go("/pools")} />
+          <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} />
           <Row icon="◎" label="Stake" hint="12% APR junior" onClick={() => go("/stake")} />
           <Row icon="☰" label="Fills" hint={`${s.fills.length} on the tape`} onClick={() => go("/orders")} />
           <Row icon="?" label="Learn" hint="Pit school" onClick={() => go("/learn")} />
@@ -159,10 +162,14 @@ function IconFloor(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-function IconStar(props: SVGProps<SVGSVGElement>) {
+function IconFarm(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
-      <path d="M12 3.6 14.4 9l5.8.6-4.4 3.8 1.3 5.7L12 16.6 6.9 19.1l1.3-5.7L3.8 9.6 9.6 9z" />
+      <path d="M12 21V9" />
+      <path d="M12 14c-3.2-1.2-5.2-3.6-6.4-7 2.8.4 5 1.8 6.4 4.2" />
+      <path d="M12 14c3.2-1.2 5.2-3.6 6.4-7-2.8.4-5 1.8-6.4 4.2" />
+      <path d="M12 10c-2-2.4-3-5-3.2-8 2 .8 3.4 2.6 3.2 5.4" />
+      <path d="M12 10c2-2.4 3-5 3.2-8-2 .8-3.4 2.6-3.2 5.4" />
     </svg>
   );
 }
@@ -218,7 +225,7 @@ export function DesktopNav({ pathname }: { pathname: string }) {
           <div className="absolute right-0 top-11 z-40 w-52 overflow-hidden rounded-md border border-border bg-panel py-1 shadow-xl">
             {(
               [
-                ["/pools", "Farms"],
+                ["/watch", "Watch"],
                 ["/stake", "Stake"],
                 ["/orders", "Fills"],
                 ["/learn", "Learn"],

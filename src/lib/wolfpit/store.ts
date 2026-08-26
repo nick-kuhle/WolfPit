@@ -174,7 +174,19 @@ export const useWolf = create<WolfStore>()(
         if (typeof r !== "string") ping(`Pool created · ${base}-${quote}`, "up");
       },
       issueToken: (sym, amt) => apply(issueTokenEngine(get(), sym, amt), set),
-      sendOrder: (o) => apply(placeDeskOrder(get(), o), set, true),
+      sendOrder: (o) => {
+        if (useAdmin.getState().listingsPaused) {
+          ping("Listings paused by pit ops.", "down");
+          set({ lastError: "Listings paused by pit ops." });
+          return;
+        }
+        if ((o.product === "future" || o.product === "option") && useAdmin.getState().geoFenceUs) {
+          ping("US geo-fence on. Futures and options hidden.", "down");
+          set({ lastError: "US geo-fence on. Futures and options hidden." });
+          return;
+        }
+        apply(placeDeskOrder(get(), o), set, true);
+      },
       cancelOrder: (id) => {
         ping("Order cancelled", "brass");
         set(cancelWorking(get(), id));

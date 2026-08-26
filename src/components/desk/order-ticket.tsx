@@ -272,9 +272,9 @@ export function OrderTicket({
       </div>
 
       {editor ? (
-        <div className="shrink-0 border-t border-brass/30 bg-[#1a0c0c]">
+        <div className="shrink-0 border-t border-brass/35 bg-[color-mix(in_oklab,var(--color-brass)_14%,#12100a)]">
           <div className="flex items-center gap-1 px-3 py-2">
-            <div className="grid h-9 w-28 grid-cols-2 overflow-hidden rounded-full border border-down/50">
+            <div className="grid h-9 w-28 grid-cols-2 overflow-hidden rounded-full border border-brass/50">
               <button
                 type="button"
                 className={cn("text-[11px] font-medium", side === "sell" ? "bg-down text-fg" : "text-muted")}
@@ -312,7 +312,7 @@ export function OrderTicket({
             </Line>
           ) : null}
 
-          <div className="flex items-center justify-between border-t border-white/5 px-3 py-2">
+          <div className="flex items-center justify-between border-t border-brass/20 px-3 py-2">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-subtle">Cost of Trade</div>
               <div className="font-display text-xl tabular-nums">{Number.isFinite(est.usd) ? fmtUsd(side === "sell" && product === "spot" ? -est.usd : est.usd) : "—"}</div>
@@ -358,7 +358,7 @@ export function OrderTicket({
                 Edit
               </Button>
             ) : null}
-            <Button className="h-11 flex-1" variant={side === "buy" ? "up" : "down"} disabled={blocked} onClick={() => setReview(true)}>
+            <Button className="h-11 flex-1 bg-brass text-bg hover:brightness-110" disabled={blocked} onClick={() => setReview(true)}>
               Review
             </Button>
           </div>
@@ -430,7 +430,7 @@ function Carousel<T extends string>({
 }) {
   const i = Math.max(0, items.indexOf(value));
   return (
-    <div className="flex h-9 flex-1 items-center justify-center gap-2 rounded-full border border-down/40 px-2">
+    <div className="flex h-9 flex-1 items-center justify-center gap-2 rounded-full border border-brass/45 px-2">
       <button type="button" className="pressable px-1 text-brass" onClick={() => onChange(items[(i - 1 + items.length) % items.length]!)}>
         ‹
       </button>
@@ -444,7 +444,7 @@ function Carousel<T extends string>({
 
 function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-white/5 px-3 py-1.5">
+    <div className="flex items-center justify-between gap-3 border-t border-brass/15 px-3 py-1.5">
       <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
       {children}
     </div>

@@ -49,24 +49,17 @@ function PoolsPage() {
   return (
     <Shell>
       <ProductGate product="farms">
-        <div className="pit-hero relative overflow-hidden border-b border-border">
-          <img
-            src="/brand/card-farm.jpg"
-            alt=""
-            decoding="async"
-            className="absolute inset-0 size-full object-cover opacity-40"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/70 to-bg/30" />
-          <div className="relative mx-auto max-w-3xl px-4 py-10 sm:py-14">
-            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">The yield pit</p>
-            <h1 className="mt-2 max-w-lg font-display text-4xl font-medium tracking-tight sm:text-5xl">
-              Farms that actually <span className="italic text-brass">pay you to look.</span>
+        <div className="relative overflow-hidden border-b border-brass/40 bg-brass text-bg">
+          <div className="mx-auto max-w-3xl px-4 py-5 sm:py-10">
+            <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-bg/70">The yield pit</p>
+            <h1 className="mt-1 font-display text-3xl font-medium tracking-tight sm:text-5xl">
+              Farms that <span className="italic">pay you to look.</span>
             </h1>
-            <p className="mt-3 max-w-md text-sm text-muted">Tap a stall. Add both legs. APY moves with TVL, util, and vol — live.</p>
+            <p className="mt-2 max-w-md text-sm text-bg/80">Tap a stall. Add both legs. APY moves with TVL, util, and vol.</p>
           </div>
         </div>
 
-        <main className="mx-auto max-w-3xl px-4 py-8">
+        <main className="mx-auto max-w-3xl px-4 py-5 sm:py-8">
           <div
             className={cn(
               "flex items-center justify-between gap-4 rounded-[var(--radius-xl)] border px-5 py-5",
@@ -177,7 +170,7 @@ function PoolsPage() {
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
-                      <div className="apy-live font-display text-3xl font-medium text-brass">{fmtPct(apy)}</div>
+                      <div className="apy-live font-display text-4xl font-medium leading-none text-brass">{fmtPct(apy)}</div>
                       <div className="text-[10px] uppercase tracking-wider text-subtle">APY</div>
                     </div>
                   </button>
