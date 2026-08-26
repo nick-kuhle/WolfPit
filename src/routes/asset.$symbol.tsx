@@ -15,10 +15,10 @@ import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
 export const Route = createFileRoute("/asset/$symbol")({
   validateSearch: (s: Record<string, unknown>) => ({
-    name: typeof s.name === "string" ? s.name : "",
-    chain: typeof s.chain === "string" ? s.chain : "",
-    contract: typeof s.contract === "string" ? s.contract : "",
-    network: typeof s.network === "string" ? s.network : "",
+    name: typeof s.name === "string" && s.name ? s.name : undefined,
+    chain: typeof s.chain === "string" && s.chain ? s.chain : undefined,
+    contract: typeof s.contract === "string" && s.contract ? s.contract : undefined,
+    network: typeof s.network === "string" && s.network ? s.network : undefined,
   }),
   component: AssetPage,
 });
@@ -26,32 +26,37 @@ export const Route = createFileRoute("/asset/$symbol")({
 function AssetPage() {
   const { symbol } = Route.useParams();
   const q = Route.useSearch();
-  const universe = useDesk((s) => s.universe);
-  const openCard = useDesk((s) => s.openCard);
   const wpitPx = useWolf((s) => s.wpit);
   const wpitBars = useWolf((s) => s.wpitCandles);
-  const listToken = useWolf((s) => s.listToken);
-  const [listing, setListing] = useState<Listing>(() => seed(symbol, q, universe, wpitPx));
+  const [listing, setListing] = useState<Listing>(() =>
+    seed(symbol, q, useDesk.getState().universe, wpitPx),
+  );
   const [interval, setIv] = useState<ChartInterval>("1h");
   const [bars, setBars] = useState<Candle[]>([]);
   const [status, setStatus] = useState<"load" | "ok" | "empty">("load");
 
   useEffect(() => {
-    const local = seed(symbol, q, universe, wpitPx);
+    const local = seed(symbol, q, useDesk.getState().universe, useWolf.getState().wpit);
     setListing(local);
-    listToken(local.symbol, local.price || 1);
-    openCard(local);
-    if (local.symbol === "WPIT" || local.price) return;
+    useWolf.getState().listToken(local.symbol, local.price || 1);
+    useDesk.getState().setFocus(local);
+    if (local.symbol === "WPIT" || local.price) {
+      return;
+    }
     let dead = false;
     void lookupToken({ data: { q: q.contract || symbol } })
       .then((hit) => {
-        if (!dead) setListing({ ...local, ...hit, symbol: hit.symbol || local.symbol });
+        if (dead) return;
+        const next = { ...local, ...hit, symbol: hit.symbol || local.symbol };
+        setListing(next);
+        useDesk.getState().setFocus(next);
+        useWolf.getState().listToken(next.symbol, next.price || 1);
       })
       .catch(() => undefined);
     return () => {
       dead = true;
     };
-  }, [symbol, q.contract, q.chain, universe, wpitPx, listToken, openCard]);
+  }, [symbol, q.contract, q.chain, q.network]);
 
   useEffect(() => {
     if (listing.symbol === "WPIT") {
@@ -83,7 +88,7 @@ function AssetPage() {
     return () => {
       dead = true;
     };
-  }, [listing, interval, wpitBars, q.network]);
+  }, [listing.symbol, listing.binance, listing.geckoId, listing.network, listing.poolAddress, interval, wpitBars, q.network]);
 
   const px = listing.symbol === "WPIT" ? wpitPx : listing.price;
 
@@ -152,7 +157,7 @@ function AssetPage() {
             <RecentFills symbol={listing.symbol} />
           </main>
           <aside className="min-h-[28rem] border-t border-border lg:h-[calc(100dvh-3rem)] lg:border-l lg:border-t-0">
-            <OrderTicket />
+            <OrderTicket under={listing.symbol} />
           </aside>
         </div>
       </ProductGate>
@@ -162,7 +167,7 @@ function AssetPage() {
 
 function seed(
   symbol: string,
-  q: { name: string; chain: string; contract: string; network: string },
+  q: { name?: string; chain?: string; contract?: string; network?: string },
   universe: Listing[],
   wpitPx: number,
 ): Listing {

@@ -283,7 +283,7 @@ export function resampleCandles(bars: EngineState["candles"], intervalMs: number
 export function equity(s: EngineState) {
   const spot = s.account.usdc + s.account.eth * s.eth + s.account.wpit * s.wpit;
   const extras = Object.entries(s.account.tokens ?? {}).reduce((a, [k, v]) => a + v * tokenPx(s, k), 0);
-  const fut = s.futures.reduce((a, p) => a + p.margin + futPnl(p, s.eth), 0);
+  const fut = s.futures.reduce((a, p) => a + p.margin + futPnl(p, markOf(s, p.under ?? "ETH")), 0);
   const opt = s.options.reduce((a, p) => a + optMark(s, p) * p.sizeEth, 0);
   const lpVal = s.lp.reduce((a, p) => a + lpValue(s, p.poolId, p.shares), 0);
   return spot + extras + fut + opt + lpVal + s.stake.amount * s.wpit;
@@ -309,8 +309,9 @@ export function liqHealth(s: EngineState) {
   if (s.futures.length === 0) return { label: "CLEAR", score: 2, tone: "up" as const };
   let worst = 99;
   for (const p of s.futures) {
-    const eq = p.margin + futPnl(p, s.eth);
-    const maint = p.sizeEth * s.eth * FUT_MM;
+    const mark = markOf(s, p.under ?? "ETH");
+    const eq = p.margin + futPnl(p, mark);
+    const maint = p.sizeEth * mark * FUT_MM;
     worst = Math.min(worst, eq / Math.max(maint, 1e-9));
   }
   if (worst < 1.05) return { label: "LIQ", score: worst, tone: "down" as const };
@@ -360,9 +361,10 @@ export function futPnl(p: EngineState["futures"][number], mark: number) {
 }
 
 export function optMark(s: EngineState, p: EngineState["options"][number]) {
+  const spot = markOf(s, p.under ?? "ETH");
   const T = yearsTo(p.expiry, s.clock);
-  const vol = ivSmile(s.iv, s.eth, p.strike, T);
-  return p.type === "call" ? bsCall(s.eth, p.strike, T, 0.03, vol) : bsPut(s.eth, p.strike, T, 0.03, vol);
+  const vol = ivSmile(s.iv, spot, p.strike, T);
+  return p.type === "call" ? bsCall(spot, p.strike, T, 0.03, vol) : bsPut(spot, p.strike, T, 0.03, vol);
 }
 
 export function lpValue(s: EngineState, id: PoolId, shares: number) {
@@ -406,6 +408,38 @@ export function tokenPx(s: EngineState, sym: string) {
   const vsEth = Object.values(s.pools).find((p) => p.base === sym && p.quote === "ETH");
   if (vsEth && vsEth.baseReserve > 0) return (vsEth.quoteReserve / vsEth.baseReserve) * s.eth;
   return 0;
+}
+
+export function markOf(s: EngineState, under = "ETH") {
+  const px = tokenPx(s, under);
+  if (px > 0) return px;
+  if (under === "ETH") return s.eth;
+  return 0;
+}
+
+export function miniQty(under = "ETH") {
+  if (under === "ETH") return MINI_ETH;
+  if (under === "WPIT") return 10;
+  return 1;
+}
+
+export function quoteTick(spot: number) {
+  if (spot >= 100) return 0.4;
+  if (spot >= 5) return 0.02;
+  if (spot >= 1) return 0.005;
+  return Math.max(spot * 0.002, 0.00005);
+}
+
+export function strikeGrid(spot: number) {
+  let step = 0.005;
+  if (spot >= 500) step = 100;
+  else if (spot >= 50) step = 5;
+  else if (spot >= 5) step = 0.5;
+  else if (spot >= 1) step = 0.05;
+  else if (spot >= 0.2) step = 0.01;
+  const atm = Math.round(spot / step) * step;
+  const round = (n: number) => Number((Math.round(n / step) * step).toPrecision(10));
+  return [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((i) => round(atm + i * step)).filter((k) => k > 0);
 }
 
 export function freeEth(s: EngineState) {
@@ -479,24 +513,27 @@ export function cancelWorking(s: EngineState, id: string): EngineState {
 }
 
 function wouldCross(s: EngineState, o: WorkingOrder) {
-  const bid = s.ethBid || s.eth;
-  const ask = s.ethAsk || s.eth;
+  const spot = markOf(s, o.under ?? "ETH");
+  const bps = spreadBps(s);
+  const bid = o.under && o.under !== "ETH" ? spot * (1 - bps / 10_000) : s.ethBid || s.eth;
+  const ask = o.under && o.under !== "ETH" ? spot * (1 + bps / 10_000) : s.ethAsk || s.eth;
   if (o.kind === "lmt") {
     if (o.side === "buy") return ask <= (o.limit ?? 0);
     return bid >= (o.limit ?? Infinity);
   }
   if (o.kind === "stp") {
-    if (o.side === "buy") return s.eth >= (o.stop ?? Infinity);
-    return s.eth <= (o.stop ?? 0);
+    if (o.side === "buy") return spot >= (o.stop ?? Infinity);
+    return spot <= (o.stop ?? 0);
   }
   if (o.kind === "stl") {
-    if (o.side === "buy") return s.eth >= (o.stop ?? Infinity) && ask <= (o.limit ?? 0);
-    return s.eth <= (o.stop ?? 0) && bid >= (o.limit ?? Infinity);
+    if (o.side === "buy") return spot >= (o.stop ?? Infinity) && ask <= (o.limit ?? 0);
+    return spot <= (o.stop ?? 0) && bid >= (o.limit ?? Infinity);
   }
   return true;
 }
 
 function tryFill(s: EngineState, o: WorkingOrder): EngineState | string {
+  const under = o.under ?? "ETH";
   if (o.product === "spot") {
     const poolId = o.poolId ?? "ETH-USDC";
     const pool = s.pools[poolId];
@@ -511,11 +548,14 @@ function tryFill(s: EngineState, o: WorkingOrder): EngineState | string {
   if (o.product === "future") {
     const contracts = o.qty;
     const side = o.side === "buy" ? "long" : "short";
-    return tradeFuture(s, side, contracts, o.expiry ?? expiries(s.clock)[0]!.at);
+    return tradeFuture(s, side, contracts, o.expiry ?? expiries(s.clock)[0]!.at, under);
   }
   if (o.product === "option") {
     if (o.side === "sell") return "Close longs from Positions. Vault does not buy options.";
-    return buyOption(s, o.optType ?? "call", o.strike ?? Math.round(s.eth / 100) * 100, o.expiry ?? expiries(s.clock)[0]!.at, o.qty);
+    const spot = markOf(s, under);
+    const ks = strikeGrid(spot);
+    const strike = o.strike ?? ks[Math.floor(ks.length / 2)]!;
+    return buyOption(s, o.optType ?? "call", strike, o.expiry ?? expiries(s.clock)[0]!.at, o.qty, under);
   }
   return "Unknown product.";
 }
@@ -550,6 +590,8 @@ export function bookGreeks(s: EngineState) {
     delta += p.side === "long" ? -p.sizeEth : p.sizeEth;
   }
   for (const p of s.options) {
+    const under = p.under ?? "ETH";
+    if (under !== "ETH") continue;
     const T = yearsTo(p.expiry, s.clock);
     const vol = ivSmile(s.iv, s.eth, p.strike, T);
     const d = bsDelta(s.eth, p.strike, T, 0.03, vol, p.type);
@@ -735,8 +777,39 @@ export function tradeSpot(s: EngineState, poolId: PoolId, side: "buy" | "sell", 
   });
 }
 
-export function tradeFuture(s: EngineState, side: FutSide, contracts: number, expiry: number): EngineState | string {
-  const sizeEth = contracts * MINI_ETH;
+export function tradeFuture(s: EngineState, side: FutSide, contracts: number, expiry: number, under = "ETH"): EngineState | string {
+  const sizeEth = contracts * miniQty(under);
+  if (under !== "ETH") {
+    const mark = markOf(s, under);
+    const bps = spreadBps(s);
+    const px = side === "long" ? mark * (1 + bps / 10_000) : mark * (1 - bps / 10_000);
+    const notional = sizeEth * px;
+    const margin = notional * FUT_IM;
+    const fee = notional * DERIV_FEE;
+    if (s.account.usdc < margin + fee) return "Insufficient USDC for initial margin + fee.";
+    const vault = { ...s.vault, reservedUsdc: s.vault.reservedUsdc + notional };
+    const pos = { id: uid("fut"), side, sizeEth, entry: px, expiry, margin, openedAt: s.clock, under };
+    const next: EngineState = {
+      ...s,
+      account: { ...s.account, usdc: s.account.usdc - margin - fee, realized: s.account.realized - fee },
+      vault,
+      futures: [...s.futures, pos],
+    };
+    return takeFee(
+      pushFill(next, {
+        id: uid("f"),
+        t: s.clock,
+        product: "future",
+        symbol: `${under} mini ${fmtExpiry(expiry)}`,
+        side,
+        size: sizeEth,
+        price: px,
+        fee,
+        note: "cash-settled · USDC IM",
+      }),
+      fee,
+    );
+  }
   const why = rejectFuture(s, side, sizeEth, expiry);
   if (why) return why;
   const bps = spreadBps(s);
@@ -824,8 +897,42 @@ export function closeFuture(s: EngineState, id: string): EngineState | string {
   );
 }
 
-export function buyOption(s: EngineState, type: OptType, strike: number, expiry: number, contracts: number): EngineState | string {
-  const sizeEth = contracts * MINI_ETH;
+export function buyOption(s: EngineState, type: OptType, strike: number, expiry: number, contracts: number, under = "ETH"): EngineState | string {
+  const sizeEth = contracts * miniQty(under);
+  if (under !== "ETH") {
+    const T = yearsTo(expiry, s.clock);
+    if (T <= 0) return "That expiry is done.";
+    const q = optionQuote(s, type, strike, expiry, under);
+    if (q.blank) return q.blank;
+    const px = q.ask;
+    const premium = px * sizeEth;
+    const fee = premium * DERIV_FEE;
+    if (s.account.usdc < premium + fee) return "Insufficient USDC for premium.";
+    const lock = type === "call" ? markOf(s, under) * sizeEth : strike * sizeEth;
+    if (s.vault.usdc - s.vault.reservedUsdc < lock) return "Not enough USDC to cash-secure.";
+    const vault = { ...s.vault, reservedUsdc: s.vault.reservedUsdc + lock };
+    const pos = { id: uid("opt"), type, strike, expiry, sizeEth, premium: px, openedAt: s.clock, under };
+    const next: EngineState = {
+      ...s,
+      account: { ...s.account, usdc: s.account.usdc - premium - fee, realized: s.account.realized - fee },
+      vault,
+      options: [...s.options, pos],
+    };
+    return takeFee(
+      pushFill(next, {
+        id: uid("f"),
+        t: s.clock,
+        product: "option",
+        symbol: `${under} ${strike} ${type} mini`,
+        side: "buy",
+        size: sizeEth,
+        price: px,
+        fee,
+        note: "cash-settled · cash-secured",
+      }),
+      fee,
+    );
+  }
   const g = bookGreeks(s);
   const why = rejectOption(s, type, strike, expiry, sizeEth, g.gamma, g.vega);
   if (why) return why;
@@ -880,8 +987,9 @@ export function buyOption(s: EngineState, type: OptType, strike: number, expiry:
 function settleAndLiq(s: EngineState): EngineState {
   let next = s;
   for (const p of s.futures) {
-    const eq = p.margin + futPnl(p, s.eth);
-    const maint = p.sizeEth * s.eth * FUT_MM;
+    const mark = markOf(next, p.under ?? "ETH");
+    const eq = p.margin + futPnl(p, mark);
+    const maint = p.sizeEth * mark * FUT_MM;
     if (eq < maint || s.clock >= p.expiry) {
       const closed = closeFuture(next, p.id);
       if (typeof closed !== "string") {
@@ -890,7 +998,7 @@ function settleAndLiq(s: EngineState): EngineState {
           liquidations: eq < maint ? next.liquidations + 1 : next.liquidations,
           insuranceUsdc:
             eq < maint
-              ? next.insuranceUsdc + Math.min(Math.max(eq, 0), 0.01 * p.sizeEth * s.eth)
+              ? next.insuranceUsdc + Math.min(Math.max(eq, 0), 0.01 * p.sizeEth * mark)
               : next.insuranceUsdc,
         };
       }
@@ -904,11 +1012,17 @@ function settleAndLiq(s: EngineState): EngineState {
       remaining.push(p);
       continue;
     }
-    const intrinsic = p.type === "call" ? Math.max(next.eth - p.strike, 0) : Math.max(p.strike - next.eth, 0);
+    const spot = markOf(next, p.under ?? "ETH");
+    const intrinsic = p.type === "call" ? Math.max(spot - p.strike, 0) : Math.max(p.strike - spot, 0);
     const payoff = intrinsic * p.sizeEth;
     acc = { ...acc, usdc: acc.usdc + payoff, realized: acc.realized + payoff - p.premium * p.sizeEth };
-    if (p.type === "call") vault.reservedEth = Math.max(0, vault.reservedEth - p.sizeEth);
-    else vault.reservedUsdc = Math.max(0, vault.reservedUsdc - p.strike * p.sizeEth);
+    if ((p.under ?? "ETH") === "ETH") {
+      if (p.type === "call") vault.reservedEth = Math.max(0, vault.reservedEth - p.sizeEth);
+      else vault.reservedUsdc = Math.max(0, vault.reservedUsdc - p.strike * p.sizeEth);
+    } else {
+      const lock = p.type === "call" ? spot * p.sizeEth : p.strike * p.sizeEth;
+      vault.reservedUsdc = Math.max(0, vault.reservedUsdc - lock);
+    }
   }
   return hedgeDelta({ ...next, options: remaining, vault, account: acc });
 }
@@ -1181,21 +1295,28 @@ export function fmtExpiry(at: number) {
 }
 
 export function strikes(spot: number) {
-  const step = spot > 3000 ? 100 : 50;
-  const atm = Math.round(spot / step) * step;
-  return [atm - 2 * step, atm - step, atm, atm + step, atm + 2 * step];
+  const g = strikeGrid(spot);
+  const mid = Math.floor(g.length / 2);
+  return g.slice(Math.max(0, mid - 2), mid + 3);
 }
 
-export function optionQuote(s: EngineState, type: OptType, strike: number, expiry: number) {
+export function optionQuote(s: EngineState, type: OptType, strike: number, expiry: number, under = "ETH") {
+  const spot = markOf(s, under);
   const T = yearsTo(expiry, s.clock);
-  const vol = smileVol(s, type, strike, T);
-  const mid = type === "call" ? bsCall(s.eth, strike, T, 0.03, vol) : bsPut(s.eth, strike, T, 0.03, vol);
-  const d = bsDelta(s.eth, strike, T, 0.03, vol, type);
+  const vol = smileVol(s, type, strike, T, spot);
+  const mid = type === "call" ? bsCall(spot, strike, T, 0.03, vol) : bsPut(spot, strike, T, 0.03, vol);
+  const d = bsDelta(spot, strike, T, 0.03, vol, type);
   const bps = spreadBps(s);
+  const tick = quoteTick(spot);
   const g = bookGreeks(s);
-  const why = rejectOption(s, type, strike, expiry, MINI_ETH, g.gamma, g.vega);
-  const ask = mid * (1 + bps / 10_000) + 0.4;
-  const bid = Math.max(0.05, mid * (1 - bps / 10_000) - 0.4);
+  const why =
+    under === "ETH"
+      ? rejectOption(s, type, strike, expiry, miniQty(under), g.gamma, g.vega)
+      : s.vault.usdc - s.vault.reservedUsdc < (type === "call" ? spot : strike) * miniQty(under)
+        ? "Not enough USDC to cash-secure."
+        : null;
+  const ask = mid * (1 + bps / 10_000) + tick;
+  const bid = Math.max(tick * 0.25, mid * (1 - bps / 10_000) - tick);
   return { T, mid, bid: why ? 0 : bid, ask: why ? 0 : ask, delta: d, iv: vol, blank: why };
 }
 

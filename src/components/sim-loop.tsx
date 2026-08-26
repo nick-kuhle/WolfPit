@@ -11,7 +11,6 @@ export function SimLoop() {
   const rehydrateTerms = useTerms((s) => s.rehydrate);
   const applyLive = useWolf((s) => s.applyLive);
   const setUniverse = useDesk((s) => s.setUniverse);
-  const setFocus = useDesk((s) => s.setFocus);
   useEffect(() => {
     rehydrate();
     rehydrateTerms();
@@ -33,12 +32,6 @@ export function SimLoop() {
           const wpit = wpitListing(wolf.wpit, ch24);
           const next = [wpit, ...raw.filter((r) => r.symbol !== "WPIT")];
           setUniverse(next);
-          const cur = useDesk.getState().focus;
-          if (cur.symbol === "WPIT") setFocus({ ...wpit });
-          else {
-            const same = next.find((r) => r.symbol === cur.symbol);
-            if (same && !cur.network) setFocus({ ...cur, ...same });
-          }
         })
         .catch(() => {
           if (dead) return;

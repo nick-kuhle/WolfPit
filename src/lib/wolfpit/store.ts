@@ -72,18 +72,17 @@ function gated(): string | null {
   return null;
 }
 
-function apply(result: EngineState | string, set: (p: Partial<WolfStore>) => void) {
+function apply(result: EngineState | string, set: (p: Partial<WolfStore>) => void, sent = false) {
   if (typeof result === "string") {
     ping(result, "down");
     set({ lastError: result });
     return;
   }
+  if (sent) ping("Order sent", "brass");
   const fill = result.fills[0];
   const prev = useWolf.getState().fills[0]?.id;
   if (fill && fill.id !== prev) {
-    ping(`${fill.side} ${fill.symbol} ${fill.size.toPrecision(4)} @ ${fill.price.toPrecision(6)}`, "up");
-  } else if ((result.working?.length ?? 0) > (useWolf.getState().working?.length ?? 0)) {
-    ping("Order working", "brass");
+    ping(`Order filled · ${fill.side} ${fill.symbol} ${fill.size.toPrecision(4)} @ ${fill.price.toPrecision(6)}`, "up");
   }
   set({ ...result, lastError: null });
 }
@@ -97,12 +96,17 @@ export const useWolf = create<WolfStore>()(
         void useWolf.persist.rehydrate();
       },
       step: (dtSec) => {
+        const prevFill = get().fills[0]?.id;
         let next = tick(get(), dtSec);
         if (next.compJoined && !next.compPaid && Date.now() >= PIT_OPEN.end) {
           const board = compBoard(Date.now(), { name: "You", equity: equity(next), joined: true });
           const you = board.find((r) => r.you);
           next = payCompPrize(next, you?.place ?? 99);
           if ((you?.place ?? 99) <= 3) ping(`Pit Open prize · ${you?.place}`, "brass");
+        }
+        if (next.fills[0]?.id && next.fills[0].id !== prevFill) {
+          const f = next.fills[0];
+          ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up");
         }
         set(next);
       },
@@ -154,7 +158,7 @@ export const useWolf = create<WolfStore>()(
         if (typeof r !== "string") ping(`Pool created · ${base}-${quote}`, "up");
       },
       issueToken: (sym, amt) => apply(issueTokenEngine(get(), sym, amt), set),
-      sendOrder: (o) => apply(placeDeskOrder(get(), o), set),
+      sendOrder: (o) => apply(placeDeskOrder(get(), o), set, true),
       cancelOrder: (id) => {
         ping("Order cancelled", "brass");
         set(cancelWorking(get(), id));

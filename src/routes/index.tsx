@@ -4,10 +4,10 @@ import { SiteFooter } from "@/components/site-footer";
 import { LiveTicker } from "@/components/ticker";
 import { Button } from "@/components/ui/button";
 import { PIT_OPEN, compBoard, compLive } from "@/lib/wolfpit/comp";
-import { equity } from "@/lib/wolfpit/engine";
+import { equity, farmApy } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
-import { fmtPx, fmtUsd } from "@/lib/utils";
+import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -49,46 +49,56 @@ function Home() {
           <span className="fly-ticket absolute left-[40%] top-2 rounded-sm bg-down px-3 py-1 font-mono text-[10px] text-fg" style={{ animationDelay: "1.4s" }}>
             FILL
           </span>
+          <span className="fly-ticket absolute right-[28%] bottom-6 rounded-sm bg-ticket px-3 py-1 font-mono text-[10px] text-bg" style={{ animationDelay: "1.8s" }}>
+            1M WPIT
+          </span>
         </div>
-        <div className="relative mx-auto grid max-w-5xl gap-6 px-4 py-8 sm:grid-cols-[minmax(0,1fr)_16rem] sm:py-10">
+        <div className="relative mx-auto grid max-w-5xl gap-6 px-4 py-8 sm:grid-cols-[minmax(0,1.2fr)_16rem] sm:py-12">
           <div>
-            <p className="font-mono text-[11px] uppercase tracking-[0.28em]">Trading competition</p>
-            <h2 className="mt-2 font-display text-4xl font-medium leading-none sm:text-5xl">{PIT_OPEN.name}</h2>
-            <p className="mt-3 max-w-lg text-sm leading-relaxed">
-              Everyone starts with <strong>${PIT_OPEN.entryUsdc.toLocaleString()}</strong> paper USDC. Last shout{" "}
-              <strong>{ends}</strong>. First place takes <strong>{PIT_OPEN.prize[0].wpit.toLocaleString()} WPIT</strong>.
-              Simulated. Loud. Free.
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-bg px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-brass">Free entry</span>
+              <span className="rounded-full bg-bg/15 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em]">Compete for prizes</span>
+              <span className="rounded-full bg-bg/15 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em]">Paper only</span>
+            </div>
+            <h2 className="mt-4 font-display text-4xl font-medium leading-[0.95] sm:text-6xl">
+              Pit Open.
+              <span className="italic"> Winner takes 1,000,000 WPIT.</span>
+            </h2>
+            <p className="mt-4 max-w-lg text-base leading-relaxed">
+              A trading competition. No deposit. Everyone starts with ${PIT_OPEN.entryUsdc.toLocaleString()} simulated
+              USDC. Last fill {ends}. 2nd gets 250,000 WPIT. 3rd gets 100,000. The flying tickets are the pit shouting.
             </p>
-            <div className="mt-5 flex flex-wrap gap-2">
+            <div className="mt-6 flex flex-wrap gap-2">
               {s.compJoined ? (
                 <Link to="/trade">
-                  <Button className="bg-bg text-brass hover:bg-bg">You're in · trade now</Button>
+                  <Button className="h-12 bg-bg px-6 text-brass hover:bg-bg">You're in · trade now</Button>
                 </Link>
               ) : (
                 <Button
-                  className="bg-bg text-brass hover:bg-bg"
+                  className="h-12 bg-bg px-6 text-brass hover:bg-bg"
                   onClick={() => {
                     join();
                     void nav({ to: "/trade" });
                   }}
                   disabled={!live}
                 >
-                  {live ? "Join · $100k paper" : "Doors closed"}
+                  {live ? "Enter free · $100k paper" : "Doors closed"}
                 </Button>
               )}
               <Link to="/trade">
-                <Button variant="outline" className="border-bg text-bg hover:bg-bg/10">
-                  Open the floor
+                <Button variant="outline" className="h-12 border-bg px-6 text-bg hover:bg-bg/10">
+                  Watch the board
                 </Button>
               </Link>
             </div>
             {you ? <p className="mt-3 font-mono text-xs">You're #{you.place} · {fmtUsd(you.equity)}</p> : null}
           </div>
           <ol className="space-y-2">
+            <li className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-80">Live board</li>
             {board.slice(0, 5).map((r) => (
               <li
                 key={r.name}
-                className={`ticket-card flex items-center justify-between rounded-md px-3 py-2 ${r.you ? "bg-bg text-brass" : "bg-bg/15"}`}
+                className={`flex items-center justify-between rounded-md px-3 py-2 ${r.you ? "bg-bg text-brass" : "bg-bg/15"}`}
               >
                 <span className="font-mono text-xs">
                   {r.place}. {r.name}
@@ -124,6 +134,22 @@ function Home() {
             </Link>
           </div>
           <p className="mt-4 text-xs text-subtle">Simulation. You will accept Terms before the desk or farms.</p>
+        </div>
+      </section>
+
+      <section className="border-b border-border bg-elevated">
+        <div className="mx-auto grid max-w-5xl gap-3 px-4 py-8 sm:grid-cols-3">
+          {[
+            { id: "ETH-USDC" as const, name: "ETH / USDC" },
+            { id: "WPIT-USDC-TEST" as const, name: "WPIT / USDC" },
+            { id: "WPIT-ETH-TEST" as const, name: "WPIT / ETH" },
+          ].map((p) => (
+            <Link key={p.id} to="/pools" className="rounded-[var(--radius-lg)] border border-brass/30 bg-panel p-4 hover:border-brass">
+              <div className="font-mono text-[10px] uppercase tracking-wider text-brass">Farm APY</div>
+              <div className="mt-1 font-display text-3xl text-up">{fmtPct(farmApy(s, p.id))}</div>
+              <div className="mt-1 text-sm text-muted">{p.name} pool</div>
+            </Link>
+          ))}
         </div>
       </section>
 

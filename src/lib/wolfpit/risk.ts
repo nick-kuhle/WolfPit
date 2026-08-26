@@ -93,8 +93,8 @@ export function projectedOptionVega(s: EngineState, type: OptType, strike: numbe
   return -bsVega(s.eth, strike, T, 0.03, vol) * 100 * sizeEth;
 }
 
-export function smileVol(s: EngineState, type: OptType, strike: number, T: number) {
-  let vol = ivSmile(s.iv, s.eth, strike, T);
+export function smileVol(s: EngineState, type: OptType, strike: number, T: number, spot = s.eth) {
+  let vol = ivSmile(s.iv, spot, strike, T);
   if (type === "call" && shortCallSize(s) > 0) vol += CALL_INV_VOL;
   return vol;
 }

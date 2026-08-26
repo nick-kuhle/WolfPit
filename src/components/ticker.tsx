@@ -29,10 +29,10 @@ export function LiveTicker() {
         to: "/asset/$symbol",
         params: { symbol: it.listing.symbol },
         search: {
-          name: it.listing.name,
-          chain: it.listing.chain ?? "",
-          contract: it.listing.contract ?? "",
-          network: it.listing.network ?? "",
+          name: it.listing.name || undefined,
+          chain: it.listing.chain || undefined,
+          contract: it.listing.contract || undefined,
+          network: it.listing.network || undefined,
         },
       });
       return;

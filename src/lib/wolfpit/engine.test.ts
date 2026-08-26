@@ -26,6 +26,9 @@ import {
   spreadBps,
   joinCompetition,
   payCompPrize,
+  optionQuote,
+  strikeGrid,
+  markOf,
 } from "./engine.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
 import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
@@ -358,5 +361,32 @@ describe("Pit Open", () => {
     assert.equal(s.account.wpit, 1_000_000);
     const again = payCompPrize(s, 1);
     assert.equal(again.account.wpit, 1_000_000);
+  });
+});
+
+describe("WPIT ladder", () => {
+  it("strikes hug WPIT not ETH", () => {
+    const s = initialState();
+    const ks = strikeGrid(s.wpit);
+    assert.ok(ks.length >= 3);
+    assert.ok(ks.every((k) => k < 50));
+    assert.ok(ks.some((k) => Math.abs(k - s.wpit) / s.wpit < 0.5));
+  });
+
+  it("WPIT call ask is a WPIT premium not an ETH premium", () => {
+    const s = initialState();
+    const k = strikeGrid(s.wpit)[4] ?? s.wpit;
+    const q = optionQuote(s, "call", k, exp, "WPIT");
+    assert.ok(!q.blank, String(q.blank));
+    assert.ok(q.ask > 0);
+    assert.ok(q.ask < s.wpit * 2);
+    const eth = optionQuote(s, "call", 4000, exp, "ETH");
+    assert.ok(eth.ask > 1);
+  });
+
+  it("markOf WPIT is not ETH", () => {
+    const s = initialState();
+    assert.notEqual(markOf(s, "WPIT"), markOf(s, "ETH"));
+    assert.equal(markOf(s, "WPIT"), s.wpit);
   });
 });

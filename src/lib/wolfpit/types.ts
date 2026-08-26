@@ -27,6 +27,7 @@ export type FuturePos = {
   expiry: number;
   margin: number;
   openedAt: number;
+  under?: string;
 };
 
 export type OptionPos = {
@@ -37,6 +38,7 @@ export type OptionPos = {
   sizeEth: number;
   premium: number;
   openedAt: number;
+  under?: string;
 };
 
 export type OrderFill = {
@@ -105,6 +107,7 @@ export type WorkingOrder = {
   expiry?: number;
   strike?: number;
   optType?: OptType;
+  under?: string;
   created: number;
 };
 

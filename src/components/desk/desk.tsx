@@ -39,10 +39,10 @@ export function Desk() {
       to: "/asset/$symbol",
       params: { symbol: l.symbol },
       search: {
-        name: l.name,
-        chain: l.chain ?? "",
-        contract: l.contract ?? "",
-        network: l.network ?? "",
+        name: l.name || undefined,
+        chain: l.chain || undefined,
+        contract: l.contract || undefined,
+        network: l.network || undefined,
       },
     });
   }

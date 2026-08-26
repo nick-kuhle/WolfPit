@@ -36,7 +36,7 @@ export function PitChart({
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
       const w = Math.max(1, parent.clientWidth);
-      const h = Math.max(height, parent.clientHeight || height);
+      const h = Math.max(1, height);
       canvas.width = Math.max(1, Math.floor(w * dpr));
       canvas.height = Math.max(1, Math.floor(h * dpr));
       canvas.style.width = `${w}px`;
