@@ -55,6 +55,7 @@ export type OrderFill = {
   note?: string;
   before?: CashShot;
   after?: CashShot;
+  fair?: { raceId: string; commit: string; seed?: string; winner?: number };
 };
 
 export type CashShot = {
@@ -138,6 +139,14 @@ export type GameBet = {
   payout: number;
 };
 
+export type FairRace = {
+  id: string;
+  kind: RaceKind;
+  commit: string;
+  seed: string;
+  winner: number;
+};
+
 export type GameMeet = {
   raceId: string;
   kind: RaceKind;
@@ -145,12 +154,15 @@ export type GameMeet = {
   winnerName: string;
   paid: number;
   at: number;
+  commit?: string;
+  seed?: string;
 };
 
 export type GamesState = {
   vaultWpit: number;
   bets: GameBet[];
   meets: GameMeet[];
+  races?: Record<string, FairRace>;
 };
 
 export type EngineState = {

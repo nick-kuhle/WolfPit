@@ -23,7 +23,7 @@ import {
   tradeSpot,
   unstakeWpit,
 } from "./engine";
-import { placeBet, settleGames } from "./games";
+import { placeBet, settleGames, ensureRaces } from "./games";
 import type { EngineState, FutSide, OptType, PoolId, RaceKind, WorkingOrder } from "./types";
 import { useAdmin } from "@/lib/admin/config";
 import { PIT_OPEN, compBoard } from "./comp";
@@ -65,6 +65,7 @@ type Actions = {
   listToken: (symbol: string, mark: number) => void;
   joinComp: () => void;
   placeRaceBet: (kind: RaceKind, runner: number, stake: number) => void;
+  seedRaces: () => void;
 };
 
 type WolfStore = EngineState & Actions;
@@ -219,6 +220,7 @@ export const useWolf = create<WolfStore>()(
         ping(`Ticket · ${b?.name ?? "runner"} @ ${b?.odds ?? "?"} · ${stake} WPIT`, "brass");
         set({ ...r, lastError: null });
       },
+      seedRaces: () => set(ensureRaces(get(), Date.now())),
       reset: () => {
         ping("Paper reset", "brass");
         set({ ...initialState(), lastError: null });

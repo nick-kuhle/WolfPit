@@ -157,6 +157,7 @@ function FillRow({
         </span>
         <span className="text-[10px] text-muted">
           {fmtQty(f.size)} @ {fmtPx(f.price)}
+          {f.fair ? ` · ${f.fair.seed ? `seed ${f.fair.seed.slice(0, 10)}` : `commit ${f.fair.commit.slice(0, 10)}`}` : ""}
         </span>
       </span>
       <span className="text-right tabular-nums text-muted">{b == null ? "—" : fmtQty(b)}</span>

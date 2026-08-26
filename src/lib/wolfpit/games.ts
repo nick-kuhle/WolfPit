@@ -1,6 +1,7 @@
 import { uid } from "./math";
 import { requireFinitePositive } from "./limits";
-import type { EngineState } from "./types";
+import { randomHex, sha256Hex } from "./sha256";
+import type { EngineState, FairRace } from "./types";
 import type { GameBet, GameMeet, GamesState, RaceKind } from "./types";
 
 export const RACE_MS = 60_000;
@@ -42,7 +43,9 @@ const BARNS = [
   "Ticket Yard", "Open Outcry", "Red Board",
 ];
 
-const SILKS = ["#f0c14b", "#3dcc7a", "#ef5a4e", "#e6e2d6", "#6ea8fe", "#c084fc", "#fb923c", "#22d3ee"];
+const SILKS = ["#2563eb", "#dc2626", "#e6e2d6", "#d4a017", "#22c55e", "#7c3aed", "#f97316", "#22d3ee"];
+export const COATS = ["blue", "red", "zebra", "leopard", "rainbow", "gold", "green", "purple"] as const;
+export type Coat = (typeof COATS)[number];
 
 const FRACS: [number, string][] = [
   [1.1, "1/10"], [1.2, "1/5"], [1.25, "1/4"], [1.33, "1/3"], [1.4, "2/5"], [1.5, "1/2"],
@@ -61,8 +64,7 @@ export type Runner = {
   form: number;
   trainer: string;
   barn: string;
-  portrait: string;
-  sprite: string;
+  coat: Coat;
 };
 
 export type RaceCard = {
@@ -76,6 +78,8 @@ export type RaceCard = {
   places: number[];
   winner: number;
   status: "open" | "running" | "official";
+  commit?: string;
+  seed?: string;
 };
 
 function rng(seed: number) {
@@ -106,7 +110,7 @@ export function fracOdds(dec: number) {
 }
 
 export function emptyGames(): GamesState {
-  return { vaultWpit: GAMES_VAULT_SEED, bets: [], meets: [] };
+  return { vaultWpit: GAMES_VAULT_SEED, bets: [], meets: [], races: {} };
 }
 
 export function slotStart(now: number, kind: RaceKind) {
@@ -130,7 +134,6 @@ export function makeCard(kind: RaceKind, now = Date.now()): RaceCard {
   const runners: Runner[] = form.map((f, i) => {
     const p = f / sum;
     const odds = Math.min(50, Math.max(1.2, Math.round((1 / (p * over)) * 20) / 20));
-    const art = i % (kind === "horse" ? 4 : 3) + 1;
     return {
       no: i + 1,
       name: pool[i]!,
@@ -139,45 +142,94 @@ export function makeCard(kind: RaceKind, now = Date.now()): RaceCard {
       form: f,
       trainer: TRAINERS[Math.floor(r() * TRAINERS.length)]!,
       barn: BARNS[Math.floor(r() * BARNS.length)]!,
-      portrait: `/brand/races/port-${kind === "horse" ? "horse" : "dog"}-${art}.jpg`,
-      sprite: `/brand/races/sprite-${kind === "horse" ? "horse" : "dog"}-${art}.jpg`,
+      coat: COATS[i]!,
     };
   });
-  const places = runners
-    .map((x) => x.no)
-    .sort((a, b) => {
-      const fa = runners[a - 1]!.form + r() * 0.22;
-      const fb = runners[b - 1]!.form + r() * 0.22;
-      return fb - fa;
-    });
   const postAt = start + POST_AT;
   const settleAt = postAt + RUN_MS;
   const nextAt = start + RACE_MS;
   let status: RaceCard["status"] = "open";
   if (now >= settleAt) status = "official";
   else if (now >= postAt) status = "running";
-  return { id, kind, start, postAt, settleAt, nextAt, runners, places, winner: places[0]!, status };
+  const nos = runners.map((x) => x.no);
+  return { id, kind, start, postAt, settleAt, nextAt, runners, places: nos, winner: nos[0]!, status };
+}
+
+export function placesFromSeed(seed: string, raceId: string, n: number) {
+  const winner = winnerFromSeed(seed, raceId, n);
+  const rest: number[] = [];
+  for (let i = 1; i <= n; i++) if (i !== winner) rest.push(i);
+  const r = rng(parseInt(sha256Hex(`${seed}:${raceId}:order`).slice(0, 8), 16) >>> 0);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [rest[i], rest[j]] = [rest[j]!, rest[i]!];
+  }
+  return { winner, places: [winner, ...rest] };
+}
+
+export function winnerFromSeed(seed: string, raceId: string, n: number) {
+  const x = parseInt(sha256Hex(`${seed}:${raceId}:winner`).slice(0, 8), 16);
+  return (x % n) + 1;
+}
+
+export function applyFair(card: RaceCard, fair?: FairRace | null): RaceCard {
+  if (!fair) return card;
+  const { winner, places } = placesFromSeed(fair.seed, card.id, card.runners.length);
+  return { ...card, winner, places, commit: fair.commit, seed: fair.seed };
+}
+
+export function makeFair(kind: RaceKind, id: string, n: number): FairRace {
+  const seed = randomHex(32);
+  const commit = sha256Hex(seed);
+  return { id, kind, seed, commit, winner: winnerFromSeed(seed, id, n) };
+}
+
+export function verifyFair(fair: { seed: string; commit: string; winner: number; id: string }, n: number) {
+  if (sha256Hex(fair.seed) !== fair.commit) return false;
+  return winnerFromSeed(fair.seed, fair.id, n) === fair.winner;
+}
+
+export function ensureRace(s: EngineState, kind: RaceKind, now = Date.now()): EngineState {
+  const card = makeCard(kind, now);
+  const games = s.games ?? emptyGames();
+  const races = { ...(games.races ?? {}) };
+  if (races[card.id]) return s.games ? s : { ...s, games };
+  races[card.id] = makeFair(kind, card.id, card.runners.length);
+  return { ...s, games: { ...games, races } };
+}
+
+export function ensureRaces(s: EngineState, now = Date.now()): EngineState {
+  return ensureRace(ensureRace(s, "horse", now), "dog", now);
+}
+
+export function cardFor(kind: RaceKind, now: number, games?: GamesState | null): RaceCard {
+  const card = makeCard(kind, now);
+  return applyFair(card, games?.races?.[card.id]);
 }
 
 export function fieldAt(card: RaceCard, now: number) {
   const t = Math.min(1, Math.max(0, (now - card.postAt) / RUN_MS));
-  const ease = t * t * (3 - 2 * t);
   return card.runners.map((r) => {
-    const place = card.places.indexOf(r.no);
-    const finish = 1 - place * (card.kind === "horse" ? 0.035 : 0.045);
-    const chaos = t > 0 && t < 1 ? 1 : 0;
-    const wobble =
-      0.28 * Math.sin(t * 31 + r.no * 2.4) * chaos +
-      0.16 * Math.sin(t * 53 + r.form * 9) * chaos +
-      0.1 * Math.sin(now / 90 + r.no) * chaos;
-    const x = Math.min(0.98, Math.max(0, ease * finish + wobble * t * (1 - t) * 4));
+    const place = Math.max(0, card.places.indexOf(r.no));
+    const x = raceX(t, place, r.no, hash(card.id + (card.seed ?? "")));
     return { ...r, x, place };
   });
 }
 
-export function flashOdds(odds: number, now: number, no: number) {
-  const wob = Math.sin(now / 140 + no * 1.7) * 0.22 + Math.sin(now / 70 + no * 3) * 0.1;
-  return Math.min(50, Math.max(1.15, Math.round(odds * (1 + wob) * 20) / 20));
+/** Strictly increasing in t. Show vol via passing; never reverse. Winner last-second sprint. */
+export function raceX(t: number, place: number, no: number, seed: number) {
+  const tt = Math.min(1, Math.max(0, t));
+  const finish = 0.9 - place * 0.03;
+  const r = ((seed >>> ((no % 8) * 3)) & 255) / 255;
+  const fast = 0.55 + r * 0.28;
+  const slow = 2.2 + r * 0.9;
+  const w = place === 0 ? 0.08 + r * 0.06 : 0.72 + r * 0.2;
+  const e = w * Math.pow(tt, fast) + (1 - w) * Math.pow(tt, slow);
+  return finish * e;
+}
+
+export function shortHash(hex: string, n = 10) {
+  return hex.slice(0, n);
 }
 
 export function liability(odds: number, stake: number) {
@@ -195,7 +247,8 @@ export function placeBet(
   if (bad) return bad;
   if (stake < MIN_BET) return `Minimum ticket is ${MIN_BET} WPIT.`;
   if (stake > MAX_BET) return `House limit ${MAX_BET} WPIT a ticket.`;
-  const card = makeCard(kind, now);
+  s = ensureRace(s, kind, now);
+  const card = cardFor(kind, now, s.games);
   if (card.status !== "open") return "Betting closed. Gates are up.";
   const run = card.runners.find((x) => x.no === runner);
   if (!run) return "No such runner.";
@@ -220,6 +273,7 @@ export function placeBet(
   };
   const before = { usdc: s.account.usdc, eth: s.account.eth, wpit: s.account.wpit };
   const after = { ...before, wpit: before.wpit - stake };
+  const commit = card.commit ?? games.races?.[card.id]?.commit ?? "";
   return {
     ...s,
     account: { ...s.account, wpit: after.wpit },
@@ -238,9 +292,10 @@ export function placeBet(
         size: stake,
         price: run.odds,
         fee: 0,
-        note: `${fracOdds(run.odds)} · ${card.id}`,
+        note: `${fracOdds(run.odds)} · ${card.id} · commit ${shortHash(commit)}`,
         before,
         after,
+        fair: { raceId: card.id, commit },
       },
       ...s.fills,
     ].slice(0, 80),
@@ -264,12 +319,14 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
     if (!card) {
       const start = Number(b.raceId.split("-")[1]);
       const probe = Number.isFinite(start) ? start + POST_AT + RUN_MS + 1 : now;
-      card = makeCard(b.kind, probe);
+      card = applyFair(makeCard(b.kind, probe), games.races?.[b.raceId]);
       cards.set(b.raceId, card);
     }
     if (now < card.settleAt) return b;
     changed = true;
     const win = b.runner === card.winner;
+    const fair = games.races?.[card.id];
+    const proof = fair ? { raceId: card.id, commit: fair.commit, seed: fair.seed, winner: fair.winner } : undefined;
     if (!win) {
       const before = { usdc: s.account.usdc, eth: s.account.eth, wpit };
       fills.unshift({
@@ -281,9 +338,10 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
         size: b.stake,
         price: b.odds,
         fee: 0,
-        note: `Official ${card.id}`,
+        note: `Official ${card.id} · seed ${shortHash(fair?.seed ?? "")}`,
         before,
         after: before,
+        fair: proof,
       });
       return { ...b, status: "lost" as const, payout: 0 };
     }
@@ -302,9 +360,10 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
       size: pay,
       price: b.odds,
       fee: 0,
-      note: `Official ${card.id} · ${fracOdds(b.odds)}`,
+      note: `Official ${card.id} · ${fracOdds(b.odds)} · seed ${shortHash(fair?.seed ?? "")}`,
       before,
       after: { ...before, wpit },
+      fair: proof,
     });
     if (!meets.some((m) => m.raceId === card!.id)) {
       meets.unshift({
@@ -314,6 +373,8 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
         winnerName: card.runners.find((x) => x.no === card!.winner)?.name ?? "",
         paid: pay,
         at: card.settleAt,
+        commit: fair?.commit,
+        seed: fair?.seed,
       });
     }
     return { ...b, status: "won" as const, payout: pay };
@@ -322,7 +383,7 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
   return {
     ...s,
     account: { ...s.account, wpit, realized },
-    games: { vaultWpit: Math.max(0, vault), bets, meets: meets.slice(0, 24) },
+    games: { ...games, vaultWpit: Math.max(0, vault), bets, meets: meets.slice(0, 24) },
     fills: fills.slice(0, 80),
   };
 }

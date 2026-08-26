@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { EntryBoard, OddsTape, RaceTrack } from "@/components/desk/race-track";
+import { EntryBoard, FairProof, OddsTape, RaceTrack } from "@/components/desk/race-track";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { YieldNav } from "@/components/yield-nav";
 import { Button } from "@/components/ui/button";
-import { MIN_BET, flashOdds, fracOdds, makeCard, openTickets, type RaceCard } from "@/lib/wolfpit/games";
+import { MIN_BET, cardFor, fracOdds, openTickets, type RaceCard } from "@/lib/wolfpit/games";
 import { useWolf } from "@/lib/wolfpit/store";
 import { cn, fmtQty } from "@/lib/utils";
 
@@ -15,14 +15,19 @@ const STAKES = [50, 100, 250, 500, 1000];
 
 function GamesPage() {
   const [now, setNow] = useState(() => Date.now());
+  const games = useWolf((s) => s.games);
+  const seedRaces = useWolf((s) => s.seedRaces);
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 120);
     return () => window.clearInterval(t);
   }, []);
   const sec = Math.floor(now / 1000);
-  const horse = useMemo(() => makeCard("horse", now), [sec]);
-  const dog = useMemo(() => makeCard("dog", now), [sec]);
-  const vault = useWolf((s) => s.games?.vaultWpit ?? 0);
+  useEffect(() => {
+    seedRaces();
+  }, [sec, seedRaces]);
+  const horse = useMemo(() => cardFor("horse", now, games), [now, games]);
+  const dog = useMemo(() => cardFor("dog", now, games), [now, games]);
+  const vault = games?.vaultWpit ?? 0;
 
   return (
     <Shell>
@@ -35,7 +40,7 @@ function GamesPage() {
               A card a minute. <span className="italic">Prizes in WPIT.</span>
             </h1>
             <p className="mt-2 max-w-md text-sm text-bg/85">
-              Entry, then they break. Vault holds {fmtQty(vault)} WPIT in prizes. Tickets confirm. Odds thrash. The wire is already written.
+              Entry, then they break. Vault {fmtQty(vault)} WPIT. Odds are the book. The dash is only for show. Winner is hashed before the gates.
             </p>
             <YieldNav on="track" />
           </div>
@@ -62,7 +67,6 @@ function Meet({ card, now }: { card: RaceCard; now: number }) {
   const wpit = s.account.wpit;
   const vault = s.games?.vaultWpit ?? 0;
   const blocked = !runner || card.status !== "open" || n < MIN_BET || n > wpit + 1e-9;
-  const live = runner ? flashOdds(runner.odds, now, runner.no) : 0;
 
   useEffect(() => {
     setPick(null);
@@ -86,18 +90,19 @@ function Meet({ card, now }: { card: RaceCard; now: number }) {
         </div>
         <Clock card={card} now={now} left={left} />
       </div>
-      <OddsTape card={card} now={now} />
+      <OddsTape card={card} />
       <div className="mt-2">
-        {card.status === "open" ? <EntryBoard card={card} now={now} picked={pick} onPick={setPick} /> : <RaceTrack card={card} now={now} />}
+        {card.status === "open" ? <EntryBoard card={card} picked={pick} onPick={setPick} /> : <RaceTrack card={card} now={now} />}
       </div>
       {card.status === "running" ? (
-        <p className="mt-2 font-mono text-[11px] uppercase tracking-wider text-down">Vol ripping · order on the field is a lie until the wire</p>
+        <p className="mt-2 font-mono text-[11px] uppercase tracking-wider text-muted">Show vol · nobody runs backward · the wire is already hashed</p>
       ) : null}
       {card.status === "official" ? (
         <p className="mt-3 rounded-md bg-brass/15 px-3 py-2 font-display text-lg text-brass">
           Prize to #{card.winner} {card.runners.find((r) => r.no === card.winner)?.name} · {fracOdds(card.runners.find((r) => r.no === card.winner)?.odds ?? 0)}
         </p>
       ) : null}
+      <FairProof card={card} />
       <div className="mt-3 flex flex-wrap gap-1">
         {STAKES.map((x) => (
           <button
@@ -112,11 +117,7 @@ function Meet({ card, now }: { card: RaceCard; now: number }) {
             {x} WPIT
           </button>
         ))}
-        <input
-          className="h-9 w-24 rounded-full border border-border bg-elevated px-3 font-mono text-[11px]"
-          value={stake}
-          onChange={(e) => setStake(e.target.value)}
-        />
+        <input className="h-9 w-24 rounded-full border border-border bg-elevated px-3 font-mono text-[11px]" value={stake} onChange={(e) => setStake(e.target.value)} />
       </div>
       <div className="mt-2 flex items-center justify-between text-[11px] text-muted">
         <span>Wallet {fmtQty(wpit)} WPIT</span>
@@ -127,31 +128,25 @@ function Meet({ card, now }: { card: RaceCard; now: number }) {
       </Button>
       {review && runner ? (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-bg/80 p-3 pb-[calc(3.6rem+env(safe-area-inset-bottom))] sm:items-center">
-          <div className="sheet-in w-full max-w-md overflow-hidden rounded-[1.1rem] border border-brass/40 bg-panel">
-            <img src={runner.portrait} alt="" className="h-36 w-full object-cover" />
-            <div className="p-4">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-brass">Confirm ticket</p>
-              <h3 className="mt-1 font-display text-2xl">
-                {n} WPIT · {runner.name}
-              </h3>
-              <p className="text-sm text-muted">
-                {runner.trainer} · {runner.barn}
-              </p>
-              <dl className="mt-3 space-y-1 font-mono text-[12px]">
-                <Row k="Locked odds" v={`${fracOdds(runner.odds)}  (${runner.odds.toFixed(2)})`} />
-                <Row k="Board was" v={`${fracOdds(live)} live`} />
-                <Row k="Stake" v={`${fmtQty(n)} WPIT`} />
-                <Row k="Prize if it hits" v={`${fmtQty(n * runner.odds)} WPIT`} />
-                <Row k="WPIT after entry" v={fmtQty(wpit - n)} />
-              </dl>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <Button variant="outline" className="h-12" onClick={() => setReview(false)}>
-                  Edit
-                </Button>
-                <Button className="h-12 bg-brass text-bg" onClick={send}>
-                  Confirm bet
-                </Button>
-              </div>
+          <div className="sheet-in w-full max-w-md overflow-hidden rounded-[1.1rem] border border-brass/40 bg-panel p-4">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-brass">Confirm ticket</p>
+            <h3 className="mt-1 font-display text-2xl">
+              {n} WPIT · {runner.name}
+            </h3>
+            <dl className="mt-3 space-y-1 font-mono text-[12px]">
+              <Row k="Odds" v={`${fracOdds(runner.odds)}  (${runner.odds.toFixed(2)})`} />
+              <Row k="Stake" v={`${fmtQty(n)} WPIT`} />
+              <Row k="Prize if it hits" v={`${fmtQty(n * runner.odds)} WPIT`} />
+              <Row k="WPIT after entry" v={fmtQty(wpit - n)} />
+              <Row k="Commit" v={card.commit ? card.commit.slice(0, 16) : "sealing"} />
+            </dl>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="outline" className="h-12" onClick={() => setReview(false)}>
+                Edit
+              </Button>
+              <Button className="h-12 bg-brass text-bg" onClick={send}>
+                Confirm bet
+              </Button>
             </div>
           </div>
         </div>

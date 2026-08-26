@@ -197,8 +197,27 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
             winnerName: String(m.winnerName ?? "").slice(0, 32),
             paid: nn(m.paid),
             at: nn(m.at),
+            commit: typeof m.commit === "string" ? m.commit : undefined,
+            seed: typeof m.seed === "string" ? m.seed : undefined,
           }))
         : [],
+      races: sanitizeRaces(raw.games?.races),
     },
   };
+}
+
+function sanitizeRaces(raw: unknown): Record<string, { id: string; kind: "horse" | "dog"; commit: string; seed: string; winner: number }> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, { id: string; kind: "horse" | "dog"; commit: string; seed: string; winner: number }> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, { id?: string; kind?: string; commit?: string; seed?: string; winner?: number }>)) {
+    if (!v || typeof v.seed !== "string" || typeof v.commit !== "string") continue;
+    out[k] = {
+      id: String(v.id ?? k),
+      kind: v.kind === "dog" ? "dog" : "horse",
+      commit: v.commit.slice(0, 64),
+      seed: v.seed.slice(0, 64),
+      winner: Math.max(1, Math.round(Number(v.winner) || 1)),
+    };
+  }
+  return out;
 }

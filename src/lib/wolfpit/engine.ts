@@ -61,7 +61,7 @@ import {
   requireMoney,
 } from "./limits";
 import { ETH_MAX, ETH_MIN, ORACLE_JUMP } from "./sanitize";
-import { emptyGames, refundOpenBets, settleGames } from "./games";
+import { emptyGames, ensureRaces, refundOpenBets, settleGames } from "./games";
 
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -224,7 +224,7 @@ export function tick(s: EngineState, dtSec: number): EngineState {
       wpit: next.account.wpit + (s.stake.amount * STAKE_APR * dt) / (365.25 * 24 * 3600),
     };
   }
-  return matchWorking(pushEquity(arbToSpot(hedgeDelta(settleAndLiq(maybeCircuit(settleGames(next)))))));
+  return matchWorking(pushEquity(arbToSpot(hedgeDelta(settleAndLiq(maybeCircuit(settleGames(ensureRaces(next))))))));
 }
 
 export function applyLive(

@@ -4,15 +4,24 @@ import { initialState } from "./engine.ts";
 import {
   GAMES_VAULT_SEED,
   OVERROUND_HORSE,
+  RUN_MS,
+  cardFor,
+  ensureRace,
   fieldAt,
   fracOdds,
   makeCard,
   placeBet,
   settleGames,
   slotStart,
+  verifyFair,
 } from "./games.ts";
+import { sha256Hex } from "./sha256.ts";
 
 describe("pit racetrack", () => {
+  it("sha256 matches a known vector", () => {
+    assert.equal(sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  });
+
   it("posts a horse card with 8 runners and a loaded book", () => {
     const card = makeCard("horse", slotStart(1_704_000_000_000, "horse") + 1_000);
     assert.equal(card.runners.length, 8);
@@ -34,6 +43,16 @@ describe("pit racetrack", () => {
     assert.equal(Math.abs(h.start - d.start), 30_000);
   });
 
+  it("seals a commit and reveals a matching seed", () => {
+    const start = slotStart(2_000_000_000_000, "horse");
+    const now = start + 1_000;
+    const s = ensureRace(initialState(), "horse", now);
+    const fair = s.games?.races?.[cardFor("horse", now, s.games).id];
+    assert.ok(fair);
+    assert.equal(fair!.commit, sha256Hex(fair!.seed));
+    assert.ok(verifyFair({ ...fair! }, 8));
+  });
+
   it("takes a ticket from WPIT into the games vault", () => {
     const start = slotStart(2_000_000_000_000, "horse");
     const now = start + 1_000;
@@ -49,6 +68,7 @@ describe("pit racetrack", () => {
     assert.equal(r.games?.bets[0]?.stake, 100);
     assert.equal(r.fills[0]?.before?.wpit, 1_000);
     assert.equal(r.fills[0]?.after?.wpit, 900);
+    assert.ok(r.fills[0]?.fair?.commit);
   });
 
   it("rejects a bet after post", () => {
@@ -63,12 +83,13 @@ describe("pit racetrack", () => {
   it("pays a winner from the vault and keeps a loser", () => {
     const start = slotStart(2_200_000_000_000, "horse");
     const now = start + 1_000;
-    const card = makeCard("horse", now);
+    let s0 = initialState();
+    s0.account.wpit = 5_000;
+    s0 = ensureRace(s0, "horse", now);
+    const card = cardFor("horse", now, s0.games);
     const winner = card.winner;
     const loser = card.runners.find((r) => r.no !== winner)!.no;
     const winOdds = card.runners.find((r) => r.no === winner)!.odds;
-    const s0 = initialState();
-    s0.account.wpit = 5_000;
     const a = placeBet(s0, "horse", winner, 100, now);
     assert.equal(typeof a, "object");
     if (typeof a === "string") throw new Error(a);
@@ -86,11 +107,23 @@ describe("pit racetrack", () => {
     const vault = done.games!.vaultWpit;
     assert.ok(vault < GAMES_VAULT_SEED + 200);
     assert.ok(vault > 0);
+    assert.ok(done.fills[0]?.fair?.seed);
   });
 
-  it("keeps the winner in front at the wire", () => {
+  it("never moves a runner backward and winner is first at the wire", () => {
     const start = slotStart(2_300_000_000_000, "dog");
-    const card = makeCard("dog", start + 1_000);
+    const now = start + 1_000;
+    const s = ensureRace(initialState(), "dog", now);
+    const card = cardFor("dog", now, s.games);
+    let prev = fieldAt(card, card.postAt);
+    for (let k = 1; k <= 40; k++) {
+      const t = card.postAt + (k / 40) * RUN_MS;
+      const cur = fieldAt(card, t);
+      for (let i = 0; i < cur.length; i++) {
+        assert.ok(cur[i]!.x + 1e-9 >= prev[i]!.x, `runner ${cur[i]!.no} reversed`);
+      }
+      prev = cur;
+    }
     const field = fieldAt(card, card.settleAt);
     const first = field.reduce((a, b) => (a.x >= b.x ? a : b));
     assert.equal(first.no, card.winner);
