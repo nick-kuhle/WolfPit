@@ -171,7 +171,7 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
       <div className="sheet-in max-h-[min(88dvh,42rem)] w-full max-w-md overflow-auto rounded-[1.1rem] border border-brass/40 bg-panel p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">
-            <RunnerGfx kind={card.kind} coat={runner.coat} no={runner.no} size={36} gait="idle" />
+            <RunnerGfx kind={card.kind} coat={runner.coat} silk={runner.silk} no={runner.no} size={36} gait="idle" />
             <div>
               <p className="font-mono text-[10px] uppercase tracking-wider text-brass">Ticket</p>
               <h3 className="font-display text-2xl leading-tight">{runner.name}</h3>

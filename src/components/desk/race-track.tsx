@@ -6,43 +6,40 @@ export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number;
   const field = fieldAt(card, now);
   const t = Math.min(1, Math.max(0, (now - card.postAt) / Math.max(1, card.settleAt - card.postAt)));
   const live = [...field].sort((a, b) => b.x - a.x);
-  const pack = live.reduce((a, r) => a + r.x, 0) / Math.max(live.length, 1);
-  const cam = card.status === "open" ? 0 : card.status === "official" ? 1 : pack;
   const bg = card.kind === "horse" ? "/brand/races/track-horse.jpg" : "/brand/races/track-dog.jpg";
   const gait = card.status === "running" ? "run" : card.status === "open" ? "idle" : "off";
   const sprite = compact ? 26 : 32;
-  const startPct = (0 - cam) * 90 + 8;
-  const finishPct = (1 - cam) * 90 + 8;
+  const start = 6;
+  const finish = 88;
+  const scroll = card.status === "open" ? 0 : card.status === "official" ? 14 : t * 14;
 
   return (
     <div className="min-w-0">
       <div
         className={cn(
           "relative overflow-hidden rounded-[var(--radius-lg)] border border-[#5a4030]",
-          compact ? "h-40 sm:h-48" : "h-44 sm:h-60",
+          compact ? "h-44 sm:h-52" : "h-48 sm:h-64",
         )}
       >
         <div className="track-world absolute inset-0">
-          <div className="track-loop" style={{ transform: `translateX(${-cam * 50}%)` }}>
+          <div className="track-loop" style={{ transform: `translateX(${-scroll}%)` }}>
             <img src={bg} alt="" />
             <img src={bg} alt="" />
           </div>
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-bg/75 via-bg/10 to-transparent" />
-        <Pole pct={startPct} label="Start" className="bg-[repeating-linear-gradient(180deg,#f4f0e6_0_8px,#1a1a1a_8px_16px)]" />
-        <Pole pct={finishPct} label="Finish" className="bg-[repeating-linear-gradient(45deg,#0b0c0b_0_6px,#f0c14b_6px_12px)]" />
-        <div className="absolute inset-x-1 bottom-1 top-6 sm:inset-x-2">
+        <Pole pct={start} label="Start" className="bg-[repeating-linear-gradient(180deg,#f4f0e6_0_8px,#1a1a1a_8px_16px)]" />
+        <Pole pct={finish} label="Finish" className="bg-[repeating-linear-gradient(45deg,#0b0c0b_0_6px,#f0c14b_6px_12px)]" />
+        <div className="absolute inset-x-0 bottom-1 top-6">
           {live.map((r, i) => {
             const place = i + 1;
-            const rel = (r.x - cam) * 0.9 + 0.1;
+            const x = card.status === "open" ? 0 : r.x;
+            const left = start + x * (finish - start);
             return (
-              <div key={r.no} className="absolute left-0 right-0" style={{ top: `${(i / Math.max(live.length - 1, 1)) * 74}%` }}>
-                <div
-                  className="absolute top-0 flex items-center gap-1"
-                  style={{ left: `calc(${Math.min(0.92, Math.max(-0.08, rel)) * 100}% - ${Math.min(0.92, Math.max(0, rel)) * sprite * 1.5}px)` }}
-                >
+              <div key={r.no} className="absolute left-0 right-0" style={{ top: `${(i / Math.max(live.length - 1, 1)) * 76}%` }}>
+                <div className="absolute top-0 flex items-center gap-1" style={{ left: `calc(${left}% - ${sprite * 0.35}px)` }}>
                   <PlaceMark place={place} />
-                  <RunnerGfx kind={card.kind} coat={r.coat} no={r.no} size={sprite} gait={gait} />
+                  <RunnerGfx kind={card.kind} coat={r.coat} silk={r.silk} no={r.no} size={sprite} gait={gait} />
                 </div>
               </div>
             );
@@ -156,7 +153,7 @@ function EntryCard({
         win && "border-up bg-up/10",
       )}
     >
-      <RunnerGfx kind={kind} coat={r.coat} no={r.no} size={28} gait="idle" />
+      <RunnerGfx kind={kind} coat={r.coat} silk={r.silk} no={r.no} size={28} gait="idle" />
       <div className="min-w-0 flex-1">
         <div className="truncate font-display text-sm leading-tight">{r.name}</div>
         <div className="flex items-baseline justify-between gap-2 font-mono text-[10px]">

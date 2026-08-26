@@ -12,16 +12,19 @@ export function RunnerGfx({
   no,
   size = 36,
   gait = "off",
+  silk,
 }: {
   kind: "horse" | "dog";
   coat: Coat;
   no: number;
   size?: number;
   gait?: "run" | "idle" | "off";
+  silk?: string;
 }) {
   const w = Math.round(size * 1.7);
+  const fill = coatBg(coat, silk);
   const mask = {
-    background: coatBg(coat),
+    background: fill,
     WebkitMaskImage: `url(${SRC[kind]})`,
     WebkitMaskRepeat: "no-repeat",
     WebkitMaskPosition: "center",
@@ -45,21 +48,31 @@ export function RunnerGfx({
       ) : (
         <div className={cn("absolute inset-0", gait === "idle" && "runner-idle")} style={mask} />
       )}
-      <span className="absolute left-1/2 top-[38%] grid size-[1.15em] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-bg font-mono text-[0.55em] font-bold leading-none text-brass ring-1 ring-brass">
+      <span
+        className="absolute left-1/2 top-[38%] grid size-[1.15em] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full font-mono text-[0.55em] font-bold leading-none text-bg ring-1 ring-bg/70"
+        style={{ background: silk || namedCoat(coat) }}
+      >
         {no}
       </span>
     </div>
   );
 }
 
-function coatBg(coat: Coat) {
-  if (coat === "zebra") return "repeating-linear-gradient(105deg,#f4f0e6 0 5px,#1a1a1a 5px 9px)";
-  if (coat === "leopard")
-    return "radial-gradient(circle at 20% 30%,#5a3a12 0 3px,transparent 4px),radial-gradient(circle at 70% 60%,#5a3a12 0 2.5px,transparent 3.5px),#d4a017";
-  if (coat === "rainbow") return "linear-gradient(90deg,#ef4444,#f59e0b,#eab308,#22c55e,#3b82f6,#a855f7)";
+function namedCoat(coat: Coat) {
+  if (coat === "zebra") return "#e6e2d6";
+  if (coat === "leopard") return "#d4a017";
   if (coat === "blue") return "#2563eb";
   if (coat === "red") return "#dc2626";
-  if (coat === "gold") return "#e3b341";
-  if (coat === "green") return "#16a34a";
+  if (coat === "green") return "#22c55e";
+  if (coat === "orange") return "#f97316";
+  if (coat === "cyan") return "#22d3ee";
   return "#7c3aed";
+}
+
+function coatBg(coat: Coat, silk?: string) {
+  const base = silk || namedCoat(coat);
+  if (coat === "zebra") return `repeating-linear-gradient(105deg,${base} 0 5px,#1a1a1a 5px 9px)`;
+  if (coat === "leopard")
+    return `radial-gradient(circle at 20% 30%,#5a3a12 0 3px,transparent 4px),radial-gradient(circle at 70% 60%,#5a3a12 0 2.5px,transparent 3.5px),${base}`;
+  return base;
 }

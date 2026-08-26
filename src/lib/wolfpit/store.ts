@@ -30,6 +30,26 @@ import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
 import { sanitizeState } from "./sanitize";
 
+function announceSettled(prev: EngineState, next: EngineState) {
+  const prevFill = prev.fills[0]?.id;
+  const fresh: typeof next.fills = [];
+  for (const f of next.fills) {
+    if (f.id === prevFill) break;
+    fresh.push(f);
+  }
+  for (const f of fresh.slice(0, 8)) {
+    if (f.side === "win") {
+      const profit = typeof f.pnl === "number" ? f.pnl : f.size;
+      ping(`Won +${profit.toFixed(2)} WPIT · ${f.symbol}`, "up", true);
+    } else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down");
+  }
+  const prevMeet = prev.games?.meets[0]?.raceId;
+  const meet = next.games?.meets[0];
+  if (meet?.raceId && meet.raceId !== prevMeet) {
+    ping(`Official · ${meet.kind} ${meet.winnerName} (${meet.winner})`, "brass");
+  }
+}
+
 type Actions = {
   lastError: string | null;
   rehydrate: () => void;
@@ -101,8 +121,6 @@ export const useWolf = create<WolfStore>()(
       },
       step: (dtSec) => {
         set((s) => {
-          const prevFill = s.fills[0]?.id;
-          const prevMeets = s.games?.meets[0]?.raceId;
           let next = tick(s, dtSec);
           next = settleGames(next, Date.now());
           if (next.compJoined && !next.compPaid && Date.now() >= PIT_OPEN.end) {
@@ -111,21 +129,12 @@ export const useWolf = create<WolfStore>()(
             next = payCompPrize(next, you?.place ?? 99);
             if ((you?.place ?? 99) <= 3) ping(`Pit Open prize · ${you?.place}`, "brass");
           }
-          const fresh = [];
+          announceSettled(s, next);
+          const prevFill = s.fills[0]?.id;
           for (const f of next.fills) {
             if (f.id === prevFill) break;
-            fresh.push(f);
-          }
-          for (const f of fresh.slice(0, 8)) {
-            if (f.side === "win") {
-              const profit = typeof f.pnl === "number" ? f.pnl : f.size;
-              ping(`Won +${profit.toFixed(2)} WPIT · ${f.symbol}`, "up", true);
-            } else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down");
-            else ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up", true);
-          }
-          if (next.games?.meets[0]?.raceId && next.games.meets[0].raceId !== prevMeets) {
-            const m = next.games.meets[0];
-            ping(`Official · ${m.kind} ${m.winnerName} (${m.winner})`, "brass");
+            if (f.side === "win" || f.side === "lose" || f.side === "bet") continue;
+            ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up", true);
           }
           return next;
         });
@@ -187,7 +196,11 @@ export const useWolf = create<WolfStore>()(
         });
       },
       applyLive: (feed) =>
-        set((s) => settleGames(applyLiveFeed(s, feed), Date.now())),
+        set((s) => {
+          const next = settleGames(applyLiveFeed(s, feed), Date.now());
+          announceSettled(s, next);
+          return next;
+        }),
       createPool: (base, quote, baseAmt, quoteAmt) => {
         const r = createPoolEngine(get(), base, quote, baseAmt, quoteAmt);
         apply(r, set);
@@ -232,7 +245,12 @@ export const useWolf = create<WolfStore>()(
           return { ...r, lastError: null };
         });
       },
-      seedRaces: () => set((s) => settleGames(ensureRaces(s, Date.now()), Date.now())),
+      seedRaces: () =>
+        set((s) => {
+          const next = settleGames(ensureRaces(s, Date.now()), Date.now());
+          announceSettled(s, next);
+          return next;
+        }),
       reset: () => {
         ping("Paper reset", "brass");
         set({ ...initialState(), lastError: null });

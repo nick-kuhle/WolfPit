@@ -44,7 +44,7 @@ const BARNS = [
 ];
 
 const SILKS = ["#2563eb", "#dc2626", "#e6e2d6", "#d4a017", "#22c55e", "#7c3aed", "#f97316", "#22d3ee"];
-export const COATS = ["blue", "red", "zebra", "leopard", "rainbow", "gold", "green", "purple"] as const;
+export const COATS = ["blue", "red", "zebra", "leopard", "green", "purple", "orange", "cyan"] as const;
 export type Coat = (typeof COATS)[number];
 
 const FRACS: [number, string][] = [
