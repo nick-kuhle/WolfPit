@@ -163,7 +163,11 @@ export const useWolf = create<WolfStore>()(
         ping("Order cancelled", "brass");
         set(cancelWorking(get(), id));
       },
-      listToken: (symbol, mark) => set(ensureListed(get(), symbol, mark)),
+      listToken: (symbol, mark) =>
+        set((s) => {
+          const next = ensureListed(s, symbol, mark);
+          return next === s ? s : next;
+        }),
       joinComp: () => {
         ping("You're in the Pit Open. $100k paper. Go shout.", "brass");
         set({ ...joinCompEngine(get()), lastError: null });

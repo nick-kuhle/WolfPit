@@ -317,6 +317,25 @@ export const getSymbolCandles = createServerFn({ method: "GET" })
     return [];
   });
 
+const candleJobs = new Map<string, Promise<Candle[]>>();
+
+export function loadSymbolCandles(d: {
+  symbol: string;
+  interval?: ChartInterval;
+  binance?: string;
+  geckoId?: string;
+  network?: string;
+  poolAddress?: string;
+}): Promise<Candle[]> {
+  const interval = d.interval ?? "1m";
+  const key = `${d.symbol}:${interval}:${d.binance ?? ""}:${d.geckoId ?? ""}:${d.network ?? ""}:${d.poolAddress ?? ""}`;
+  const hit = candleJobs.get(key);
+  if (hit) return hit;
+  const job = getSymbolCandles({ data: { ...d, interval } }).catch(() => [] as Candle[]);
+  candleJobs.set(key, job);
+  return job;
+}
+
 async function geckoMarkets(): Promise<Listing[]> {
   try {
     const res = await fetch(

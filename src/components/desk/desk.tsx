@@ -1,7 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AccountBar } from "@/components/desk/account-bar";
 import { ChartPane } from "@/components/desk/chart";
+import { OrderTicket } from "@/components/desk/order-ticket";
 import { Watchlist } from "@/components/desk/watchlist";
 import { Button } from "@/components/ui/button";
 import { useDesk, type Listing } from "@/lib/wolfpit/desk";
@@ -14,34 +15,85 @@ import {
   futPnl,
   liqHealth,
   lpValue,
+  markOf,
+  optionQuote,
+  resampleCandles,
   tokenPx,
   usedMargin,
 } from "@/lib/wolfpit/engine";
+import { loadSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
+import type { Candle } from "@/lib/wolfpit/types";
 import { STAKE_APR } from "@/lib/wolfpit/types";
 import { cn, fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
-export function Desk() {
+type Tab = "list" | "trade" | "pos";
+
+export function Desk({ seed }: { seed?: string }) {
   const nav = useNavigate();
   const s = useWolf();
+  const focus = useDesk((d) => d.focus);
+  const universe = useDesk((d) => d.universe);
+  const [tab, setTab] = useState<Tab>(seed ? "trade" : "list");
   const [wide, setWide] = useState(false);
+  const [prefer, setPrefer] = useState<"buy" | "sell" | null>(null);
+  const [interval, setIv] = useState<ChartInterval>("1h");
+  const [bars, setBars] = useState<Candle[]>([]);
+  const [status, setStatus] = useState<"load" | "ok" | "empty">("load");
+
+  useEffect(() => {
+    if (!seed) return;
+    const sym = seed.toUpperCase();
+    const hit = useDesk.getState().universe.find((u) => u.symbol === sym);
+    useDesk.getState().setFocus(
+      hit ?? { symbol: sym, name: sym, price: 0, change24: 0, volume24: 0 },
+    );
+    setTab("trade");
+  }, [seed]);
+
+  useEffect(() => {
+    const listing = useDesk.getState().focus;
+    if (listing.symbol === "WPIT") {
+      const rows = resampleCandles(useWolf.getState().wpitCandles, 3_600_000);
+      setBars(rows);
+      setStatus(rows.length >= 2 ? "ok" : "empty");
+      return;
+    }
+    let dead = false;
+    setStatus("load");
+    void loadSymbolCandles({
+      symbol: listing.symbol,
+      interval,
+      binance: listing.binance,
+      geckoId: listing.geckoId,
+      network: listing.network,
+      poolAddress: listing.poolAddress,
+    }).then((rows) => {
+      if (dead) return;
+      setBars(rows);
+      setStatus(rows.length >= 2 ? "ok" : "empty");
+    });
+    return () => {
+      dead = true;
+    };
+  }, [focus.symbol, focus.binance, focus.geckoId, focus.network, focus.poolAddress, interval]);
+
+  function pick(l: Listing) {
+    useDesk.getState().setFocus(l);
+    useWolf.getState().listToken(l.symbol, l.price || 1);
+    setPrefer(null);
+    setTab("trade");
+  }
+
   const eq = equity(s);
   const day = dayPnl(s);
   const health = liqHealth(s);
   const used = usedMargin(s);
-  const farmUsd = s.farmWpit * s.wpit;
-  const stakeUsd = s.stake.amount * s.wpit;
-  const tape = (s.equityTape ?? []).length >= 2 ? s.equityTape : [{ t: s.clock, o: eq, h: eq, l: eq, c: eq, v: 1 }];
-  const universe = useDesk((d) => d.universe);
-
-  function openAsset(l: Listing) {
-    useDesk.getState().setFocus(l);
-    useWolf.getState().listToken(l.symbol, l.price || 1);
-    void nav({
-      to: "/asset/$symbol",
-      params: { symbol: l.symbol },
-    });
-  }
+  const under = focus.symbol === "USDC" ? "ETH" : focus.symbol.toUpperCase();
+  const spot = markOf(s, under) || focus.price || 0;
+  const bid = under === "ETH" ? s.ethBid || spot : spot * 0.9992;
+  const ask = under === "ETH" ? s.ethAsk || spot : spot * 1.0008;
+  const chg = focus.change24;
 
   const holdings: { sym: string; qty: number; px: number }[] = [
     { sym: "USDC", qty: s.account.usdc, px: 1 },
@@ -56,151 +108,180 @@ export function Desk() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <AccountBar />
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_17rem]">
-          <section className="ticket-card overflow-hidden rounded-[var(--radius-xl)] border border-brass/40 bg-panel">
-            <div className="flex items-end justify-between px-4 pt-3">
-              <div>
-                <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-brass">Book · live</p>
-                <h1 className="font-display text-3xl font-medium">{fmtUsd(eq)}</h1>
-              </div>
-              <div className={`font-mono text-sm ${day >= 0 ? "text-up" : "text-down"}`}>
-                day {day >= 0 ? "+" : "−"}
-                {fmtUsd(Math.abs(day))}
-              </div>
-            </div>
-            <div className="px-3 pb-2 pt-3">
-              <ChartPane
-                candles={tape}
-                interval="1h"
-                expanded={wide}
-                onToggle={() => setWide((v) => !v)}
-                compact={128}
-              />
-            </div>
-          </section>
+      <div className="flex border-b border-border lg:hidden">
+        {(["list", "trade", "pos"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={cn(
+              "pressable h-11 flex-1 text-[11px] uppercase tracking-wider",
+              tab === t ? "border-b border-brass text-brass" : "text-muted",
+            )}
+          >
+            {t === "list" ? "Watchlist" : t === "trade" ? "Trade" : "Positions"}
+          </button>
+        ))}
+      </div>
 
-          <aside className="grid grid-cols-2 gap-2 lg:grid-cols-1">
-            <StatTile k="Cash" v={fmtUsd(s.account.usdc)} tone="ticket" />
-            <StatTile k="Margin" v={fmtUsd(used)} sub={`${fmtUsd(s.account.usdc)} free`} />
-            <StatTile k="Liq health" v={health.label} tone={health.tone} sub={`${health.score.toFixed(2)}× maint`} />
-            <StatTile k="Day P/L" v={`${day >= 0 ? "+" : "−"}${fmtUsd(Math.abs(day))}`} tone={day >= 0 ? "up" : "down"} />
-            <StatTile k="Farm ripe" v={`${s.farmWpit.toFixed(1)} WPIT`} sub={fmtUsd(farmUsd)} />
-            <StatTile k="Staked" v={`${s.stake.amount.toFixed(0)} WPIT`} sub={`${(STAKE_APR * 100).toFixed(0)}% · ${fmtUsd(stakeUsd)}`} />
-          </aside>
-        </div>
-
-        <section className="px-3 pb-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-display text-xl">Holdings</h2>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-subtle">tap a ticket</span>
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[16.5rem_minmax(0,1fr)_16.5rem]">
+        <aside className={cn("min-h-0 overflow-hidden border-r border-border", tab === "list" ? "block" : "hidden lg:block")}>
+          <div className="border-b border-border px-3 py-2">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-subtle">Account</p>
+            <p className="font-display text-2xl leading-none">{fmtUsd(eq)}</p>
+            <p className={cn("mt-1 font-mono text-[11px]", day >= 0 ? "text-up" : "text-down")}>
+              Day {day >= 0 ? "+" : "−"}
+              {fmtUsd(Math.abs(day))}
+            </p>
+            <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-muted">
+              <dt>Cash</dt>
+              <dd className="text-right text-fg">{fmtUsd(s.account.usdc)}</dd>
+              <dt>Margin used</dt>
+              <dd className="text-right text-fg">{fmtUsd(used)}</dd>
+              <dt>Liq health</dt>
+              <dd className={cn("text-right", health.tone === "up" ? "text-up" : health.tone === "down" ? "text-down" : "text-warn")}>
+                {health.label}
+              </dd>
+            </dl>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {holdings.map((h) => (
+          <div className="h-[calc(100%-7.5rem)] min-h-0">
+            <Watchlist onPick={pick} />
+          </div>
+        </aside>
+
+        <section className={cn("min-h-0 overflow-auto", tab === "trade" ? "block" : "hidden lg:block")}>
+          <div className="border-b border-border px-3 py-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h1 className="font-display text-2xl font-medium leading-none">{under}</h1>
+                <p className="text-[11px] text-muted">{focus.name}</p>
+              </div>
+              <div className="text-right">
+                <div className={cn("font-mono text-xl tabular-nums", chg >= 0 ? "text-up" : "text-down")}>
+                  {spot ? fmtPx(spot) : "—"}
+                </div>
+                <div className={cn("font-mono text-[11px]", chg >= 0 ? "text-up" : "text-down")}>{fmtPct(chg)}</div>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
               <button
-                key={h.sym}
-                onClick={() =>
-                  openAsset({
-                    symbol: h.sym,
-                    name: h.sym,
-                    price: h.px,
-                    change24: 0,
-                    volume24: 0,
-                    chain: h.sym === "WPIT" ? "Base" : "",
-                  })
-                }
-                className="pressable ticket-card rounded-[var(--radius-lg)] border border-border bg-elevated p-3 text-left hover:border-brass"
+                type="button"
+                className="pressable rounded-[var(--radius-sm)] bg-down px-3 py-2 text-left text-fg"
+                onClick={() => {
+                  setPrefer("sell");
+                  setTab("trade");
+                }}
               >
-                <div className="font-mono text-[11px] text-brass">{h.sym}</div>
-                <div className="mt-1 font-display text-2xl leading-none">{h.qty >= 1000 ? h.qty.toFixed(0) : h.qty.toPrecision(4)}</div>
-                <div className="mt-1 font-mono text-xs text-muted">{fmtUsd(h.qty * h.px)}</div>
+                <div className="text-[10px] uppercase tracking-wider">Sell</div>
+                <div className="font-mono text-lg leading-none">{spot ? fmtPx(bid) : "—"}</div>
               </button>
-            ))}
+              <button
+                type="button"
+                className="pressable rounded-[var(--radius-sm)] bg-up px-3 py-2 text-left text-bg"
+                onClick={() => {
+                  setPrefer("buy");
+                  setTab("trade");
+                }}
+              >
+                <div className="text-[10px] uppercase tracking-wider">Buy</div>
+                <div className="font-mono text-lg leading-none">{spot ? fmtPx(ask) : "—"}</div>
+              </button>
+            </div>
+            <dl className="mt-2 grid grid-cols-3 gap-2 font-mono text-[10px] text-muted">
+              <div>
+                Vol <span className="text-fg">{fmtUsd(focus.volume24)}</span>
+              </div>
+              <div>
+                Bid <span className="text-down">{spot ? fmtPx(bid) : "—"}</span>
+              </div>
+              <div>
+                Ask <span className="text-up">{spot ? fmtPx(ask) : "—"}</span>
+              </div>
+            </dl>
+          </div>
+          <div className="px-3 py-2">
+            <ChartPane
+              candles={bars}
+              interval={interval}
+              status={status}
+              onInterval={setIv}
+              expanded={wide}
+              onToggle={() => setWide((v) => !v)}
+              compact={120}
+            />
+          </div>
+          <div className={wide ? "h-[28rem]" : "h-[min(38rem,calc(100dvh-22rem))]"}>
+            <OrderTicket prefer={prefer} under={under} />
           </div>
         </section>
 
-        {s.futures.length > 0 ? (
-          <section className="px-3 pb-3">
-            <h2 className="mb-2 font-display text-xl">Minis</h2>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {s.futures.map((p) => {
-                const pnl = futPnl(p, s.eth);
-                return (
-                  <div key={p.id} className="ticket-card rounded-[var(--radius-lg)] border border-border bg-panel p-3">
-                    <div className="flex justify-between">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase ${p.side === "long" ? "bg-up text-bg" : "bg-down text-fg"}`}>
-                        {p.side}
-                      </span>
-                      <span className={`font-mono text-sm ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</span>
-                    </div>
-                    <div className="mt-2 font-display text-lg">{p.sizeEth} ETH</div>
-                    <div className="font-mono text-[11px] text-muted">
-                      {fmtPx(p.entry)} → {fmtPx(s.eth)} · liq {fmtPx(futLiqPrice(p))}
-                    </div>
-                    <div className="font-mono text-[10px] text-subtle">{fmtExpiry(p.expiry)}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
-
-        {s.lp.length > 0 ? (
-          <section className="px-3 pb-3">
-            <h2 className="mb-2 font-display text-xl">Farms</h2>
-            <div className="flex flex-wrap gap-2">
-              {s.lp.map((p) => (
-                <div key={p.poolId} className="rounded-full border border-brass/40 bg-elevated px-4 py-2">
-                  <span className="font-mono text-xs">{p.poolId.replace("-TEST", "")}</span>
-                  <span className="ml-2 text-brass">{fmtUsd(lpValue(s, p.poolId, p.shares))}</span>
-                  <span className="ml-2 text-[10px] text-muted">{fmtPct(farmApy(s, p.poolId))}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="border-t border-border">
-          <div className="flex items-center justify-between px-3 py-2">
-            <h2 className="font-display text-xl">Watchlist</h2>
-            <Button size="sm" variant="outline" onClick={() => void nav({ to: "/orders" })}>
+        <aside className={cn("min-h-0 overflow-auto border-l border-border", tab === "pos" ? "block" : "hidden lg:block")}>
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <h2 className="font-display text-lg">Positions</h2>
+            <Button size="sm" variant="ghost" onClick={() => void nav({ to: "/orders" })}>
               Fills
             </Button>
           </div>
-          <div className="h-[min(50vh,28rem)]">
-            <Watchlist onPick={openAsset} />
+          <div className="divide-y divide-border">
+            {holdings.map((h) => (
+              <button
+                key={h.sym}
+                type="button"
+                onClick={() => pick({ symbol: h.sym, name: h.sym, price: h.px, change24: 0, volume24: 0 })}
+                className="pressable flex w-full items-center justify-between px-3 py-2 text-left hover:bg-elevated"
+              >
+                <div>
+                  <div className="font-mono text-xs">{h.sym}</div>
+                  <div className="font-mono text-[10px] text-muted">{h.qty >= 100 ? h.qty.toFixed(2) : h.qty.toPrecision(4)}</div>
+                </div>
+                <div className="text-right font-mono text-xs">{fmtUsd(h.qty * h.px)}</div>
+              </button>
+            ))}
+            {s.futures.map((p) => {
+              const mark = markOf(s, p.under ?? "ETH");
+              const pnl = futPnl(p, mark);
+              return (
+                <div key={p.id} className="px-3 py-2">
+                  <div className="flex justify-between">
+                    <span className={cn("text-[10px] uppercase", p.side === "long" ? "text-up" : "text-down")}>
+                      {p.side} mini {p.under ?? "ETH"}
+                    </span>
+                    <span className={cn("font-mono text-xs", pnl >= 0 ? "text-up" : "text-down")}>{fmtUsd(pnl)}</span>
+                  </div>
+                  <div className="font-mono text-[10px] text-muted">
+                    {p.sizeEth} · liq {fmtPx(futLiqPrice(p))} · {fmtExpiry(p.expiry)}
+                  </div>
+                </div>
+              );
+            })}
+            {s.options.map((p) => {
+              const q = optionQuote(s, p.type, p.strike, p.expiry, p.under ?? "ETH");
+              const mid = ((q.bid || 0) + (q.ask || 0)) / 2;
+              const pnl = (mid - p.premium) * p.sizeEth;
+              return (
+                <div key={p.id} className="px-3 py-2">
+                  <div className="flex justify-between">
+                    <span className="font-mono text-[11px]">
+                      {p.type} {fmtPx(p.strike)}
+                    </span>
+                    <span className={cn("font-mono text-xs", pnl >= 0 ? "text-up" : "text-down")}>{fmtUsd(pnl)}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {s.lp.map((p) => (
+              <div key={p.poolId} className="px-3 py-2 font-mono text-[11px]">
+                {p.poolId.replace("-TEST", "")}{" "}
+                <span className="text-brass">{fmtUsd(lpValue(s, p.poolId, p.shares))}</span>
+                <span className="ml-1 text-muted">{fmtPct(farmApy(s, p.poolId))}</span>
+              </div>
+            ))}
+            <div className="px-3 py-2 font-mono text-[11px] text-muted">
+              Stake {s.stake.amount.toFixed(0)} WPIT · {(STAKE_APR * 100).toFixed(0)}%
+            </div>
           </div>
-        </section>
+        </aside>
       </div>
-    </div>
-  );
-}
-
-function StatTile({
-  k,
-  v,
-  sub,
-  tone,
-}: {
-  k: string;
-  v: string;
-  sub?: string;
-  tone?: "up" | "down" | "warn" | "ticket";
-}) {
-  return (
-    <div
-      className={cn(
-        "ticket-card rounded-[var(--radius-lg)] border p-3",
-        tone === "up" && "border-up/50 bg-up/10",
-        tone === "down" && "border-down/50 bg-down/10",
-        tone === "warn" && "border-warn/50 bg-warn/10",
-        tone === "ticket" && "border-brass bg-brass/15",
-        !tone && "border-border bg-elevated",
-      )}
-    >
-      <div className="font-mono text-[10px] uppercase tracking-wider text-subtle">{k}</div>
-      <div className="mt-1 font-display text-xl leading-tight">{v}</div>
-      {sub ? <div className="mt-1 font-mono text-[10px] text-muted">{sub}</div> : null}
     </div>
   );
 }

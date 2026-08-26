@@ -15,7 +15,6 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   const setChainTape = useDesk((s) => s.setChainTape);
   const focus = useDesk((s) => s.focus);
   const openCard = useDesk((s) => s.openCard);
-  const cardOpen = useDesk((s) => s.cardOpen);
   const [tab, setTab] = useState<Tab>("hot");
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Listing[]>([]);
@@ -134,12 +133,7 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
           ))}
         </div>
       ) : null}
-      <div
-        className={cn(
-          "min-h-0 flex-1 overflow-auto",
-          cardOpen && "max-lg:pb-[min(72dvh,28rem)] landscape:max-lg:pb-0 landscape:max-lg:pr-[min(28rem,50vw)] lg:pr-[min(440px,42vw)]",
-        )}
-      >
+      <div className="min-h-0 flex-1 overflow-auto">
         {chainBusy && tab === "chains" && !q.trim() ? <p className="p-3 text-xs text-muted">Loading {chainId}…</p> : null}
         {!busy && rows.length === 0 ? <p className="p-3 text-xs text-muted">{q.trim() ? "No matches." : "No names on this tape."}</p> : null}
         {rows.map((r) => (
@@ -148,7 +142,7 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
             onClick={() => pick(r)}
             className={cn(
               "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left transition-colors duration-150 hover:bg-elevated",
-              focus.symbol === r.symbol && cardOpen && "bg-elevated",
+              focus.symbol === r.symbol && "bg-elevated",
             )}
           >
             <div className="min-w-0">

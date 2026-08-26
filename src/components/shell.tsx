@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { WolfMark } from "@/components/mark";
 import { cn } from "@/lib/utils";
 import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
-import { useDesk } from "@/lib/wolfpit/desk";
 
 const NAV = [
   { to: "/trade" as const, label: "Floor" },
@@ -37,7 +36,6 @@ export function ChainChip() {
 
 export function Shell({ children, desk }: { children: ReactNode; desk?: boolean }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const focus = useDesk((s) => s.focus.symbol);
   return (
     <div className="flex min-h-dvh flex-col bg-bg text-fg">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:gap-3 sm:px-4">
@@ -59,9 +57,8 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
             </Link>
           ))}
           <Link
-            to="/asset/$symbol"
-            params={{ symbol: focus || "ETH" }}
-            className={cn("pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg", pathname.startsWith("/asset") && "text-brass")}
+            to="/trade"
+            className={cn("pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg", pathname === "/trade" && "text-brass")}
           >
             Ticket
           </Link>
@@ -86,11 +83,10 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
             </Link>
           ))}
           <Link
-            to="/asset/$symbol"
-            params={{ symbol: focus || "ETH" }}
+            to="/trade"
             className={cn(
               "pressable flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
-              pathname.startsWith("/asset") ? "text-brass" : "text-muted",
+              pathname === "/trade" ? "text-brass" : "text-muted",
             )}
           >
             Ticket

@@ -10,7 +10,6 @@ type TapeItem =
 
 export function LiveTicker() {
   const universe = useDesk((s) => s.universe);
-  const openCard = useDesk((s) => s.openCard);
   const s = useWolf();
   const nav = useNavigate();
   const coins = universe.slice(0, 16);
@@ -24,11 +23,9 @@ export function LiveTicker() {
 
   function go(it: TapeItem) {
     if (it.kind === "asset") {
-      openCard(it.listing);
-      void nav({
-        to: "/asset/$symbol",
-        params: { symbol: it.listing.symbol },
-      });
+      useDesk.getState().setFocus(it.listing);
+      useWolf.getState().listToken(it.listing.symbol, it.listing.price || 1);
+      void nav({ to: "/trade" });
       return;
     }
     void nav({ to: it.to });

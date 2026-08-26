@@ -17,7 +17,6 @@ import { useWolf } from "@/lib/wolfpit/store";
 import type { DeskSide, OrderKind, OptType, PoolId, Product, Tif } from "@/lib/wolfpit/types";
 import { FUT_IM, FUT_MM } from "@/lib/wolfpit/types";
 import { useAdmin } from "@/lib/admin/config";
-import { useDesk } from "@/lib/wolfpit/desk";
 import { cn, fmtPx, fmtUsd } from "@/lib/utils";
 
 const KINDS: { id: OrderKind; label: string }[] = [
@@ -58,11 +57,6 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
   useEffect(() => {
     const id = under === "ETH" ? "ETH-USDC" : under === "WPIT" ? "WPIT-USDC-TEST" : `${under}-USDC`;
     setPoolId(id);
-    const st = useWolf.getState();
-    if (!st.pools[id]) {
-      const px = markOf(st, under) || useDesk.getState().focus.price || 1;
-      useWolf.getState().listToken(under, px);
-    }
   }, [under]);
 
   const clock = s.clock;
@@ -90,8 +84,6 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
   const maxN = under === "ETH" ? maxMiniContracts(s, futSide) : Math.floor(bp / Math.max(miniQty(under) * spot * FUT_IM, 1e-9));
   const q = product === "option" ? optionQuote(s, optType, k, exp.at, under) : null;
   const futWhy = product === "future" && under === "ETH" ? rejectFuture(s, futSide, size, exp.at) : null;
-  const bid = under === "ETH" ? s.ethBid || spot : spot * (1 - 8 / 10_000);
-  const ask = under === "ETH" ? s.ethAsk || spot : spot * (1 + 8 / 10_000);
 
   const est = (() => {
     if (product === "spot") {
@@ -143,16 +135,6 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-wider text-brass">{under} · live</div>
-          <div className="font-display text-2xl leading-none">{fmtPx(spot)}</div>
-        </div>
-        <div className="text-right font-mono text-[11px] text-muted">
-          {fmtPx(bid)} / {fmtPx(ask)}
-        </div>
-      </div>
-
       <div className="flex border-b border-border">
         {products.map((p) => (
           <button
