@@ -28,3 +28,18 @@ export function fmtPct(n: number) {
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
   return `${sign}${(Math.abs(n) * 100).toFixed(2)}%`;
 }
+
+/** Qty without scientific notation. signed=true prefixes + / −. */
+export function fmtQty(n: number, signed = false) {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  const sign = signed ? (n > 0 ? "+" : n < 0 ? "−" : "") : n < 0 ? "−" : "";
+  if (abs === 0) return signed ? "0" : "0.00";
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(abs >= 10_000_000 ? 1 : 2)}M`;
+  if (abs >= 1_000) return `${sign}${abs.toLocaleString("en-US", { maximumFractionDigits: abs >= 10_000 ? 0 : 2 })}`;
+  if (abs >= 1) return `${sign}${abs.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  if (abs >= 0.01) return `${sign}${abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  if (abs >= 0.0001) return `${sign}${abs.toLocaleString("en-US", { maximumFractionDigits: 6 })}`;
+  return `${sign}${abs.toExponential(1)}`;
+}
+
