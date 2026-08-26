@@ -25,7 +25,15 @@ const KINDS: { id: OrderKind; label: string }[] = [
   { id: "stp", label: "STP" },
 ];
 
-export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "sell" | null; under?: string }) {
+export function OrderTicket({
+  prefer,
+  under: underProp,
+  want,
+}: {
+  prefer?: "buy" | "sell" | null;
+  under?: string;
+  want?: "spot" | "future" | "option" | null;
+}) {
   const clear = useWolf((s) => s.clearError);
   const err = useWolf((s) => s.lastError);
   const geo = useAdmin((s) => s.geoFenceUs);
@@ -55,8 +63,17 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
   }, [prefer]);
 
   useEffect(() => {
+    if (want) {
+      setProduct(want);
+      setSheet(want !== "option");
+    }
+  }, [want]);
+
+  useEffect(() => {
     const id = under === "ETH" ? "ETH-USDC" : under === "WPIT" ? "WPIT-USDC-TEST" : `${under}-USDC`;
     setPoolId(id);
+    setQty("1");
+    setSheet(false);
   }, [under]);
 
   const clock = s.clock;
@@ -64,7 +81,7 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
   const exp = exps[exi]!;
   const grid = useMemo(() => strikeGrid(spot), [spot]);
   const k = strike || grid[Math.floor(grid.length / 2)] || spot;
-  const n = Number(qty) || 0;
+  const n = Math.max(0, Math.min(Number(qty) || 0, 500));
   const products: Product[] = geo ? ["spot"] : ["spot", "future", "option"];
   const futSide = side === "buy" ? "long" : "short";
   const size = n * miniQty(under);
@@ -154,16 +171,16 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-3 pb-4">
-        {product === "option" ? (
+      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+        {product === "option" && !sheet ? (
           <>
-            <div className="mt-3 flex gap-1 overflow-x-auto">
+            <div className="mt-2 flex gap-1 overflow-x-auto">
               {exps.map((e, i) => (
                 <button
                   key={e.at}
                   onClick={() => setExi(i)}
                   className={cn(
-                    "pressable h-10 shrink-0 rounded-full border px-3 font-mono text-[11px]",
+                    "pressable h-9 shrink-0 rounded-full border px-3 font-mono text-[11px]",
                     i === exi ? "border-brass bg-brass text-bg" : "border-border text-muted",
                   )}
                 >
@@ -171,14 +188,14 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
                 </button>
               ))}
             </div>
-            <p className="mt-1 font-mono text-[10px] text-subtle">{exp.when} · click ask to buy, bid to sell</p>
+            <p className="mt-1 font-mono text-[10px] text-subtle">{exp.when} · tap ask to buy · tap bid to sell</p>
             <div className="mt-2 overflow-hidden rounded-[var(--radius-md)] border border-border">
-              <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr] bg-elevated px-2 py-1.5 font-mono text-[9px] uppercase tracking-wider text-subtle">
-                <span>C bid</span>
-                <span>C ask</span>
+              <div className="grid grid-cols-[1fr_1fr_auto_1fr_1fr] bg-elevated px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-subtle">
+                <span>Call bid</span>
+                <span>Call ask</span>
                 <span className="text-center">Strike</span>
-                <span className="text-right">P bid</span>
-                <span className="text-right">P ask</span>
+                <span className="text-right">Put bid</span>
+                <span className="text-right">Put ask</span>
               </div>
               {grid.map((ks) => {
                 const c = optionQuote(s, "call", ks, exp.at, under);
@@ -191,7 +208,7 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
                   >
                     <LadderCell value={c.bid} tone="down" disabled={!c.bid} onClick={() => pickLadder("call", "bid", ks)} />
                     <LadderCell value={c.ask} tone="up" disabled={!c.ask} onClick={() => pickLadder("call", "ask", ks)} />
-                    <div className="min-w-[4.5rem] text-center font-mono text-xs text-fg">{fmtPx(ks)}</div>
+                    <div className="min-w-[4.2rem] text-center font-mono text-xs text-fg">{fmtPx(ks)}</div>
                     <LadderCell value={p.bid} tone="down" disabled={!p.bid} onClick={() => pickLadder("put", "bid", ks)} align="right" />
                     <LadderCell value={p.ask} tone="up" disabled={!p.ask} onClick={() => pickLadder("put", "ask", ks)} align="right" />
                   </div>
@@ -199,126 +216,88 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
               })}
             </div>
           </>
-        ) : (
+        ) : product !== "option" ? (
           <>
-            <div className="mt-3">
+            <div className="mt-2">
               <SideToggle value={side} onChange={setSide} />
             </div>
-            {product === "spot" && (
+            {product === "future" ? (
+              <div className="mt-2 flex gap-1 overflow-x-auto">
+                {exps.map((e, i) => (
+                  <button
+                    key={e.at}
+                    onClick={() => setExi(i)}
+                    className={cn(
+                      "pressable h-9 shrink-0 rounded-full border px-3 font-mono text-[11px]",
+                      i === exi ? "border-brass bg-brass text-bg" : "border-border text-muted",
+                    )}
+                  >
+                    {e.label} · {e.when.replace(" UTC", "")}
+                  </button>
+                ))}
+              </div>
+            ) : (
               <Field label="Pool">
-                <select className={inp} value={poolId} onChange={(e) => setPoolId(e.target.value)}>
+                <select className={inp} value={poolId} onChange={(e) => setPoolId(e.target.value as PoolId)}>
                   {Object.keys(s.pools).map((id) => (
                     <option key={id}>{id}</option>
                   ))}
                 </select>
               </Field>
             )}
-            {product === "future" && (
-              <Field label="Expiry">
-                <div className="grid gap-1">
-                  {exps.map((e, i) => (
-                    <button
-                      key={e.at}
-                      onClick={() => setExi(i)}
-                      className={cn(
-                        "pressable flex h-11 items-center justify-between rounded-[var(--radius-sm)] border px-3",
-                        i === exi ? "border-brass text-fg" : "border-border text-muted",
-                      )}
-                    >
-                      <span className="font-mono text-xs">{e.label}</span>
-                      <span className="font-mono text-[11px]">{e.when}</span>
-                    </button>
-                  ))}
-                </div>
-              </Field>
-            )}
           </>
-        )}
-
-        {sheet || product !== "option" ? (
-          <div className="mt-3 rounded-[var(--radius-lg)] border border-brass/40 bg-elevated p-3">
-            {product === "option" ? (
-              <p className="font-mono text-[11px] text-brass">
-                {side.toUpperCase()} {optType.toUpperCase()} {under} {fmtPx(k)} · {exp.when}
-              </p>
-            ) : null}
-            <Field label={product === "spot" ? "Quantity (base)" : "Contracts"}>
-              <Stepper value={qty} onChange={setQty} step={product === "spot" ? 0.1 : 1} presets={product === "spot" ? [0.1, 0.5, 1, 5] : [1, 2, 5, 10]} />
-            </Field>
-            <Field label="Type">
-              <div className="grid grid-cols-4 gap-1">
-                {KINDS.map((knd) => (
-                  <button
-                    key={knd.id}
-                    onClick={() => setKind(knd.id)}
-                    className={cn("pressable h-10 rounded-[var(--radius-sm)] border text-[11px]", kind === knd.id ? "border-brass text-fg" : "border-border text-muted")}
-                  >
-                    {knd.label}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            {(kind === "lmt" || kind === "stl") && (
-              <Field label="Limit">
-                <Stepper value={limit} onChange={setLimit} step={spot >= 50 ? 1 : 0.01} dp={spot >= 50 ? 2 : 4} />
-              </Field>
-            )}
-            <dl className="mt-2 space-y-1 font-mono text-[11px]">
-              {product === "future" ? (
-                <>
-                  <Row k="Expiry" v={exp.when} />
-                  <Row k="Size" v={`${size} ${under}`} />
-                  <Row k="IM / MM" v={`${fmtUsd(im)} / ${fmtUsd(mm)}`} />
-                  <Row k="Liq" v={fmtPx(liq)} />
-                  <Row k="Buying power" v={fmtUsd(bp)} />
-                  <Row k="Max new" v={`${maxN} mini`} />
-                </>
-              ) : product === "option" && q ? (
-                <>
-                  <Row k="Ask / Δ" v={`${fmtPx(q.ask)} / ${q.delta.toFixed(2)}`} />
-                  <Row k="Est." v={est.label} />
-                  <Row k="Cash" v={fmtUsd(s.account.usdc)} />
-                </>
-              ) : (
-                <Row k="Est." v={est.label} />
-              )}
-            </dl>
-            {product === "option" && side === "sell" ? (
-              <p className="mt-2 text-xs text-muted">Vault does not buy. Close longs from Positions.</p>
-            ) : null}
-            {q?.blank ? <p className="mt-2 text-xs text-down">{q.blank}</p> : null}
-            {err ? <p className="mt-2 text-xs text-down">{err}</p> : null}
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {product === "option" ? (
-                <Button variant="outline" onClick={() => setSheet(false)}>
-                  Back
-                </Button>
-              ) : (
-                <div />
-              )}
-              <Button variant={side === "buy" ? "up" : "down"} disabled={blocked} onClick={fire}>
-                Confirm {side}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {(s.working ?? []).length > 0 && (
-          <section className="mt-4">
-            <h3 className="mb-2 text-[10px] uppercase tracking-wider text-subtle">Working</h3>
-            {s.working.map((w) => (
-              <div key={w.id} className="mb-2 flex items-center justify-between border-b border-border pb-2 text-xs">
-                <div className="font-medium">
-                  {w.side.toUpperCase()} {w.qty} {w.under ?? w.product} {w.kind.toUpperCase()}
-                </div>
-                <button className="h-11 px-3 text-muted" onClick={() => cancel(w.id)}>
-                  Cancel
-                </button>
-              </div>
-            ))}
-          </section>
+        ) : (
+          <p className="mt-2 font-mono text-[11px] text-brass">
+            {side.toUpperCase()} {optType.toUpperCase()} {under} {fmtPx(k)} · {exp.when}
+          </p>
         )}
       </div>
+
+      {sheet || product !== "option" ? (
+        <div className="shrink-0 border-t border-brass/30 bg-elevated px-3 py-2">
+          {product === "option" ? (
+            <p className="mb-1 font-mono text-[11px] text-brass">
+              {side.toUpperCase()} {optType.toUpperCase()} {fmtPx(k)} · {exp.label}
+            </p>
+          ) : null}
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <div className="text-[10px] uppercase tracking-wider text-subtle">{product === "spot" ? "Qty" : "Contracts"}</div>
+              <Stepper value={qty} onChange={setQty} step={product === "spot" ? 0.1 : 1} presets={product === "spot" ? [0.1, 0.5, 1, 5] : [1, 2, 5, 10]} dp={product === "spot" ? 2 : 0} />
+            </div>
+            <Button className="h-11 px-5" variant={side === "buy" ? "up" : "down"} disabled={blocked} onClick={fire}>
+              {side === "buy" ? "Buy" : "Sell"}
+            </Button>
+          </div>
+          <p className="mt-1 font-mono text-[10px] text-muted">
+            {est.label}
+            {product === "future" ? ` · IM ${fmtUsd(im)} · liq ${fmtPx(liq)} · max ${maxN}` : null}
+          </p>
+          {product === "option" && side === "sell" ? <p className="text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p> : null}
+          {q?.blank ? <p className="text-[10px] text-down">{q.blank}</p> : null}
+          {err ? <p className="text-[10px] text-down">{err}</p> : null}
+          {product === "option" ? (
+            <button type="button" className="mt-1 text-[11px] text-brass" onClick={() => setSheet(false)}>
+              Back to chain
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {(s.working ?? []).length > 0 ? (
+        <div className="shrink-0 border-t border-border px-3 py-1">
+          {s.working.slice(0, 2).map((w) => (
+            <div key={w.id} className="flex items-center justify-between py-1 text-[11px]">
+              <span className="font-mono">
+                {w.side} {w.qty} {w.under ?? w.product}
+              </span>
+              <button type="button" className="text-muted" onClick={() => cancel(w.id)}>
+                Cancel
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

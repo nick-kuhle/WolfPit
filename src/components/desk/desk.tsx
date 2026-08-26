@@ -7,6 +7,7 @@ import { Watchlist } from "@/components/desk/watchlist";
 import { Button } from "@/components/ui/button";
 import { useDesk, type Listing } from "@/lib/wolfpit/desk";
 import {
+  BAR_MS,
   dayPnl,
   equity,
   farmApy,
@@ -17,7 +18,7 @@ import {
   lpValue,
   markOf,
   optionQuote,
-  resampleCandles,
+  synthCandles,
   tokenPx,
   usedMargin,
 } from "@/lib/wolfpit/engine";
@@ -35,8 +36,8 @@ export function Desk({ seed }: { seed?: string }) {
   const focus = useDesk((d) => d.focus);
   const universe = useDesk((d) => d.universe);
   const [tab, setTab] = useState<Tab>(seed ? "trade" : "list");
-  const [wide, setWide] = useState(false);
   const [prefer, setPrefer] = useState<"buy" | "sell" | null>(null);
+  const [want, setWant] = useState<"spot" | "future" | "option" | null>(null);
   const [interval, setIv] = useState<ChartInterval>("1h");
   const [bars, setBars] = useState<Candle[]>([]);
   const [status, setStatus] = useState<"load" | "ok" | "empty">("load");
@@ -53,10 +54,16 @@ export function Desk({ seed }: { seed?: string }) {
 
   useEffect(() => {
     const listing = useDesk.getState().focus;
+    const ms = BAR_MS[interval];
+    const px = listing.symbol === "WPIT" ? useWolf.getState().wpit : listing.price || useWolf.getState().eth;
+    const seed = listing.symbol.split("").reduce((a, ch) => a + ch.charCodeAt(0), 0);
     if (listing.symbol === "WPIT") {
-      const rows = resampleCandles(useWolf.getState().wpitCandles, 3_600_000);
-      setBars(rows);
-      setStatus(rows.length >= 2 ? "ok" : "empty");
+      const live = synthCandles(px || 0.01, ms, Date.now(), seed, true);
+      live[live.length - 1]!.c = px;
+      live[live.length - 1]!.h = Math.max(live[live.length - 1]!.h, px);
+      live[live.length - 1]!.l = Math.min(live[live.length - 1]!.l, px);
+      setBars(live);
+      setStatus("ok");
       return;
     }
     let dead = false;
@@ -70,13 +77,18 @@ export function Desk({ seed }: { seed?: string }) {
       poolAddress: listing.poolAddress,
     }).then((rows) => {
       if (dead) return;
-      setBars(rows);
-      setStatus(rows.length >= 2 ? "ok" : "empty");
+      if (rows.length >= 8) {
+        setBars(rows);
+        setStatus("ok");
+        return;
+      }
+      setBars(synthCandles(px || 1, ms, Date.now(), seed, false));
+      setStatus("ok");
     });
     return () => {
       dead = true;
     };
-  }, [focus.symbol, focus.binance, focus.geckoId, focus.network, focus.poolAddress, interval]);
+  }, [focus.symbol, focus.binance, focus.geckoId, focus.network, focus.poolAddress, interval, focus.price]);
 
   function pick(l: Listing) {
     useDesk.getState().setFocus(l);
@@ -149,69 +161,52 @@ export function Desk({ seed }: { seed?: string }) {
           </div>
         </aside>
 
-        <section className={cn("min-h-0 overflow-auto", tab === "trade" ? "block" : "hidden lg:block")}>
-          <div className="border-b border-border px-3 py-2">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h1 className="font-display text-2xl font-medium leading-none">{under}</h1>
-                <p className="text-[11px] text-muted">{focus.name}</p>
-              </div>
-              <div className="text-right">
-                <div className={cn("font-mono text-xl tabular-nums", chg >= 0 ? "text-up" : "text-down")}>
-                  {spot ? fmtPx(spot) : "—"}
+        <section className={cn("flex min-h-0 flex-col overflow-hidden", tab === "trade" ? "flex" : "hidden lg:flex")}>
+          <div className="shrink-0 border-b border-border px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-baseline gap-2">
+                  <h1 className="font-display text-xl font-medium leading-none">{under}</h1>
+                  <span className={cn("font-mono text-lg tabular-nums", chg >= 0 ? "text-up" : "text-down")}>
+                    {spot ? fmtPx(spot) : "—"}
+                  </span>
+                  <span className={cn("font-mono text-[11px]", chg >= 0 ? "text-up" : "text-down")}>{fmtPct(chg)}</span>
                 </div>
-                <div className={cn("font-mono text-[11px]", chg >= 0 ? "text-up" : "text-down")}>{fmtPct(chg)}</div>
+                <p className="truncate text-[11px] text-muted">{focus.name}</p>
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  className="pressable h-10 min-w-[4.5rem] rounded-[var(--radius-sm)] bg-down px-3 text-center text-fg"
+                  onClick={() => {
+                    setPrefer("sell");
+                    setWant("spot");
+                    setTab("trade");
+                  }}
+                >
+                  <div className="text-[9px] uppercase tracking-wider">Sell</div>
+                  <div className="font-mono text-xs leading-none">{spot ? fmtPx(bid) : "—"}</div>
+                </button>
+                <button
+                  type="button"
+                  className="pressable h-10 min-w-[4.5rem] rounded-[var(--radius-sm)] bg-up px-3 text-center text-bg"
+                  onClick={() => {
+                    setPrefer("buy");
+                    setWant("spot");
+                    setTab("trade");
+                  }}
+                >
+                  <div className="text-[9px] uppercase tracking-wider">Buy</div>
+                  <div className="font-mono text-xs leading-none">{spot ? fmtPx(ask) : "—"}</div>
+                </button>
               </div>
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className="pressable rounded-[var(--radius-sm)] bg-down px-3 py-2 text-left text-fg"
-                onClick={() => {
-                  setPrefer("sell");
-                  setTab("trade");
-                }}
-              >
-                <div className="text-[10px] uppercase tracking-wider">Sell</div>
-                <div className="font-mono text-lg leading-none">{spot ? fmtPx(bid) : "—"}</div>
-              </button>
-              <button
-                type="button"
-                className="pressable rounded-[var(--radius-sm)] bg-up px-3 py-2 text-left text-bg"
-                onClick={() => {
-                  setPrefer("buy");
-                  setTab("trade");
-                }}
-              >
-                <div className="text-[10px] uppercase tracking-wider">Buy</div>
-                <div className="font-mono text-lg leading-none">{spot ? fmtPx(ask) : "—"}</div>
-              </button>
-            </div>
-            <dl className="mt-2 grid grid-cols-3 gap-2 font-mono text-[10px] text-muted">
-              <div>
-                Vol <span className="text-fg">{fmtUsd(focus.volume24)}</span>
-              </div>
-              <div>
-                Bid <span className="text-down">{spot ? fmtPx(bid) : "—"}</span>
-              </div>
-              <div>
-                Ask <span className="text-up">{spot ? fmtPx(ask) : "—"}</span>
-              </div>
-            </dl>
           </div>
-          <div className="px-3 py-2">
-            <ChartPane
-              candles={bars}
-              interval={interval}
-              status={status}
-              onInterval={setIv}
-              expanded={wide}
-              onToggle={() => setWide((v) => !v)}
-              compact={120}
-            />
+          <div className="shrink-0 border-b border-border">
+            <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={132} />
           </div>
-          <div className={wide ? "h-[28rem]" : "h-[min(38rem,calc(100dvh-22rem))]"}>
-            <OrderTicket prefer={prefer} under={under} />
+          <div className="min-h-0 flex-1">
+            <OrderTicket prefer={prefer} under={under} want={want} />
           </div>
         </section>
 

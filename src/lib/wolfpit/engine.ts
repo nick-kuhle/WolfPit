@@ -280,6 +280,34 @@ export function resampleCandles(bars: EngineState["candles"], intervalMs: number
   return out;
 }
 
+export const BAR_MS = {
+  "1m": 60_000,
+  "5m": 300_000,
+  "15m": 900_000,
+  "1h": 3_600_000,
+  "1d": 86_400_000,
+} as const;
+
+export function synthCandles(px: number, intervalMs: number, now: number, seed = 1, moon = false) {
+  const n = 96;
+  const r = rng((seed >>> 0) ^ (intervalMs >>> 0));
+  const vol = moon ? 0.028 : 0.01;
+  let p = moon ? Math.max(px * 0.12, 1e-6) : px * 0.96;
+  const out: EngineState["candles"] = [];
+  const bucket = Math.floor(now / intervalMs) * intervalMs;
+  for (let i = n - 1; i >= 0; i--) {
+    const t = bucket - i * intervalMs;
+    const ret = moon ? (r() < 0.9 ? 0.005 + r() * 0.028 : -(0.002 + r() * 0.01)) : nrand(r) * vol;
+    const o = p;
+    const c = i === 0 ? px : Math.max(px * 0.04, o * (1 + ret));
+    const h = Math.max(o, c) * (1 + r() * vol * 0.45);
+    const l = Math.max(1e-8, Math.min(o, c) * (1 - r() * vol * 0.45));
+    out.push({ t, o, h, l, c, v: 8 + r() * 80 });
+    p = c;
+  }
+  return out;
+}
+
 export function equity(s: EngineState) {
   const spot = s.account.usdc + s.account.eth * s.eth + s.account.wpit * s.wpit;
   const extras = Object.entries(s.account.tokens ?? {}).reduce((a, [k, v]) => a + v * tokenPx(s, k), 0);

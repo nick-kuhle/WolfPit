@@ -15,7 +15,7 @@ export function AccountBar() {
   const pnl = eq - start;
   const up = pnl >= 0;
   return (
-    <div className="flex flex-nowrap items-center gap-x-4 gap-y-2 overflow-x-auto border-b border-border bg-panel px-3 py-2 text-xs sm:flex-wrap sm:gap-x-5">
+    <div className="flex flex-nowrap items-center gap-x-3 overflow-x-auto border-b border-border bg-panel px-3 py-1.5 text-xs sm:gap-x-5">
       <div>
         <div className="text-[10px] uppercase tracking-wider text-subtle">Net liq</div>
         <div className="font-mono tabular-nums text-sm text-fg">{fmtUsd(eq)}</div>
@@ -41,7 +41,7 @@ export function AccountBar() {
         <div className="text-[10px] uppercase tracking-wider text-subtle">Clock</div>
         <div className="font-mono tabular-nums text-sm">{new Date(clock).toISOString().slice(11, 19)}</div>
       </div>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto hidden items-center gap-2 sm:flex">
         <span className="text-[10px] uppercase tracking-wider text-subtle">Speed</span>
         {([1, 10, 60] as const).map((n) => (
           <Button key={n} size="sm" variant={speed === n ? "default" : "outline"} onClick={() => setSpeed(n)}>

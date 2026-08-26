@@ -11,9 +11,15 @@ function cssVar(name: string, fallback: string) {
 function axisLabel(t: number, interval: ChartInterval) {
   const d = new Date(t);
   if (interval === "1d") return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  if (interval === "1h")
-    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric" });
+  if (interval === "1h") return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric" });
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
+function pxLabel(p: number) {
+  if (p >= 1000) return p.toFixed(0);
+  if (p >= 1) return p.toFixed(2);
+  if (p >= 0.01) return p.toFixed(4);
+  return p.toFixed(6);
 }
 
 export function PitChart({
@@ -36,11 +42,11 @@ export function PitChart({
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
       const w = Math.max(1, parent.clientWidth);
-      const h = Math.max(1, height);
+      const h = Math.max(1, parent.clientHeight || height);
       canvas.width = Math.max(1, Math.floor(w * dpr));
       canvas.height = Math.max(1, Math.floor(h * dpr));
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -51,25 +57,31 @@ export function PitChart({
       const down = cssVar("--color-down", "#c45c52");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
-      if (candles.length < 2) {
+      const slice = candles.length > 120 ? candles.slice(-120) : candles;
+      if (slice.length < 2) {
         ctx.fillStyle = muted;
         ctx.font = "12px 'IBM Plex Sans', sans-serif";
         ctx.fillText("Waiting on candles…", 16, h / 2);
         return;
       }
-      const padL = 10;
-      const padR = 52;
-      const padT = 12;
-      const padB = 28;
-      const slice = candles.length > 240 ? candles.slice(-240) : candles;
+      const padL = 8;
+      const padR = 54;
+      const padT = 8;
+      const padB = 22;
       let lo = Math.min(...slice.map((c) => c.l));
       let hi = Math.max(...slice.map((c) => c.h));
-      const pad = (hi - lo) * 0.08 || 1;
-      lo -= pad;
+      if (!(hi > lo)) {
+        lo *= 0.98;
+        hi *= 1.02;
+      }
+      const pad = (hi - lo) * 0.06 || hi * 0.02;
+      lo = Math.max(0, lo - pad);
       hi += pad;
-      const plotW = w - padL - padR;
-      const plotH = h - padT - padB;
-      const x = (i: number) => padL + (i / Math.max(slice.length - 1, 1)) * plotW;
+      const plotW = Math.max(1, w - padL - padR);
+      const plotH = Math.max(1, h - padT - padB);
+      const gap = plotW / slice.length;
+      const cw = Math.min(7, Math.max(1.25, gap * 0.62));
+      const x = (i: number) => padL + gap * i + gap / 2;
       const y = (p: number) => padT + ((hi - p) / (hi - lo)) * plotH;
       ctx.strokeStyle = grid;
       ctx.lineWidth = 1;
@@ -82,22 +94,20 @@ export function PitChart({
         ctx.moveTo(padL, yy);
         ctx.lineTo(w - padR, yy);
         ctx.stroke();
-        const label = p >= 1000 ? p.toFixed(0) : p >= 1 ? p.toFixed(2) : p.toFixed(5);
-        ctx.fillText(label, w - padR + 6, yy + 3);
+        ctx.fillText(pxLabel(p), w - padR + 6, yy + 3);
       }
-      const ticks = 4;
+      const ticks = 3;
       for (let i = 0; i <= ticks; i++) {
         const idx = Math.round((i / ticks) * (slice.length - 1));
         const bar = slice[idx];
         if (!bar) continue;
-        const xx = x(idx);
-        ctx.fillText(axisLabel(bar.t, interval), Math.min(xx, w - padR - 48), h - 8);
+        ctx.fillText(axisLabel(bar.t, interval), Math.min(x(idx), w - padR - 56), h - 6);
       }
-      const cw = Math.max(1.5, plotW / slice.length - 1.2);
       slice.forEach((c, i) => {
         const isUp = c.c >= c.o;
         ctx.strokeStyle = isUp ? up : down;
         ctx.fillStyle = isUp ? up : down;
+        ctx.lineWidth = 1;
         const xc = x(i);
         ctx.beginPath();
         ctx.moveTo(xc, y(c.h));
@@ -123,43 +133,35 @@ export function ChartPane({
   interval,
   status,
   onInterval,
-  expanded,
-  onToggle,
   compact = 148,
 }: {
   candles: Candle[];
   interval: ChartInterval;
   status?: "ok" | "load" | "empty";
   onInterval?: (iv: ChartInterval) => void;
-  expanded: boolean;
-  onToggle: () => void;
   compact?: number;
 }) {
-  const h = expanded ? 420 : compact;
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-brass/30 bg-chart">
-      <div className="flex items-center gap-1 border-b border-border px-2">
+    <div className="overflow-hidden bg-chart">
+      <div className="flex items-center gap-1 px-2">
         {onInterval
           ? (["1m", "5m", "15m", "1h", "1d"] as const).map((k) => (
               <button
                 key={k}
                 type="button"
                 onClick={() => onInterval(k)}
-                className={`pressable h-9 px-2 font-mono text-[11px] ${interval === k ? "text-fg" : "text-muted"}`}
+                className={`pressable h-8 px-2 font-mono text-[11px] ${interval === k ? "text-brass" : "text-muted"}`}
               >
                 {k}
               </button>
             ))
-          : <span className="h-9 px-2 font-mono text-[11px] leading-9 text-subtle">equity</span>}
-        <button type="button" className="pressable ml-auto h-9 px-2 font-mono text-[11px] text-brass" onClick={onToggle}>
-          {expanded ? "Shrink" : "Expand"}
-        </button>
+          : null}
       </div>
-      <div style={{ height: h }}>
-        {status && status !== "ok" ? (
-          <p className="p-3 text-sm text-muted">{status === "load" ? "Loading candles…" : "No candles for this timeframe."}</p>
+      <div style={{ height: compact }}>
+        {status === "load" ? (
+          <p className="p-3 text-sm text-muted">Loading candles…</p>
         ) : (
-          <PitChart candles={candles} height={h} interval={interval} />
+          <PitChart candles={candles} height={compact} interval={interval} />
         )}
       </div>
     </div>
