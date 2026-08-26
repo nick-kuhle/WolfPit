@@ -219,7 +219,7 @@ export function fieldAt(card: RaceCard, now: number) {
 /** Strictly increasing. Pattern is unique per runner/race — winner is not always last. */
 export function raceX(t: number, place: number, no: number, seed: number) {
   const tt = Math.min(1, Math.max(0, t));
-  const finish = 0.86 - place * 0.03;
+  const finish = 1 - place * 0.04;
   const r = rng(seed ^ Math.imul(no + 1, 2654435761));
   const p = 0.4 + r() * 2.4;
   const knots = 7;

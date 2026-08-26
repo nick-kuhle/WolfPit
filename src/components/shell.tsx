@@ -51,7 +51,7 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
           {address ? truncAddr(address) : "Connect"}
         </Link>
       </header>
-      <div className={cn("min-h-0 flex-1", pathname.startsWith("/admin") ? "" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>{children}</div>
+      <div className={cn("min-h-0 flex-1 overflow-x-hidden", pathname.startsWith("/admin") ? "" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>{children}</div>
       {pathname.startsWith("/admin") ? null : <PitDock />}
     </div>
   );

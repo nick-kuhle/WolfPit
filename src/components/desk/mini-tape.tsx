@@ -3,7 +3,7 @@ import { useDesk, type Listing } from "@/lib/wolfpit/desk";
 import { cn, fmtPct, fmtPx } from "@/lib/utils";
 
 type TapeTab = "saved" | "hot" | "gainers" | "losers";
-const COLLAPSED = 5;
+const COLLAPSED = 3;
 
 export function MiniTape({ onPick }: { onPick: (l: Listing) => void }) {
   const universe = useDesk((s) => s.universe);
@@ -52,7 +52,7 @@ export function MiniTape({ onPick }: { onPick: (l: Listing) => void }) {
           <span className="font-mono text-base leading-none">{open ? "▴" : "▾"}</span>
         </button>
       </div>
-      <div className={cn("overflow-y-auto", open ? "max-h-48" : "max-h-[11.5rem]")}>
+      <div className={cn("overflow-y-auto", open ? "max-h-40" : "max-h-[6.75rem]")}>
         {shown.length === 0 ? (
           <p className="px-3 py-2 font-mono text-[10px] text-muted">
             {tab === "saved" ? "Star names on the tape to keep them here." : "Waiting on the tape…"}

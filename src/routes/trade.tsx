@@ -9,7 +9,7 @@ function TradePage() {
   return (
     <Shell desk>
       <ProductGate product="desk">
-        <div className="h-[calc(100dvh-3rem)] min-h-0">
+        <div className="h-full min-h-0">
           <Desk pane="trade" />
         </div>
       </ProductGate>

@@ -7,29 +7,29 @@ export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number;
   const t = Math.min(1, Math.max(0, (now - card.postAt) / Math.max(1, card.settleAt - card.postAt)));
   const bg = card.kind === "horse" ? "/brand/races/track-horse.jpg" : "/brand/races/track-dog.jpg";
   const moving = card.status !== "open";
-  const sprite = compact ? 18 : 22;
+  const sprite = compact ? 26 : 32;
 
   return (
     <div className="min-w-0">
       <div
         className={cn(
           "relative overflow-hidden rounded-[var(--radius-lg)] border border-[#5a4030]",
-          compact ? "h-32 sm:h-40" : "h-36 sm:h-52",
+          compact ? "h-36 sm:h-44" : "h-40 sm:h-56",
         )}
       >
         <img src={bg} alt="" className="absolute inset-0 size-full object-cover object-[center_70%]" />
-        <div className="absolute inset-0 bg-gradient-to-t from-bg/80 via-bg/20 to-transparent" />
-        <div className="absolute inset-y-3 right-[6%] z-[1] w-1 rounded-full bg-brass shadow-[0_0_12px_#f0c14b]" />
-        <div className="absolute inset-x-1 bottom-1 top-6 sm:inset-x-2">
+        <div className="absolute inset-0 bg-gradient-to-t from-bg/70 via-bg/15 to-transparent" />
+        <div className="absolute inset-y-2 right-[7%] z-[1] w-1 rounded-full bg-brass shadow-[0_0_12px_#f0c14b]" />
+        <div className="absolute inset-x-1 bottom-1 top-6 right-[7%] sm:inset-x-2 sm:right-[7%]">
           {field.map((r, i) => (
             <div
               key={r.no}
-              className="absolute left-0 right-10 sm:right-12"
-              style={{ top: `${(i / Math.max(field.length - 1, 1)) * 78}%` }}
+              className="absolute left-0 right-0"
+              style={{ top: `${(i / Math.max(field.length - 1, 1)) * 76}%` }}
             >
               <div
                 className="absolute top-0"
-                style={{ left: `${(moving ? r.x : 0.02) * 100}%` }}
+                style={{ left: `calc(${(moving ? r.x : 0.02) * 100}% - ${(moving ? r.x : 0.02) * sprite * 1.7}px)` }}
               >
                 <RunnerGfx kind={card.kind} coat={r.coat} no={r.no} size={sprite} />
               </div>

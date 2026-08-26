@@ -154,7 +154,7 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
           </div>
         </aside>
 
-        <section className={cn("flex min-h-0 flex-col overflow-hidden", view === "trade" ? "flex" : "hidden lg:flex")}>
+        <section className={cn("flex min-h-0 flex-col overflow-y-auto overscroll-y-contain lg:overflow-hidden", view === "trade" ? "flex" : "hidden lg:flex")}>
           <div className="shrink-0 border-b border-border px-3 py-1.5">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -205,9 +205,9 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
           </div>
           <MiniTape onPick={pick} />
           <div className="shrink-0 border-b border-border">
-            <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={96} />
+            <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={72} />
           </div>
-          <div className="min-h-0 flex-1">
+          <div className="min-h-[14rem] flex-1 lg:min-h-0">
             <OrderTicket prefer={prefer} under={under} want={want} />
           </div>
         </section>

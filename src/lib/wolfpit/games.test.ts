@@ -127,6 +127,7 @@ describe("pit racetrack", () => {
     const field = fieldAt(card, card.settleAt);
     const first = field.reduce((a, b) => (a.x >= b.x ? a : b));
     assert.equal(first.no, card.winner);
+    assert.ok(first.x >= 0.99, `winner short of the wire ${first.x}`);
   });
 
   it("does not always leave the winner last at mid-race", () => {

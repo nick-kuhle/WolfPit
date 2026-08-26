@@ -39,7 +39,7 @@ export function OrderTicket({
   const err = useWolf((s) => s.lastError);
   const geo = useAdmin((s) => s.geoFenceUs);
   const paused = useAdmin((s) => s.listingsPaused);
-  const [product, setProduct] = useState<Product>("option");
+  const [product, setProduct] = useState<Product>("spot");
   const [side, setSide] = useState<DeskSide>(prefer ?? "buy");
   const [kind, setKind] = useState<OrderKind>("mkt");
   const [tif, setTif] = useState<Tif>("day");
@@ -187,7 +187,7 @@ export function OrderTicket({
   const editor = sheet || product !== "option";
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-panel">
+    <div className="relative flex min-h-full flex-col bg-panel lg:h-full lg:min-h-0">
       <div className="flex border-b border-border">
         {products.map((p) => (
           <button
@@ -281,10 +281,9 @@ export function OrderTicket({
             {side.toUpperCase()} {optType.toUpperCase()} {under} {fmtPx(k)} · {exp.when}
           </p>
         )}
-      </div>
 
       {editor ? (
-        <div className="shrink-0 border-t border-brass/35 bg-[color-mix(in_oklab,var(--color-brass)_14%,#12100a)]">
+        <div className="mt-2 rounded-md border border-brass/35 bg-[color-mix(in_oklab,var(--color-brass)_14%,#12100a)]">
           <div className="flex items-center gap-1 px-3 py-2">
             <div className="grid h-9 w-28 grid-cols-2 overflow-hidden rounded-full border border-brass/50">
               <button
@@ -324,7 +323,32 @@ export function OrderTicket({
             </Line>
           ) : null}
 
-          <div className="flex items-center justify-between border-t border-brass/20 px-3 py-2">
+          <Line label="TIF">
+            <Carousel value={tif} items={TIFS} label={(x) => x.toUpperCase()} onChange={setTif} />
+          </Line>
+
+          {overSize ? (
+            <p className="px-3 pb-2 text-[10px] text-down">
+              Size exceeds max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} given cash, inventory, and pool depth.
+            </p>
+          ) : null}
+          {overCash ? (
+            <p className="px-3 pb-2 text-[10px] text-down">
+              Not enough cash. Debit {fmtUsd(est.usd)} vs {fmtUsd(bp)} free.
+            </p>
+          ) : null}
+          {product === "option" && side === "sell" ? (
+            <p className="px-3 pb-2 text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p>
+          ) : null}
+          {q?.blank ? <p className="px-3 pb-2 text-[10px] text-down">{q.blank}</p> : null}
+          {err ? <p className="px-3 pb-2 text-[10px] text-down">{err}</p> : null}
+        </div>
+      ) : null}
+      </div>
+
+      {editor ? (
+        <div className="sticky bottom-0 z-20 shrink-0 border-t border-brass/35 bg-[color-mix(in_oklab,var(--color-brass)_18%,#12100a)]">
+          <div className="flex items-center justify-between px-3 py-2">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-subtle">Cost of Trade</div>
               <div className="font-display text-xl tabular-nums">{Number.isFinite(est.usd) ? fmtUsd(side === "sell" && product === "spot" ? -est.usd : est.usd) : "—"}</div>
@@ -332,39 +356,14 @@ export function OrderTicket({
             <div className="text-right font-mono text-[10px] text-muted">
               {product === "future" ? (
                 <>
-                  IM {fmtUsd(im)} · MM {fmtUsd(mm)}
-                  <br />
-                  liq {fmtPx(liq)} · {(rate * 100).toFixed(0)}%
+                  IM {fmtUsd(im)} · liq {fmtPx(liq)}
                 </>
               ) : (
                 est.label
               )}
-              <br />
-              max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} · cash {fmtUsd(bp)}
             </div>
           </div>
-
-          <Line label="TIF">
-            <Carousel value={tif} items={TIFS} label={(x) => x.toUpperCase()} onChange={setTif} />
-          </Line>
-
-          {overSize ? (
-            <p className="px-3 text-[10px] text-down">
-              Size exceeds max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} given cash, inventory, and pool depth.
-            </p>
-          ) : null}
-          {overCash ? (
-            <p className="px-3 text-[10px] text-down">
-              Not enough cash. Debit {fmtUsd(est.usd)} vs {fmtUsd(bp)} free.
-            </p>
-          ) : null}
-          {product === "option" && side === "sell" ? (
-            <p className="px-3 text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p>
-          ) : null}
-          {q?.blank ? <p className="px-3 text-[10px] text-down">{q.blank}</p> : null}
-          {err ? <p className="px-3 text-[10px] text-down">{err}</p> : null}
-
-          <div className="flex gap-2 px-3 py-2">
+          <div className="flex gap-2 px-3 pb-2">
             {product === "option" ? (
               <Button variant="ghost" className="h-11 flex-1" onClick={() => { setSheet(false); setReview(false); }}>
                 Edit
