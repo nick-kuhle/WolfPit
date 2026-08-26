@@ -193,8 +193,11 @@ describe("pit racetrack", () => {
     const r = placeTickets(s0, "horse", [a, b, c], 100, now, "quinella");
     assert.equal(typeof r, "object");
     if (typeof r === "string") throw new Error(r);
-    assert.equal(r.account.wpit, 4_700);
+    assert.ok(Math.abs(r.account.wpit - 4_900) < 1e-6);
     assert.equal(r.games?.bets.filter((x) => x.status === "open").length, 3);
+    const legs = r.games?.bets.filter((x) => x.market === "quinella") ?? [];
+    const spent = legs.reduce((a, b) => a + b.stake, 0);
+    assert.ok(Math.abs(spent - 100) < 1e-6);
     const done = settleGames(r, card.settleAt + 50);
     const wins = done.games?.bets.filter((x) => x.market === "quinella" && x.status === "won") ?? [];
     const lost = done.games?.bets.filter((x) => x.market === "quinella" && x.status === "lost") ?? [];
@@ -203,8 +206,8 @@ describe("pit racetrack", () => {
     const hit = wins[0]!;
     const top = new Set([a, b]);
     assert.ok(top.has(hit.runner) && hit.runnerB && top.has(hit.runnerB));
-    assert.ok(done.account.wpit > 4_700);
-    assert.ok(Math.abs(done.account.wpit - (4_700 + hit.payout)) < 1e-6);
+    assert.ok(done.account.wpit > 4_900);
+    assert.ok(Math.abs(done.account.wpit - (4_900 + hit.payout)) < 1e-6);
   });
 
   it("credits WPIT on a late settle after the next card has started", () => {

@@ -226,7 +226,7 @@ export const useWolf = create<WolfStore>()(
             return { lastError: r };
           }
           const n = r.games?.bets.filter((b) => b.status === "open" && b.placedAt >= Date.now() - 2000).length ?? 1;
-          ping(`Ticket${n > 1 ? "s" : ""} · ${market.toUpperCase()} · ${stake * (market === "quinella" ? Math.max(1, n) : 1)} WPIT`, "brass");
+          ping(`Ticket${n > 1 ? "s" : ""} · ${market.toUpperCase()} · ${stake} WPIT`, "brass");
           return { ...r, lastError: null };
         });
       },

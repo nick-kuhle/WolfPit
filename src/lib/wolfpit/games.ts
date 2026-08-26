@@ -316,9 +316,15 @@ export function placeTickets(
   if (market === "quinella") {
     const combos = quinellaCombos(picks);
     if (combos.length === 0) return "Pick two runners for the quinella.";
+    if (stake < MIN_BET) return `Minimum ticket is ${MIN_BET} WPIT.`;
+    if (stake > MAX_BET) return `House limit ${MAX_BET} WPIT a ticket.`;
     let cur: EngineState | string = s;
-    for (const [a, b] of combos) {
-      cur = placeBet(cur as EngineState, kind, a, stake, now, "quinella", b);
+    let left = stake;
+    for (let i = 0; i < combos.length; i++) {
+      const [a, b] = combos[i]!;
+      const per = i === combos.length - 1 ? left : Math.round((stake / combos.length) * 1e6) / 1e6;
+      left = Math.round((left - per) * 1e6) / 1e6;
+      cur = placeBet(cur as EngineState, kind, a, per, now, "quinella", b);
       if (typeof cur === "string") return cur;
     }
     return cur;
@@ -351,7 +357,8 @@ export function placeBet(
 ): EngineState | string {
   const bad = requireFinitePositive(stake, "Stake");
   if (bad) return bad;
-  if (stake < MIN_BET) return `Minimum ticket is ${MIN_BET} WPIT.`;
+  if (market !== "quinella" && stake < MIN_BET) return `Minimum ticket is ${MIN_BET} WPIT.`;
+  if (market === "quinella" && stake < 0.01) return "Stake too small.";
   if (stake > MAX_BET) return `House limit ${MAX_BET} WPIT a ticket.`;
   s = ensureRace(s, kind, now);
   const card = cardFor(kind, now, s.games);

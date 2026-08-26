@@ -122,15 +122,16 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
   }, [pick]);
 
   const combos = market === "quinella" ? quinellaCombos(picks) : [];
-  const tickets = market === "quinella" ? Math.max(combos.length, 0) : 1;
+  const tickets = market === "quinella" ? Math.max(combos.length, 1) : 1;
   const first = picks[0] ?? pick;
   const second = market === "exacta" ? exacta2 : picks[1];
   const odds =
     market === "quinella" && combos.length
       ? Math.max(...combos.map(([a, b]) => marketOdds(card, "quinella", a, b)))
       : marketOdds(card, market, first, second ?? undefined);
-  const cost = n * tickets;
-  const maxPay = market === "quinella" ? n * odds : n * odds;
+  const cost = n;
+  const perCombo = tickets > 0 ? n / tickets : n;
+  const maxPay = perCombo * odds;
   const maxLoss = cost;
   const ready =
     n >= MIN_BET &&
@@ -226,7 +227,7 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
             </div>
             {combos.length > 1 ? (
               <p className="mt-1 font-mono text-[10px] text-brass">
-                Box · {combos.length} quinellas · {fmtQty(cost)} WPIT total
+                Box · {combos.length} quinellas · {fmtQty(cost)} WPIT total ({fmtQty(perCombo)} each)
               </p>
             ) : null}
           </div>
@@ -292,7 +293,7 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
           </div>
         )}
 
-        <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-subtle">Stake {market === "quinella" && tickets > 1 ? "per combo" : ""}</p>
+        <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-subtle">Stake (total)</p>
         <div className="mt-1 flex flex-wrap gap-1">
           {STAKES.map((x) => (
             <button
