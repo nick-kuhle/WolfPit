@@ -74,6 +74,49 @@
   }
 }
 
+@keyframes runner-gallop {
+  0% {
+    transform: translateY(0) rotate(-7deg) scaleX(1.08) scaleY(0.92);
+  }
+  18% {
+    transform: translateY(-26%) rotate(5deg) scaleX(0.9) scaleY(1.1);
+  }
+  36% {
+    transform: translateY(-2%) rotate(-4deg) scaleX(1.1) scaleY(0.9);
+  }
+  54% {
+    transform: translateY(-22%) rotate(6deg) scaleX(0.92) scaleY(1.08);
+  }
+  72% {
+    transform: translateY(-4%) rotate(-5deg) scaleX(1.06) scaleY(0.94);
+  }
+  100% {
+    transform: translateY(0) rotate(-7deg) scaleX(1.08) scaleY(0.92);
+  }
+}
+
+@keyframes runner-idle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-8%) rotate(3deg);
+  }
+}
+
+.runner-gallop {
+  transform-origin: 50% 90%;
+  animation: runner-gallop 0.4s linear infinite;
+}
+.runner-gallop.is-dog {
+  animation-duration: 0.28s;
+}
+.runner-idle {
+  transform-origin: 50% 90%;
+  animation: runner-idle 0.85s ease-in-out infinite;
+}
+
 @keyframes sheet-in {
   from {
     opacity: 0;
@@ -241,6 +284,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .runner-gallop,
+  .runner-idle,
   .sheet-in,
   .apy-live,
   .ripe-glow,

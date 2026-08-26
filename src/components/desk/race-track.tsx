@@ -6,7 +6,7 @@ export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number;
   const field = fieldAt(card, now);
   const t = Math.min(1, Math.max(0, (now - card.postAt) / Math.max(1, card.settleAt - card.postAt)));
   const bg = card.kind === "horse" ? "/brand/races/track-horse.jpg" : "/brand/races/track-dog.jpg";
-  const moving = card.status !== "open";
+  const gait = card.status === "running" ? "run" : card.status === "open" ? "idle" : "off";
   const sprite = compact ? 26 : 32;
 
   return (
@@ -29,9 +29,9 @@ export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number;
             >
               <div
                 className="absolute top-0"
-                style={{ left: `calc(${(moving ? r.x : 0.02) * 100}% - ${(moving ? r.x : 0.02) * sprite * 1.7}px)` }}
+                style={{ left: `calc(${(card.status !== "open" ? r.x : 0.02) * 100}% - ${(card.status !== "open" ? r.x : 0.02) * sprite * 1.7}px)` }}
               >
-                <RunnerGfx kind={card.kind} coat={r.coat} no={r.no} size={sprite} />
+                <RunnerGfx kind={card.kind} coat={r.coat} no={r.no} size={sprite} gait={gait} />
               </div>
             </div>
           ))}
@@ -109,7 +109,7 @@ function EntryCard({
         win && "border-up bg-up/10",
       )}
     >
-      <RunnerGfx kind={kind} coat={r.coat} no={r.no} size={28} />
+      <RunnerGfx kind={kind} coat={r.coat} no={r.no} size={28} gait="idle" />
       <div className="min-w-0 flex-1">
         <div className="truncate font-display text-sm leading-tight">{r.name}</div>
         <div className="flex items-baseline justify-between gap-2 font-mono text-[10px]">

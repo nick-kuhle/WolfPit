@@ -125,15 +125,18 @@ export type WorkingOrder = {
 };
 
 export type RaceKind = "horse" | "dog";
+export type BetMarket = "win" | "place" | "show" | "quinella" | "exacta";
 
 export type GameBet = {
   id: string;
   raceId: string;
   kind: RaceKind;
   runner: number;
+  runnerB?: number;
   name: string;
   stake: number;
   odds: number;
+  market: BetMarket;
   placedAt: number;
   status: "open" | "won" | "lost";
   payout: number;

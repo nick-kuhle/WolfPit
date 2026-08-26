@@ -1,4 +1,5 @@
 import type { Coat } from "@/lib/wolfpit/games";
+import { cn } from "@/lib/utils";
 
 const SRC = {
   horse: "/brand/races/horse-run.png",
@@ -10,17 +11,24 @@ export function RunnerGfx({
   coat,
   no,
   size = 36,
+  gait = "off",
 }: {
   kind: "horse" | "dog";
   coat: Coat;
   no: number;
   size?: number;
+  gait?: "run" | "idle" | "off";
 }) {
   const w = Math.round(size * 1.7);
   return (
     <div className="relative shrink-0" style={{ width: w, height: size }}>
       <div
-        className="absolute inset-0"
+        className={cn(
+          "absolute inset-0",
+          gait === "run" && "runner-gallop",
+          gait === "run" && kind === "dog" && "is-dog",
+          gait === "idle" && "runner-idle",
+        )}
         style={{
           background: coatBg(coat),
           WebkitMaskImage: `url(${SRC[kind]})`,
@@ -31,6 +39,7 @@ export function RunnerGfx({
           maskRepeat: "no-repeat",
           maskPosition: "center",
           maskSize: "contain",
+          animationDelay: `-${(no % 8) * 0.05}s`,
         }}
       />
       <span className="absolute left-1/2 top-[38%] grid size-[1.15em] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-bg font-mono text-[0.55em] font-bold leading-none text-brass ring-1 ring-brass">

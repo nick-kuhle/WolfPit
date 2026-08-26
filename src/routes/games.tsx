@@ -1,24 +1,36 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { EntryBoard, FairProof, OddsTape, RaceTrack } from "@/components/desk/race-track";
+import { RunnerGfx } from "@/components/desk/runner-gfx";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { YieldNav } from "@/components/yield-nav";
 import { Button } from "@/components/ui/button";
-import { MIN_BET, cardFor, fracOdds, openTickets, type RaceCard } from "@/lib/wolfpit/games";
+import {
+  MARKET_HINT,
+  MIN_BET,
+  cardFor,
+  fracOdds,
+  marketOdds,
+  openTickets,
+  ticketName,
+  type RaceCard,
+} from "@/lib/wolfpit/games";
 import { useWolf } from "@/lib/wolfpit/store";
+import type { BetMarket } from "@/lib/wolfpit/types";
 import { cn, fmtQty } from "@/lib/utils";
 
 export const Route = createFileRoute("/games")({ component: GamesPage });
 
 const STAKES = [50, 100, 250, 500, 1000];
+const MARKETS: BetMarket[] = ["win", "place", "show", "quinella", "exacta"];
 
 function GamesPage() {
   const [now, setNow] = useState(() => Date.now());
   const games = useWolf((s) => s.games);
   const seedRaces = useWolf((s) => s.seedRaces);
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 120);
+    const t = window.setInterval(() => setNow(Date.now()), 80);
     return () => window.clearInterval(t);
   }, []);
   const sec = Math.floor(now / 1000);
@@ -40,7 +52,7 @@ function GamesPage() {
               A card a minute. <span className="italic">Prizes in WPIT.</span>
             </h1>
             <p className="mt-2 max-w-md text-sm text-bg/85">
-              Entry, then they break. Vault {fmtQty(vault)} WPIT. Odds are the book. The dash is only for show. Winner is hashed before the gates.
+              Tap a runner. Win, place, show, quinella, exacta. Vault {fmtQty(vault)} WPIT.
             </p>
             <YieldNav on="track" />
           </div>
@@ -56,28 +68,12 @@ function GamesPage() {
 }
 
 function Meet({ card, now }: { card: RaceCard; now: number }) {
-  const s = useWolf();
-  const bet = useWolf((st) => st.placeRaceBet);
   const [pick, setPick] = useState<number | null>(null);
-  const [stake, setStake] = useState("100");
-  const [review, setReview] = useState(false);
-  const runner = card.runners.find((r) => r.no === pick) ?? null;
-  const n = Number(stake) || 0;
   const left = Math.max(0, card.postAt - now);
-  const wpit = s.account.wpit;
-  const vault = s.games?.vaultWpit ?? 0;
-  const blocked = !runner || card.status !== "open" || n < MIN_BET || n > wpit + 1e-9;
 
   useEffect(() => {
     setPick(null);
-    setReview(false);
   }, [card.id]);
-
-  function send() {
-    if (!runner || blocked) return;
-    bet(card.kind, runner.no, n);
-    setReview(false);
-  }
 
   return (
     <section className="min-w-0 overflow-hidden rounded-[var(--radius-xl)] border border-border bg-panel p-2.5 sm:p-4">
@@ -95,7 +91,7 @@ function Meet({ card, now }: { card: RaceCard; now: number }) {
         {card.status === "open" ? <EntryBoard card={card} picked={pick} onPick={setPick} /> : <RaceTrack card={card} now={now} />}
       </div>
       {card.status === "running" ? (
-        <p className="mt-2 font-mono text-[11px] uppercase tracking-wider text-muted">Show vol · nobody runs backward · the wire is already hashed</p>
+        <p className="mt-2 font-mono text-[11px] uppercase tracking-wider text-muted">Always moving · hashed wire</p>
       ) : null}
       {card.status === "official" ? (
         <p className="mt-3 rounded-md bg-brass/15 px-3 py-2 font-display text-lg text-brass">
@@ -103,55 +99,149 @@ function Meet({ card, now }: { card: RaceCard; now: number }) {
         </p>
       ) : null}
       <FairProof card={card} />
-      <div className="mt-3 flex flex-wrap gap-1">
-        {STAKES.map((x) => (
-          <button
-            key={x}
-            type="button"
-            onClick={() => setStake(String(x))}
-            className={cn(
-              "h-9 rounded-full border px-3 font-mono text-[11px]",
-              Number(stake) === x ? "border-brass bg-brass text-bg" : "border-border text-muted",
-            )}
-          >
-            {x} WPIT
-          </button>
-        ))}
-        <input className="h-9 w-24 rounded-full border border-border bg-elevated px-3 font-mono text-[11px]" value={stake} onChange={(e) => setStake(e.target.value)} />
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-muted">
-        <span>Wallet {fmtQty(wpit)} WPIT</span>
-        <span>Prize vault {fmtQty(vault)} WPIT</span>
-      </div>
-      <Button className="mt-3 h-12 w-full bg-brass text-bg" disabled={blocked} onClick={() => setReview(true)}>
-        {runner ? `Review ${n} WPIT on ${runner.name}` : "Pick a runner"}
-      </Button>
-      {review && runner ? (
-        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-bg/80 p-3 pb-[calc(3.6rem+env(safe-area-inset-bottom))] sm:items-center">
-          <div className="sheet-in w-full max-w-md overflow-hidden rounded-[1.1rem] border border-brass/40 bg-panel p-4">
-            <p className="font-mono text-[10px] uppercase tracking-wider text-brass">Confirm ticket</p>
-            <h3 className="mt-1 font-display text-2xl">
-              {n} WPIT · {runner.name}
-            </h3>
-            <dl className="mt-3 space-y-1 font-mono text-[12px]">
-              <Row k="Odds" v={`${fracOdds(runner.odds)}  (${runner.odds.toFixed(2)})`} />
-              <Row k="Stake" v={`${fmtQty(n)} WPIT`} />
-              <Row k="Prize if it hits" v={`${fmtQty(n * runner.odds)} WPIT`} />
-              <Row k="WPIT after entry" v={fmtQty(wpit - n)} />
-              <Row k="Commit" v={card.commit ? card.commit.slice(0, 16) : "sealing"} />
-            </dl>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button variant="outline" className="h-12" onClick={() => setReview(false)}>
-                Edit
-              </Button>
-              <Button className="h-12 bg-brass text-bg" onClick={send}>
-                Confirm bet
-              </Button>
+      {pick && card.status === "open" ? <TicketSheet card={card} pick={pick} onClose={() => setPick(null)} /> : null}
+    </section>
+  );
+}
+
+function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; onClose: () => void }) {
+  const bet = useWolf((st) => st.placeRaceBet);
+  const wpit = useWolf((s) => s.account.wpit);
+  const vault = useWolf((s) => s.games?.vaultWpit ?? 0);
+  const runner = card.runners.find((r) => r.no === pick)!;
+  const [market, setMarket] = useState<BetMarket>("win");
+  const [pair, setPair] = useState<number | null>(null);
+  const [stake, setStake] = useState("100");
+  const [confirm, setConfirm] = useState(false);
+  const n = Number(stake) || 0;
+  const needsPair = market === "quinella" || market === "exacta";
+  const odds = marketOdds(card, market, pick, pair ?? undefined);
+  const maxPay = n * odds;
+  const maxLoss = n;
+  const ready = n >= MIN_BET && n <= wpit + 1e-9 && (!needsPair || (pair && pair !== pick));
+
+  useEffect(() => {
+    setPair(null);
+    setConfirm(false);
+    setMarket("win");
+  }, [pick]);
+
+  function send() {
+    if (!ready) return;
+    bet(card.kind, pick, n, market, pair ?? undefined);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-bg/80 p-3 pb-[calc(3.6rem+env(safe-area-inset-bottom))] sm:items-center">
+      <div className="sheet-in max-h-[min(88dvh,40rem)] w-full max-w-md overflow-auto rounded-[1.1rem] border border-brass/40 bg-panel p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <RunnerGfx kind={card.kind} coat={runner.coat} no={runner.no} size={36} gait="idle" />
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-brass">Ticket</p>
+              <h3 className="font-display text-2xl leading-tight">{runner.name}</h3>
+              <p className="font-mono text-[11px] text-muted">Win {fracOdds(runner.odds)}</p>
             </div>
           </div>
+          <button type="button" className="h-9 px-2 font-mono text-[11px] text-muted" onClick={onClose}>
+            Close
+          </button>
         </div>
-      ) : null}
-    </section>
+
+        <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-subtle">Market</p>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {MARKETS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMarket(m);
+                setConfirm(false);
+              }}
+              className={cn(
+                "h-9 rounded-full border px-3 font-mono text-[11px] uppercase",
+                market === m ? "border-brass bg-brass text-bg" : "border-border text-muted",
+              )}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1 font-mono text-[10px] text-muted">{MARKET_HINT[market]}</p>
+
+        {needsPair ? (
+          <div className="mt-2">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-subtle">
+              {market === "exacta" ? "2nd" : "With"}
+            </p>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {card.runners
+                .filter((r) => r.no !== pick)
+                .map((r) => (
+                  <button
+                    key={r.no}
+                    type="button"
+                    onClick={() => setPair(r.no)}
+                    className={cn(
+                      "h-8 rounded-full border px-2.5 font-mono text-[10px]",
+                      pair === r.no ? "border-brass bg-brass text-bg" : "border-border text-muted",
+                    )}
+                  >
+                    #{r.no} {r.name}
+                  </button>
+                ))}
+            </div>
+          </div>
+        ) : null}
+
+        <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-subtle">Stake</p>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {STAKES.map((x) => (
+            <button
+              key={x}
+              type="button"
+              onClick={() => setStake(String(x))}
+              className={cn(
+                "h-9 rounded-full border px-3 font-mono text-[11px]",
+                Number(stake) === x ? "border-brass bg-brass text-bg" : "border-border text-muted",
+              )}
+            >
+              {x}
+            </button>
+          ))}
+          <input
+            className="h-9 w-24 rounded-full border border-border bg-elevated px-3 font-mono text-[11px]"
+            value={stake}
+            onChange={(e) => setStake(e.target.value)}
+          />
+        </div>
+
+        <dl className="mt-3 space-y-0 font-mono text-[12px]">
+          <Row k="Selection" v={ticketName(card, market, pick, pair ?? undefined)} />
+          <Row k="Odds" v={`${fracOdds(odds)}  (${odds.toFixed(2)})`} />
+          <Row k="Max payout" v={`${fmtQty(maxPay)} WPIT`} />
+          <Row k="Max loss" v={`${fmtQty(maxLoss)} WPIT`} />
+          <Row k="Wallet after" v={fmtQty(Math.max(0, wpit - n))} />
+          <Row k="Vault" v={`${fmtQty(vault)} WPIT`} />
+        </dl>
+
+        {!confirm ? (
+          <Button className="mt-4 h-12 w-full bg-brass text-bg" disabled={!ready} onClick={() => setConfirm(true)}>
+            {ready ? "Review ticket" : needsPair && !pair ? "Pick the other runner" : "Set a stake"}
+          </Button>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <Button variant="outline" className="h-12" onClick={() => setConfirm(false)}>
+              Edit
+            </Button>
+            <Button className="h-12 bg-brass text-bg" onClick={send}>
+              Confirm bet
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -181,26 +271,24 @@ function Tickets() {
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {open.map((b) => (
           <article key={b.id} className="rounded-[var(--radius-lg)] border border-brass/40 bg-elevated p-3">
-            <div className="font-mono text-[10px] uppercase tracking-wider text-brass">Open · {b.kind}</div>
-            <div className="font-display text-xl">
-              #{b.runner} {b.name}
+            <div className="font-mono text-[10px] uppercase tracking-wider text-brass">
+              Open · {b.market ?? "win"} · {b.kind}
             </div>
+            <div className="font-display text-xl">{b.name}</div>
             <div className="font-mono text-[12px] text-muted">
-              {fmtQty(b.stake)} WPIT @ {fracOdds(b.odds)} · prize {fmtQty(b.stake * b.odds)}
+              {fmtQty(b.stake)} WPIT @ {fracOdds(b.odds)} · max {fmtQty(b.stake * b.odds)}
             </div>
           </article>
         ))}
         {recent.map((b) => (
           <article key={b.id} className={cn("rounded-[var(--radius-lg)] border p-3", b.status === "won" ? "border-up/40 bg-up/10" : "border-border bg-panel")}>
             <div className="font-mono text-[10px] uppercase tracking-wider text-subtle">
-              {b.status} · {b.kind}
+              {b.status} · {b.market ?? "win"} · {b.kind}
             </div>
-            <div className="font-display text-xl">
-              #{b.runner} {b.name}
-            </div>
+            <div className="font-display text-xl">{b.name}</div>
             <div className="font-mono text-[12px] text-muted">
               {fmtQty(b.stake)} WPIT @ {fracOdds(b.odds)}
-              {b.status === "won" ? ` · prize ${fmtQty(b.payout)}` : ""}
+              {b.status === "won" ? ` · prize ${fmtQty(b.payout)}` : ` · lost ${fmtQty(b.stake)}`}
             </div>
           </article>
         ))}

@@ -24,7 +24,7 @@ import {
   unstakeWpit,
 } from "./engine";
 import { placeBet, settleGames, ensureRaces } from "./games";
-import type { EngineState, FutSide, OptType, PoolId, RaceKind, WorkingOrder } from "./types";
+import type { BetMarket, EngineState, FutSide, OptType, PoolId, RaceKind, WorkingOrder } from "./types";
 import { useAdmin } from "@/lib/admin/config";
 import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
@@ -64,7 +64,7 @@ type Actions = {
   cancelOrder: (id: string) => void;
   listToken: (symbol: string, mark: number) => void;
   joinComp: () => void;
-  placeRaceBet: (kind: RaceKind, runner: number, stake: number) => void;
+  placeRaceBet: (kind: RaceKind, runner: number, stake: number, market?: BetMarket, runnerB?: number) => void;
   seedRaces: () => void;
 };
 
@@ -209,15 +209,15 @@ export const useWolf = create<WolfStore>()(
         ping("You're in the Pit Open. $100k paper. Go shout.", "brass");
         set({ ...joinCompEngine(get()), lastError: null });
       },
-      placeRaceBet: (kind, runner, stake) => {
-        const r = placeBet(get(), kind, runner, stake);
+      placeRaceBet: (kind, runner, stake, market = "win", runnerB) => {
+        const r = placeBet(get(), kind, runner, stake, Date.now(), market, runnerB);
         if (typeof r === "string") {
           ping(r, "down");
           set({ lastError: r });
           return;
         }
         const b = r.games?.bets[0];
-        ping(`Ticket · ${b?.name ?? "runner"} @ ${b?.odds ?? "?"} · ${stake} WPIT`, "brass");
+        ping(`Ticket · ${b?.market?.toUpperCase() ?? "WIN"} ${b?.name ?? "runner"} @ ${b?.odds ?? "?"} · ${stake} WPIT`, "brass");
         set({ ...r, lastError: null });
       },
       seedRaces: () => set(ensureRaces(get(), Date.now())),

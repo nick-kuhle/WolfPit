@@ -1,7 +1,7 @@
 import { uid } from "./math";
 import { requireFinitePositive } from "./limits";
 import { randomHex, sha256Hex } from "./sha256";
-import type { EngineState, FairRace } from "./types";
+import type { BetMarket, EngineState, FairRace } from "./types";
 import type { GameBet, GameMeet, GamesState, RaceKind } from "./types";
 
 export const RACE_MS = 60_000;
@@ -216,27 +216,18 @@ export function fieldAt(card: RaceCard, now: number) {
   });
 }
 
-/** Strictly increasing. Pattern is unique per runner/race — winner is not always last. */
+/** Always moving on (0,1). Unique curve per runner; winner still first at the wire. */
 export function raceX(t: number, place: number, no: number, seed: number) {
   const tt = Math.min(1, Math.max(0, t));
   const finish = 1 - place * 0.04;
   const r = rng(seed ^ Math.imul(no + 1, 2654435761));
-  const p = 0.4 + r() * 2.4;
-  const knots = 7;
-  const ys: number[] = [0];
-  for (let i = 1; i < knots; i++) {
-    const u = i / knots;
-    const mix = 0.45 * r() + 0.55 * Math.pow(u, p);
-    const y = finish * mix;
-    const prev = ys[ys.length - 1]!;
-    ys.push(Math.max(prev + finish * 0.012, Math.min(finish * 0.97, y)));
-  }
-  ys.push(finish);
-  const x = tt * knots;
-  const i = Math.min(knots - 1, Math.floor(x));
-  const local = x - i;
-  const s = local * local * (3 - 2 * local);
-  return ys[i]! + (ys[i + 1]! - ys[i]!) * s;
+  const p = 0.7 + r() * 1.5;
+  const cruise = 0.46 + r() * 0.16;
+  const k = 2 + Math.floor(r() * 3);
+  const w = 0.06 * (tt - Math.sin(2 * Math.PI * k * tt) / (2 * Math.PI * k));
+  const raw = cruise * tt + (1 - cruise) * Math.pow(tt, p) + w;
+  const end = cruise + (1 - cruise) + 0.06;
+  return finish * (raw / end);
 }
 
 export function shortHash(hex: string, n = 10) {
@@ -247,12 +238,72 @@ export function liability(odds: number, stake: number) {
   return stake * Math.max(0, odds - 1);
 }
 
+function roundOdds(n: number) {
+  return Math.min(120, Math.max(1.15, Math.round(n * 20) / 20));
+}
+
+function pWin(card: RaceCard, no: number) {
+  const o = card.runners.find((r) => r.no === no)?.odds ?? 10;
+  return 1 / Math.max(1.05, o);
+}
+
+export function marketOdds(card: RaceCard, market: BetMarket, a: number, b?: number) {
+  const run = card.runners.find((r) => r.no === a);
+  const win = run?.odds ?? 3;
+  if (market === "win") return roundOdds(win);
+  if (market === "place") return roundOdds(1 + (win - 1) * 0.38);
+  if (market === "show") return roundOdds(1 + (win - 1) * 0.22);
+  if ((market === "quinella" || market === "exacta") && b && b !== a) {
+    const pa = pWin(card, a);
+    const pb = pWin(card, b);
+    if (market === "quinella") {
+      const pq = pa * (pb / Math.max(0.08, 1 - pa)) + pb * (pa / Math.max(0.08, 1 - pb));
+      return roundOdds(1 / Math.max(0.012, pq * 0.88));
+    }
+    const pe = pa * (pb / Math.max(0.08, 1 - pa));
+    return roundOdds(1 / Math.max(0.01, pe * 0.85));
+  }
+  return roundOdds(win);
+}
+
+export function ticketHits(b: GameBet, places: number[]) {
+  const m = b.market ?? "win";
+  const i = places.indexOf(b.runner);
+  if (m === "win") return i === 0;
+  if (m === "place") return i >= 0 && i <= 1;
+  if (m === "show") return i >= 0 && i <= 2;
+  if (m === "quinella") {
+    const top = new Set(places.slice(0, 2));
+    return Boolean(b.runnerB && top.has(b.runner) && top.has(b.runnerB));
+  }
+  if (m === "exacta") return places[0] === b.runner && places[1] === b.runnerB;
+  return false;
+}
+
+export function ticketName(card: RaceCard, market: BetMarket, a: number, b?: number) {
+  const na = card.runners.find((r) => r.no === a)?.name ?? `#${a}`;
+  const nb = b ? card.runners.find((r) => r.no === b)?.name ?? `#${b}` : "";
+  if (market === "quinella" && nb) return `${na} / ${nb}`;
+  if (market === "exacta" && nb) return `${na} > ${nb}`;
+  return na;
+}
+
+export const MARKET_HINT: Record<BetMarket, string> = {
+  win: "1st only",
+  place: "1st or 2nd",
+  show: "1st, 2nd or 3rd",
+  quinella: "1st and 2nd, any order",
+  exacta: "1st and 2nd, in order",
+};
+
 export function placeBet(
   s: EngineState,
   kind: RaceKind,
   runner: number,
   stake: number,
   now = Date.now(),
+  market: BetMarket = "win",
+  runnerB?: number,
 ): EngineState | string {
   const bad = requireFinitePositive(stake, "Stake");
   if (bad) return bad;
@@ -263,21 +314,29 @@ export function placeBet(
   if (card.status !== "open") return "Betting closed. Gates are up.";
   const run = card.runners.find((x) => x.no === runner);
   if (!run) return "No such runner.";
+  if (market === "quinella" || market === "exacta") {
+    if (!runnerB || runnerB === runner) return "Pick a second runner.";
+    if (!card.runners.some((x) => x.no === runnerB)) return "No such runner.";
+  }
+  const odds = marketOdds(card, market, runner, runnerB);
   const games = s.games ?? emptyGames();
   if (s.account.wpit + 1e-9 < stake) return "Not enough WPIT.";
-  const due = liability(run.odds, stake);
-  const onRunner = games.bets
-    .filter((b) => b.raceId === card.id && b.runner === runner && b.status === "open")
+  const due = liability(odds, stake);
+  const onBook = games.bets
+    .filter((b) => b.raceId === card.id && b.status === "open")
     .reduce((a, b) => a + liability(b.odds, b.stake), 0);
-  if (due + onRunner > games.vaultWpit * 0.15) return "Book is full on that runner. Cut the stake.";
+  if (due + onBook > games.vaultWpit * 0.35) return "Book is full. Cut the stake.";
+  const name = ticketName(card, market, runner, runnerB);
   const bet: GameBet = {
     id: uid("bet"),
     raceId: card.id,
     kind,
     runner: run.no,
-    name: run.name,
+    runnerB: market === "quinella" || market === "exacta" ? runnerB : undefined,
+    name,
     stake,
-    odds: run.odds,
+    odds,
+    market,
     placedAt: now,
     status: "open",
     payout: 0,
@@ -298,12 +357,12 @@ export function placeBet(
         id: uid("f"),
         t: s.clock,
         product: "spot" as const,
-        symbol: `${card.kind} ${run.name}`,
+        symbol: `${card.kind} ${name}`,
         side: "bet",
         size: stake,
-        price: run.odds,
+        price: odds,
         fee: 0,
-        note: `${fracOdds(run.odds)} · ${card.id} · commit ${shortHash(commit)}`,
+        note: `${market.toUpperCase()} ${fracOdds(odds)} · ${card.id} · commit ${shortHash(commit)}`,
         before,
         after,
         fair: { raceId: card.id, commit },
@@ -335,10 +394,10 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
     }
     if (now < card.settleAt) return b;
     changed = true;
-    const win = b.runner === card.winner;
+    const hit = ticketHits(b, card.places);
     const fair = games.races?.[card.id];
     const proof = fair ? { raceId: card.id, commit: fair.commit, seed: fair.seed, winner: fair.winner } : undefined;
-    if (!win) {
+    if (!hit) {
       const before = { usdc: s.account.usdc, eth: s.account.eth, wpit };
       fills.unshift({
         id: uid("f"),

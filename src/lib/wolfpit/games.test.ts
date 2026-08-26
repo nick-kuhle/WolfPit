@@ -120,7 +120,9 @@ describe("pit racetrack", () => {
       const t = card.postAt + (k / 40) * RUN_MS;
       const cur = fieldAt(card, t);
       for (let i = 0; i < cur.length; i++) {
-        assert.ok(cur[i]!.x + 1e-9 >= prev[i]!.x, `runner ${cur[i]!.no} reversed`);
+        const dx = cur[i]!.x - prev[i]!.x;
+        assert.ok(dx + 1e-9 >= 0, `runner ${cur[i]!.no} reversed`);
+        if (k < 40) assert.ok(dx > 0.0015, `runner ${cur[i]!.no} stalled ${dx}`);
       }
       prev = cur;
     }
@@ -141,5 +143,38 @@ describe("pit racetrack", () => {
       if (rank >= mid.length - 2) last += 1;
     }
     assert.ok(last < 16, `winner parked last ${last}/20`);
+  });
+
+  it("pays place on second and quinella on the exact pair", () => {
+    const start = slotStart(2_400_000_000_000, "horse");
+    const now = start + 1_000;
+    let s0 = initialState();
+    s0.account.wpit = 5_000;
+    s0 = ensureRace(s0, "horse", now);
+    const card = cardFor("horse", now, s0.games);
+    const first = card.places[0]!;
+    const second = card.places[1]!;
+    const third = card.places[2]!;
+    const a = placeBet(s0, "horse", second, 100, now, "place");
+    assert.equal(typeof a, "object");
+    if (typeof a === "string") throw new Error(a);
+    const b = placeBet(a, "horse", first, 100, now, "quinella", second);
+    assert.equal(typeof b, "object");
+    if (typeof b === "string") throw new Error(b);
+    const c = placeBet(b, "horse", third, 100, now, "show");
+    assert.equal(typeof c, "object");
+    if (typeof c === "string") throw new Error(c);
+    const d = placeBet(c, "horse", second, 100, now, "exacta", first);
+    assert.equal(typeof d, "object");
+    if (typeof d === "string") throw new Error(d);
+    const done = settleGames(d, card.settleAt + 50);
+    const place = done.games?.bets.find((x) => x.market === "place");
+    const q = done.games?.bets.find((x) => x.market === "quinella");
+    const show = done.games?.bets.find((x) => x.market === "show");
+    const ex = done.games?.bets.find((x) => x.market === "exacta");
+    assert.equal(place?.status, "won");
+    assert.equal(q?.status, "won");
+    assert.equal(show?.status, "won");
+    assert.equal(ex?.status, "lost");
   });
 });

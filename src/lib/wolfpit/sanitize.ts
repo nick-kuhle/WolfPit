@@ -181,9 +181,14 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
               raceId: String(b.raceId ?? ""),
               kind: b.kind === "dog" ? "dog" as const : "horse" as const,
               runner: Math.max(1, Math.round(nn(b.runner, 1))),
-              name: String(b.name ?? "").slice(0, 32),
+              runnerB: b.runnerB ? Math.max(1, Math.round(nn(b.runnerB, 0))) : undefined,
+              name: String(b.name ?? "").slice(0, 72),
               stake: nn(b.stake),
-              odds: Math.min(50, Math.max(1.1, nn(b.odds, 2))),
+              odds: Math.min(150, Math.max(1.1, nn(b.odds, 2))),
+              market:
+                b.market === "place" || b.market === "show" || b.market === "quinella" || b.market === "exacta"
+                  ? b.market
+                  : "win",
               placedAt: nn(b.placedAt),
               status: b.status === "won" || b.status === "lost" ? b.status : "open",
               payout: nn(b.payout),
