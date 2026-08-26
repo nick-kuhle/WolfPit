@@ -243,17 +243,49 @@ export const getUniverse = createServerFn({ method: "GET" }).handler(async (): P
 });
 
 
+export const searchTokens = createServerFn({ method: "GET" })
+  .validator((d: { q: string }) => d)
+  .handler(async ({ data }): Promise<Listing[]> => {
+    const q = data.q.trim();
+    if (!q) return [];
+    if (/^wpit$/i.test(q) || /^wolf/i.test(q)) {
+      return [
+        {
+          symbol: "WPIT",
+          name: "WolfPit",
+          price: 0,
+          change24: 0,
+          volume24: 0,
+          chain: "Base",
+        },
+      ];
+    }
+    const dex = await dexSearch(q);
+    if (dex.length) return dex;
+    const g = await geckoSearch(q);
+    return g ? [g] : [];
+  });
+
 export const lookupToken = createServerFn({ method: "GET" })
   .validator((d: { q: string }) => d)
   .handler(async ({ data }): Promise<Listing> => {
     const q = data.q.trim();
+    if (/^wpit$/i.test(q) || /^wolfpit$/i.test(q)) {
+      return {
+        symbol: "WPIT",
+        name: "WolfPit",
+        price: 0,
+        change24: 0,
+        volume24: 0,
+        chain: "Base",
+      };
+    }
     if (/^0x[a-fA-F0-9]{40}$/.test(q)) {
       const dex = await dexToken(q);
       if (dex) return dex;
     }
-    const rows = await geckoMarkets();
-    const hit = rows.find((r) => r.symbol === q.toUpperCase() || r.name.toLowerCase() === q.toLowerCase());
-    if (hit) return hit;
+    const hits = await dexSearch(q);
+    if (hits[0]) return hits[0];
     const search = await geckoSearch(q);
     if (search) return search;
     throw new Error("Token not found.");
@@ -314,6 +346,46 @@ async function geckoMarkets(): Promise<Listing[]> {
         geckoId: c.id,
       };
     });
+  } catch {
+    return [];
+  }
+}
+
+async function dexSearch(q: string): Promise<Listing[]> {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) return [];
+    const j = (await res.json()) as {
+      pairs?: {
+        chainId: string;
+        pairAddress?: string;
+        priceUsd?: string;
+        priceChange?: { h24?: number };
+        volume?: { h24?: number };
+        baseToken: { symbol: string; name: string; address: string };
+      }[];
+    };
+    const seen = new Set<string>();
+    const out: Listing[] = [];
+    for (const p of j.pairs ?? []) {
+      const symbol = p.baseToken.symbol.toUpperCase();
+      const key = `${p.chainId}:${p.baseToken.address}`;
+      if (seen.has(key) || out.length >= 12) continue;
+      seen.add(key);
+      out.push({
+        symbol,
+        name: p.baseToken.name,
+        price: Number(p.priceUsd) || 0,
+        change24: (p.priceChange?.h24 ?? 0) / 100,
+        volume24: p.volume?.h24 ?? 0,
+        chain: p.chainId,
+        contract: p.baseToken.address,
+        network: p.chainId === "ethereum" ? "eth" : p.chainId,
+        poolAddress: p.pairAddress,
+        binance: BINANCE_MAP[symbol],
+      });
+    }
+    return out;
   } catch {
     return [];
   }

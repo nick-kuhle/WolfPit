@@ -154,7 +154,7 @@ export const useWolf = create<WolfStore>()(
       clearError: () => set({ lastError: null }),
     }),
     {
-      name: "wolfpit-sim-v6",
+      name: "wolfpit-sim-v7",
       skipHydration: true,
       partialize: (s) => ({
         clock: s.clock,

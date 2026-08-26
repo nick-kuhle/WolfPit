@@ -26,6 +26,17 @@ export const ETH_LISTING: Listing = {
   geckoId: "ethereum",
 };
 
+export function wpitListing(price: number, change24: number, vol = 2_400_000): Listing {
+  return {
+    symbol: "WPIT",
+    name: "WolfPit",
+    price,
+    change24,
+    volume24: vol,
+    chain: "Base",
+  };
+}
+
 type DeskUi = {
   focus: Listing;
   universe: Listing[];

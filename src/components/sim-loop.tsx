@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useDesk } from "@/lib/wolfpit/desk";
+import { useDesk, wpitListing } from "@/lib/wolfpit/desk";
 import { getLiveMarket, getUniverse } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
 import { useTerms } from "@/lib/wolfpit/terms";
@@ -25,14 +25,26 @@ export function SimLoop() {
         })
         .catch(() => undefined);
       void getUniverse()
-        .then((rows) => {
-          if (dead || !rows.length) return;
-          setUniverse(rows);
+        .then((raw) => {
+          if (dead) return;
+          const wolf = useWolf.getState();
+          const ch24 =
+            wolf.wpitCandles.length > 1 ? wolf.wpit / wolf.wpitCandles[0]!.c - 1 : 0.12;
+          const wpit = wpitListing(wolf.wpit, ch24);
+          const next = [wpit, ...raw.filter((r) => r.symbol !== "WPIT")];
+          setUniverse(next);
           const cur = useDesk.getState().focus;
-          const same = rows.find((r) => r.symbol === cur.symbol);
-          if (same && !cur.network) setFocus({ ...cur, ...same });
+          if (cur.symbol === "WPIT") setFocus({ ...wpit });
+          else {
+            const same = next.find((r) => r.symbol === cur.symbol);
+            if (same && !cur.network) setFocus({ ...cur, ...same });
+          }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (dead) return;
+          const wolf = useWolf.getState();
+          setUniverse([wpitListing(wolf.wpit, 0.12)]);
+        });
     };
     pull();
     const id = window.setInterval(pull, 15_000);

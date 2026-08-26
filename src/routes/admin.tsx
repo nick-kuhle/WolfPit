@@ -1,5 +1,5 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, Link, Outlet, redirect, useRouterState } from "@tanstack/react-router";
+import { useState } from "react";
 import { Shell } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { adminLogout, adminWhoami } from "@/lib/admin/actions";
@@ -8,25 +8,21 @@ import { chainLabel } from "@/lib/wolfpit/chain";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtUsd } from "@/lib/utils";
 
-export const Route = createFileRoute("/admin")({ component: AdminPage });
+export const Route = createFileRoute("/admin")({
+  beforeLoad: async ({ location }) => {
+    if (location.pathname === "/admin/login") return { adminUser: null as string | null };
+    const r = await adminWhoami();
+    if (!r.user) throw redirect({ to: "/admin/login" });
+    return { adminUser: r.user };
+  },
+  component: AdminGate,
+});
 
-function AdminPage() {
-  const [user, setUser] = useState<string | null | undefined>(undefined);
-  const nav = useNavigate();
-  useEffect(() => {
-    void adminWhoami().then((r) => {
-      if (!r.user) nav({ to: "/admin/login" });
-      else setUser(r.user);
-    });
-  }, [nav]);
-  if (!user) {
-    return (
-      <Shell>
-        <p className="p-8 text-sm text-muted">Checking pit ops session…</p>
-      </Shell>
-    );
-  }
-  return <AdminDesk user={user} />;
+function AdminGate() {
+  const { adminUser } = Route.useRouteContext();
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  if (path === "/admin/login" || !adminUser) return <Outlet />;
+  return <AdminDesk user={adminUser} />;
 }
 
 function AdminDesk({ user }: { user: string }) {

@@ -16,6 +16,7 @@ import {
   removeLiquidity,
   setMark,
   settleNow,
+  tick,
   tradeFuture,
   tradeSpot,
 } from "./engine.ts";
@@ -188,7 +189,7 @@ describe("W1-02 risk limits", () => {
     s.wpit = 2;
     const next = harvestFarm(s);
     assert.equal(next.farmWpit, 0);
-    assert.ok(Math.abs(next.account.wpit - 99) < 1e-9);
+    assert.ok(Math.abs(next.account.wpit - (s.account.wpit + 99)) < 1e-9);
     assert.ok(Math.abs(next.insuranceUsdc - (s.insuranceUsdc + 2)) < 1e-9);
   });
 });
@@ -254,6 +255,16 @@ describe("AMM create pool", () => {
     assert.ok(poolTvl(s, "WPIT-USDC-TEST") > 0);
     assert.ok(thin > fat);
     assert.ok(thin > 0);
+  });
+});
+
+describe("WPIT moon", () => {
+  it("synthetic mark tends to rise", () => {
+    let s = initialState();
+    const start = s.wpit;
+    for (let i = 0; i < 240; i++) s = tick(s, 1);
+    assert.ok(s.wpit > start * 0.9);
+    assert.ok(s.wpitCandles.length >= 2);
   });
 });
 

@@ -49,7 +49,8 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
   }, [prefer]);
 
   useEffect(() => {
-    const id = focus.symbol === "ETH" ? "ETH-USDC" : `${focus.symbol}-USDC`;
+    const id =
+      focus.symbol === "ETH" ? "ETH-USDC" : focus.symbol === "WPIT" ? "WPIT-USDC-TEST" : `${focus.symbol}-USDC`;
     setPoolId(id);
     listToken(focus.symbol, focus.price || s.eth);
   }, [focus.symbol, focus.price, listToken, s.eth]);

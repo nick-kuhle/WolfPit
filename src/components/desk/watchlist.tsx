@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ping } from "@/lib/wolfpit/alerts";
-import { useDesk, type Listing } from "@/lib/wolfpit/desk";
-import { CHAINS, getChainTape, lookupToken } from "@/lib/wolfpit/market";
+import { useDesk, wpitListing, type Listing } from "@/lib/wolfpit/desk";
+import { CHAINS, getChainTape, searchTokens } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -19,9 +18,11 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   const cardOpen = useDesk((s) => s.cardOpen);
   const [tab, setTab] = useState<Tab>("hot");
   const [q, setQ] = useState("");
+  const [hits, setHits] = useState<Listing[]>([]);
   const [busy, setBusy] = useState(false);
   const [chainBusy, setChainBusy] = useState(false);
   const listToken = useWolf((s) => s.listToken);
+  const wpitPx = useWolf((s) => s.wpit);
 
   useEffect(() => {
     if (tab !== "chains") return;
@@ -42,69 +43,77 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
     };
   }, [tab, chainId, setChainTape]);
 
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 1) {
+      setHits([]);
+      setBusy(false);
+      return;
+    }
+    setBusy(true);
+    const t = window.setTimeout(() => {
+      void searchTokens({ data: { q: query } })
+        .then((rows) => {
+          setHits(
+            rows.map((r) => (r.symbol === "WPIT" ? wpitListing(wpitPx, r.change24, r.volume24 || 2_400_000) : r)),
+          );
+        })
+        .catch(() => setHits([]))
+        .finally(() => setBusy(false));
+    }, 180);
+    return () => window.clearTimeout(t);
+  }, [q, wpitPx]);
+
   const rows = useMemo(() => {
+    if (q.trim()) return hits;
     if (tab === "chains") return chainTape;
     const u = universe.slice();
     if (tab === "gainers") return u.sort((a, b) => b.change24 - a.change24);
     if (tab === "losers") return u.sort((a, b) => a.change24 - b.change24);
-    return u.sort((a, b) => b.volume24 - a.volume24);
-  }, [universe, chainTape, tab]);
+    return u.sort((a, b) => (a.symbol === "WPIT" ? -1 : b.symbol === "WPIT" ? 1 : b.volume24 - a.volume24));
+  }, [universe, chainTape, tab, q, hits]);
 
   function pick(l: Listing) {
-    openCard(l);
-    listToken(l.symbol, l.price || 1);
-    onPick?.(l);
-  }
-
-  async function lookup() {
-    const query = q.trim();
-    if (!query) return;
-    setBusy(true);
-    try {
-      const l = await lookupToken({ data: { q: query } });
-      pick(l);
-      setQ("");
-    } catch {
-      ping("Token not found", "down");
-    } finally {
-      setBusy(false);
-    }
+    const listing = l.symbol === "WPIT" ? wpitListing(wpitPx, l.change24, l.volume24) : l;
+    openCard(listing);
+    listToken(listing.symbol, listing.price || 1);
+    setQ("");
+    setHits([]);
+    onPick?.(listing);
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
-      <form
-        className="flex gap-1 border-b border-border px-3 py-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void lookup();
-        }}
-      >
+      <div className="border-b border-border px-3 py-2">
         <input
-          className="h-11 min-w-0 flex-1 rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono text-xs"
-          placeholder="Ticker or 0x"
+          className="h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono text-xs"
+          placeholder="Search ticker, name, or 0x"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <button type="submit" disabled={busy} className="h-11 px-3 text-xs uppercase tracking-wider text-brass">
-          Go
-        </button>
-      </form>
-      <div className="flex border-b border-border">
-        {(["hot", "gainers", "losers", "chains"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "h-11 flex-1 text-[11px] uppercase tracking-wider",
-              tab === t ? "border-b border-accent text-fg" : "text-muted",
-            )}
-          >
-            {t}
-          </button>
-        ))}
+        {q.trim() ? (
+          <p className="mt-1 text-[10px] uppercase tracking-wider text-subtle">
+            {busy ? "Searching…" : `${hits.length} hit${hits.length === 1 ? "" : "s"}`}
+          </p>
+        ) : null}
       </div>
-      {tab === "chains" ? (
+      {q.trim() ? null : (
+        <div className="flex border-b border-border">
+          {(["hot", "gainers", "losers", "chains"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                "h-11 flex-1 text-[11px] uppercase tracking-wider",
+                tab === t ? "border-b border-accent text-fg" : "text-muted",
+              )}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === "chains" && !q.trim() ? (
         <div className="flex gap-1 overflow-x-auto border-b border-border px-2 py-2">
           {CHAINS.map((c) => (
             <button
@@ -126,11 +135,11 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
           cardOpen && "max-lg:pb-[min(72dvh,28rem)] landscape:max-lg:pb-0 landscape:max-lg:pr-[min(28rem,50vw)] lg:pr-[min(440px,42vw)]",
         )}
       >
-        {chainBusy && tab === "chains" ? <p className="p-3 text-xs text-muted">Loading {chainId}…</p> : null}
-        {!chainBusy && rows.length === 0 ? <p className="p-3 text-xs text-muted">No names on this tape.</p> : null}
+        {chainBusy && tab === "chains" && !q.trim() ? <p className="p-3 text-xs text-muted">Loading {chainId}…</p> : null}
+        {!busy && rows.length === 0 ? <p className="p-3 text-xs text-muted">{q.trim() ? "No matches." : "No names on this tape."}</p> : null}
         {rows.map((r) => (
           <button
-            key={`${r.network ?? ""}-${r.symbol}-${r.contract ?? r.poolAddress ?? r.geckoId ?? ""}`}
+            key={`${r.network ?? ""}-${r.symbol}-${r.contract ?? r.poolAddress ?? r.geckoId ?? r.name}`}
             onClick={() => pick(r)}
             className={cn(
               "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left",

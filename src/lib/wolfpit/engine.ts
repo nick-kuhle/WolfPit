@@ -8,6 +8,7 @@ import {
   STAKE_APR,
   START_ETH,
   START_USDC,
+  START_WPIT,
   UTIL_CAP,
   WPIT_EMIT_PER_SEC,
   type EngineState,
@@ -60,7 +61,7 @@ export const T0 = Date.UTC(2026, 7, 25, 20, 0, 0);
 
 export function initialState(now = T0): EngineState {
   const eth = 4000;
-  const wpit = 1;
+  const wpit = 0.087;
   return {
     clock: now,
     eth,
@@ -77,10 +78,10 @@ export function initialState(now = T0): EngineState {
     account: {
       usdc: START_USDC,
       eth: START_ETH,
-      wpit: 0,
+      wpit: START_WPIT,
       tokens: {},
       realized: 0,
-      startEquity: START_USDC + START_ETH * eth,
+      startEquity: START_USDC + START_ETH * eth + START_WPIT * wpit,
     },
     vault: {
       eth: 100,
@@ -134,11 +135,16 @@ export function initialState(now = T0): EngineState {
 function seedCandles(now: number, px: number, kind: "eth" | "wpit") {
   const r = rng(kind === "eth" ? 0x0c0ffee : 0x0b00b1e);
   const out = [];
-  let p = px * 0.985;
-  const vol = kind === "eth" ? 0.008 : 0.02;
+  let p = kind === "wpit" ? px * 0.18 : px * 0.985;
+  const vol = kind === "eth" ? 0.008 : 0.03;
   for (let i = 180; i >= 0; i--) {
     const t = now - i * 60_000;
-    const n = nrand(r) * vol;
+    let n: number;
+    if (kind === "wpit") {
+      n = r() < 0.9 ? 0.006 + r() * 0.018 : -(0.002 + r() * 0.01);
+    } else {
+      n = nrand(r) * vol;
+    }
     const o = p;
     const c = Math.max(0.0001, p * (1 + n));
     const h = Math.max(o, c) * (1 + r() * vol * 0.35);
@@ -152,12 +158,29 @@ function seedCandles(now: number, px: number, kind: "eth" | "wpit") {
   return out;
 }
 
+function moonWpit(px: number, clock: number, dtSec: number) {
+  const steps = Math.max(1, Math.round(dtSec));
+  let p = px;
+  for (let i = 0; i < steps; i++) {
+    const r = rng(0x51a7e ^ ((((clock / 1000) | 0) + i * 19) * 2654435761));
+    const dump = r() < 0.06;
+    const ret = dump ? -(0.004 + r() * 0.02) : 0.004 + r() * 0.012;
+    p = Math.max(0.01, p * (1 + ret));
+  }
+  return p;
+}
+
 export function tick(s: EngineState, dtSec: number): EngineState {
-  const next = { ...s, account: { ...s.account }, vault: { ...s.vault } };
+  const next = { ...s, account: { ...s.account }, vault: { ...s.vault }, pools: { ...s.pools } };
   next.clock = s.liveAt > 0 ? Date.now() : s.clock + dtSec * 1000;
+  next.wpit = moonWpit(s.wpit, next.clock, dtSec);
   const pool = s.pools["WPIT-USDC-TEST"];
   if (pool && pool.baseReserve > 0) {
-    next.wpit = pool.quoteReserve / pool.baseReserve;
+    next.pools["WPIT-USDC-TEST"] = { ...pool, quoteReserve: pool.baseReserve * next.wpit };
+  }
+  const ethPoolWpit = s.pools["WPIT-ETH-TEST"];
+  if (ethPoolWpit && ethPoolWpit.baseReserve > 0 && next.eth > 0) {
+    next.pools["WPIT-ETH-TEST"] = { ...ethPoolWpit, quoteReserve: (ethPoolWpit.baseReserve * next.wpit) / next.eth };
   }
   next.wpitCandles = pushCandle(s.wpitCandles, next.clock, next.wpit);
 
@@ -167,7 +190,7 @@ export function tick(s: EngineState, dtSec: number): EngineState {
   next.insuranceUsdc = (s.insuranceUsdc ?? INSURANCE_SEED) + emit * 0.1 * next.wpit;
   const ethPool = s.pools["ETH-USDC"];
   if (ethPool) {
-    next.pools = { ...s.pools, "ETH-USDC": { ...ethPool, feeBps: spotFeeBps(next.realizedVol) } };
+    next.pools["ETH-USDC"] = { ...ethPool, feeBps: spotFeeBps(next.realizedVol) };
   }
   if (s.stake.amount > 0) {
     next.account = {
@@ -230,6 +253,23 @@ function pushCandle(candles: EngineState["candles"], t: number, px: number) {
     last.v += 1;
   }
   return copy;
+}
+
+export function resampleCandles(bars: EngineState["candles"], intervalMs: number) {
+  if (bars.length < 2 || intervalMs <= 60_000) return bars;
+  const out: EngineState["candles"] = [];
+  for (const c of bars) {
+    const bucket = Math.floor(c.t / intervalMs) * intervalMs;
+    const last = out[out.length - 1];
+    if (!last || last.t !== bucket) out.push({ ...c, t: bucket });
+    else {
+      last.h = Math.max(last.h, c.h);
+      last.l = Math.min(last.l, c.l);
+      last.c = c.c;
+      last.v += c.v;
+    }
+  }
+  return out;
 }
 
 export function equity(s: EngineState) {
@@ -824,6 +864,7 @@ export function createPool(
 export function ensureListed(s: EngineState, symbol: string, mark: number): EngineState {
   const sym = symbol.trim().toUpperCase();
   if (!sym || sym === "USDC") return s;
+  if (sym === "WPIT" && (s.pools["WPIT-USDC-TEST"] || s.pools["WPIT-USDC"])) return s;
   const id = `${sym}-USDC`;
   if (s.pools[id]) return s;
   const px = Math.max(mark, 1e-9);

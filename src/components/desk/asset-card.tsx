@@ -3,6 +3,7 @@ import { PitChart } from "@/components/desk/chart";
 import { OrderTicket } from "@/components/desk/order-ticket";
 import { Button } from "@/components/ui/button";
 import { useDesk } from "@/lib/wolfpit/desk";
+import { resampleCandles } from "@/lib/wolfpit/engine";
 import { getSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { Candle } from "@/lib/wolfpit/types";
@@ -14,6 +15,8 @@ export function AssetCard() {
   const closeCard = useDesk((s) => s.closeCard);
   const setExpanded = useDesk((s) => s.setExpanded);
   const listToken = useWolf((s) => s.listToken);
+  const wpitBars = useWolf((s) => s.wpitCandles);
+  const wpitPx = useWolf((s) => s.wpit);
   const [interval, setIv] = useState<ChartInterval>("1m");
   const [bars, setBars] = useState<Candle[]>([]);
   const [status, setStatus] = useState<"load" | "ok" | "empty">("load");
@@ -24,6 +27,13 @@ export function AssetCard() {
   }, [focus.symbol, focus.price, listToken]);
 
   useEffect(() => {
+    if (focus.symbol === "WPIT") {
+      const ms = interval === "1d" ? 86_400_000 : interval === "1h" ? 3_600_000 : interval === "15m" ? 900_000 : interval === "5m" ? 300_000 : 60_000;
+      const rows = resampleCandles(wpitBars, ms);
+      setBars(rows);
+      setStatus(rows.length >= 2 ? "ok" : "empty");
+      return;
+    }
     let dead = false;
     setStatus("load");
     setBars([]);
@@ -48,7 +58,7 @@ export function AssetCard() {
     return () => {
       dead = true;
     };
-  }, [focus.symbol, focus.binance, focus.geckoId, focus.network, focus.poolAddress, interval]);
+  }, [focus.symbol, focus.binance, focus.geckoId, focus.network, focus.poolAddress, interval, wpitBars, wpitPx]);
 
   return (
     <div
@@ -66,7 +76,7 @@ export function AssetCard() {
           </div>
           <h2 className="truncate font-display text-xl font-medium leading-tight">{focus.name}</h2>
           <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
-            <span className="font-mono text-lg tabular-nums">{fmtPx(focus.price)}</span>
+            <span className="font-mono text-lg tabular-nums">{fmtPx(focus.symbol === "WPIT" ? wpitPx : focus.price)}</span>
             <span className={`font-mono text-sm ${focus.change24 >= 0 ? "text-up" : "text-down"}`}>
               {fmtPct(focus.change24)}
             </span>

@@ -12,6 +12,8 @@ type Pane = "watch" | "port" | "hist";
 
 export function Desk() {
   const cardOpen = useDesk((s) => s.cardOpen);
+  const closeCard = useDesk((s) => s.closeCard);
+  const expanded = useDesk((s) => s.expanded);
   const [pane, setPane] = useState<Pane>("watch");
 
   return (
@@ -37,7 +39,19 @@ export function Desk() {
         {pane === "watch" && <Watchlist />}
         {pane === "port" && <Portfolio />}
         {pane === "hist" && <History />}
-        {cardOpen && pane === "watch" ? <AssetCard /> : null}
+        {cardOpen && pane === "watch" ? (
+          <>
+            {expanded ? null : (
+              <button
+                type="button"
+                aria-label="Close card"
+                className="absolute inset-0 z-20 bg-bg/50"
+                onClick={closeCard}
+              />
+            )}
+            <AssetCard />
+          </>
+        ) : null}
       </div>
     </div>
   );
