@@ -271,6 +271,21 @@
   animation: flutter 4.5s ease-in-out infinite;
 }
 
+.floor-deck {
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.floor-deck::-webkit-scrollbar {
+  display: none;
+}
+.floor-slide {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
 @keyframes flutter {
   0%,
   100% {

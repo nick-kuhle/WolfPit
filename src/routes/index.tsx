@@ -2,14 +2,13 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { LiveTicker } from "@/components/ticker";
-import { HomeTrack } from "@/components/home-track";
+import { FloorDeck } from "@/components/floor-deck";
 import { Button } from "@/components/ui/button";
 import { PIT_OPEN, compBoard, compLive } from "@/lib/wolfpit/comp";
-import { equity, farmApy } from "@/lib/wolfpit/engine";
+import { equity } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { useWallet } from "@/lib/wallet/session";
-import { STAKE_APR } from "@/lib/wolfpit/types";
-import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
+import { fmtUsd } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -27,7 +26,7 @@ function Home() {
   return (
     <Shell>
       <LiveTicker />
-      <HomeTrack />
+      <FloorDeck />
 
       <section className="relative overflow-hidden border-b border-brass/40 bg-brass text-bg">
         <div className="pointer-events-none absolute inset-0 opacity-30">
@@ -102,113 +101,7 @@ function Home() {
           </ol>
         </div>
       </section>
-
-      <section className="relative overflow-hidden">
-        <img src="/brand/hero-pit.jpg" alt="" decoding="async" className="absolute inset-0 size-full object-cover object-center" />
-        <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/55 to-bg/25" />
-        <div className="relative mx-auto max-w-5xl px-4 py-16 sm:py-24">
-          <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-brass">Paper pit · live tape · zero deposit</p>
-          <h1 className="mt-4 max-w-2xl font-display text-5xl font-medium leading-[0.95] tracking-tight sm:text-7xl">
-            Trade like the pit.
-            <span className="italic text-brass"> Farm like you mean it.</span>
-          </h1>
-          <p className="mt-5 max-w-lg text-lg leading-relaxed text-muted">
-            1,000 ETH and $100,000 in paper. Live crypto prices. Farms that print simulated WPIT. Dated options —
-            not perps — so you can finally learn a call without lighting a wallet.
-          </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link to="/trade" className="sm:w-auto">
-              <Button className="h-12 w-full px-6 text-base sm:w-auto">Start with fake money →</Button>
-            </Link>
-            <Link to="/pools" className="sm:w-auto">
-              <Button variant="outline" className="h-12 w-full px-6 text-base sm:w-auto">
-                Show me the yield
-              </Button>
-            </Link>
-          </div>
-          <p className="mt-4 text-xs text-subtle">Simulation. You will accept Terms before the desk or farms.</p>
-        </div>
-      </section>
-
-      <section className="border-b border-border bg-elevated">
-        <div className="mx-auto grid max-w-5xl gap-3 px-4 py-8 sm:grid-cols-3">
-          {[
-            { id: "ETH-USDC" as const, name: "ETH / USDC" },
-            { id: "WPIT-USDC-TEST" as const, name: "WPIT / USDC" },
-            { id: "WPIT-ETH-TEST" as const, name: "WPIT / ETH" },
-          ].map((p) => (
-            <Link key={p.id} to="/pools" className="rounded-[var(--radius-lg)] border border-brass/30 bg-panel p-4 hover:border-brass">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-brass">Farm APY</div>
-              <div className="mt-1 font-display text-3xl text-up">{fmtPct(farmApy(s, p.id))}</div>
-              <div className="mt-1 text-sm text-muted">{p.name} pool</div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto grid max-w-5xl gap-4 px-4 py-10 sm:grid-cols-2 lg:grid-cols-4 sm:py-14">
-        <Wow
-          img="/brand/races/track-horse.jpg"
-          kicker="Racetrack"
-          title="Horses and dogs. A finish every minute."
-          body="Two-minute cards, staggered. Classic book. Tickets in WPIT. The games vault pays the winners."
-          to="/games"
-          cta="Walk the paddock"
-        />
-        <Wow
-          img="/brand/card-farm.jpg"
-          kicker="Farms"
-          title={`Stake ${(STAKE_APR * 100).toFixed(0)}%. Farm more.`}
-          body="WPIT-USDC and WPIT-ETH farms emit into LPs. Harvest. A 1% tax feeds insurance."
-          to="/pools"
-          cta="Open the farms"
-        />
-        <Wow
-          img="/brand/lockup-dark.jpg"
-          kicker="Pools"
-          title="Park WPIT. Earn 12%."
-          body="Junior to insurance. First-loss if the pit has a bad day. Simulated."
-          to="/stake"
-          cta="Open the pools"
-        />
-        <Wow
-          img="/brand/og-pit.jpg"
-          kicker="Paper"
-          title="Take a seat. Shout."
-          body="Spot, dated minis, vanillas. Simulated funds. Live marks."
-          to="/trade"
-          cta="Open the desk"
-        />
-      </section>
       <SiteFooter />
     </Shell>
-  );
-}
-
-function Wow({
-  img,
-  kicker,
-  title,
-  body,
-  to,
-  cta,
-}: {
-  img: string;
-  kicker: string;
-  title: string;
-  body: string;
-  to: "/trade" | "/pools" | "/learn" | "/games" | "/stake";
-  cta: string;
-}) {
-  return (
-    <Link to={to} className="ticket-card group overflow-hidden rounded-[var(--radius-xl)] border border-border bg-panel">
-      <img src={img} alt="" decoding="async" className="aspect-[4/3] w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-      <div className="p-5">
-        <div className="font-mono text-[11px] uppercase tracking-wider text-brass">{kicker}</div>
-        <h2 className="mt-2 font-display text-2xl font-medium leading-tight">{title}</h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
-        <div className="mt-4 text-sm text-fg">{cta} →</div>
-      </div>
-    </Link>
   );
 }

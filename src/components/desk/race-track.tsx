@@ -2,7 +2,7 @@ import { RunnerGfx } from "@/components/desk/runner-gfx";
 import { fieldAt, fracOdds, shortHash, type RaceCard, type Runner } from "@/lib/wolfpit/games";
 import { cn, fmtQty } from "@/lib/utils";
 
-export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number; compact?: boolean }) {
+export function RaceTrack({ card, now, compact, list = true }: { card: RaceCard; now: number; compact?: boolean; list?: boolean }) {
   const field = fieldAt(card, now);
   const t = Math.min(1, Math.max(0, (now - card.postAt) / Math.max(1, card.settleAt - card.postAt)));
   const live = [...field].sort((a, b) => b.x - a.x);
@@ -49,6 +49,7 @@ export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number;
           {card.status === "official" ? "Official" : card.status === "running" ? `Live ${Math.round(t * 100)}%` : "Gate"}
         </div>
       </div>
+      {list ? (
       <ol className="mt-1.5 flex flex-col gap-0.5">
         {live.map((r, i) => {
           const place = i + 1;
@@ -64,6 +65,7 @@ export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number;
           );
         })}
       </ol>
+      ) : null}
     </div>
   );
 }
