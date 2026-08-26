@@ -74,6 +74,7 @@ export type PoolState = {
 export type LpPosition = {
   poolId: PoolId;
   shares: number;
+  costUsdc?: number;
 };
 
 export type StakePos = {
@@ -134,6 +135,7 @@ export type EngineState = {
   fills: OrderFill[];
   working: WorkingOrder[];
   farmWpit: number;
+  harvestedWpit: number;
   insuranceUsdc: number;
   circuitUntil: number;
   simSpeed: 1 | 10 | 60;

@@ -4,7 +4,7 @@ import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
-import { farmApy, lpValue, poolMark, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
+import { farmApy, farmPending, lpPnl, lpValue, poolMark, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { cn, fmtPct, fmtUsd } from "@/lib/utils";
 
@@ -92,6 +92,64 @@ function PoolsPage() {
             </Button>
           </div>
 
+          {s.lp.length > 0 ? (
+            <section className="mt-8">
+              <h2 className="font-display text-2xl">Your liquidity</h2>
+              <p className="mt-1 text-sm text-muted">
+                Harvested {(s.harvestedWpit ?? 0).toFixed(2)} WPIT · ripe {s.farmWpit.toFixed(2)} WPIT
+              </p>
+              <div className="mt-3 grid gap-3">
+                {s.lp.map((pos) => {
+                  const p = s.pools[pos.poolId];
+                  const val = lpValue(s, pos.poolId, pos.shares);
+                  const pnl = lpPnl(s, pos);
+                  const pending = farmPending(s, pos.poolId);
+                  return (
+                    <article key={pos.poolId} className="rounded-[var(--radius-xl)] border border-brass/40 bg-elevated p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-mono text-sm">{prettyPool(pos.poolId)}</div>
+                          <div className="mt-1 font-mono text-[11px] text-muted">
+                            {pos.shares.toPrecision(5)} LP tokens · {fmtUsd(val)} in the pool
+                          </div>
+                          <div className="font-mono text-[11px] text-muted">
+                            {p ? `TVL ${fmtUsd(poolTvl(s, pos.poolId))} · ${fmtPct(farmApy(s, pos.poolId))} APY` : ""}
+                          </div>
+                          <div className="mt-1 font-mono text-[11px]">
+                            Ripe {pending.toFixed(2)} WPIT
+                            {pos.costUsdc ? ` · cost ${fmtUsd(pos.costUsdc)}` : ""}
+                            <span className={pnl >= 0 ? " text-up" : " text-down"}> · P/L {fmtUsd(pnl)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {[0.25, 0.5, 1].map((pct) => (
+                          <Button
+                            key={pct}
+                            size="sm"
+                            variant={pct === 1 ? "outline" : "ghost"}
+                            onClick={() =>
+                              setPending({
+                                title: `Remove ${(pct * 100).toFixed(0)}% from ${prettyPool(pos.poolId)}`,
+                                body: `Pull ${(pos.shares * pct).toPrecision(4)} LP tokens (${fmtUsd(val * pct)}). Legs return to your wallet.`,
+                                run: () => remove(pos.poolId, pos.shares * pct),
+                              })
+                            }
+                          >
+                            Remove {(pct * 100).toFixed(0)}%
+                          </Button>
+                        ))}
+                        <Button size="sm" variant="ghost" onClick={() => setOpenId(pos.poolId)}>
+                          Add more
+                        </Button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
           <div className="mt-8 grid gap-3">
             {ids.map((id) => {
               const p = s.pools[id]!;
@@ -140,7 +198,7 @@ function PoolsPage() {
                           <span className="mt-1 block text-muted">Wallet {fmtAmt(tokenBal(s.account, p.quote))}</span>
                         </label>
                       </div>
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           onClick={() =>
                             setPending({
@@ -152,9 +210,23 @@ function PoolsPage() {
                         >
                           Add liquidity
                         </Button>
-                        <Button variant="outline" disabled={!mine} onClick={() => mine && remove(id, mine.shares)}>
-                          Remove
-                        </Button>
+                        {mine
+                          ? [0.25, 0.5, 1].map((pct) => (
+                              <Button
+                                key={pct}
+                                variant="outline"
+                                onClick={() =>
+                                  setPending({
+                                    title: `Remove ${(pct * 100).toFixed(0)}%`,
+                                    body: `Pull ${(mine.shares * pct).toPrecision(4)} LP from ${prettyPool(id)} (${fmtUsd(lpValue(s, id, mine.shares) * pct)}).`,
+                                    run: () => remove(id, mine.shares * pct),
+                                  })
+                                }
+                              >
+                                Remove {(pct * 100).toFixed(0)}%
+                              </Button>
+                            ))
+                          : null}
                       </div>
                     </div>
                   ) : null}

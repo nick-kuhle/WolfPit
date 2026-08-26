@@ -130,6 +130,7 @@ export function initialState(now = T0): EngineState {
     fills: [],
     working: [],
     farmWpit: 0,
+    harvestedWpit: 0,
     insuranceUsdc: INSURANCE_SEED,
     circuitUntil: 0,
     simSpeed: 1,
@@ -406,6 +407,16 @@ export function poolTvl(s: EngineState, id: PoolId) {
   const pool = s.pools[id];
   if (!pool) return 0;
   return pool.quoteReserve * tokenPx(s, pool.quote) + pool.baseReserve * tokenPx(s, pool.base);
+}
+
+export function farmPending(s: EngineState, id: PoolId) {
+  return s.farmWpit * farmShare(s, id);
+}
+
+export function lpPnl(s: EngineState, pos: EngineState["lp"][number]) {
+  const now = lpValue(s, pos.poolId, pos.shares);
+  const cost = pos.costUsdc ?? now;
+  return now - cost + farmPending(s, pos.poolId) * s.wpit;
 }
 
 export function farmShare(s: EngineState, id: PoolId) {
@@ -1144,7 +1155,8 @@ export function addLiquidity(s: EngineState, poolId: PoolId, quoteAmt: number): 
   copy.quoteReserve += quoteAmt;
   copy.baseReserve += baseIn;
   copy.lpSupply += shares;
-  return { ...s, account: acc, pools: { ...s.pools, [poolId]: copy }, lp: upsertLp(s.lp, poolId, shares) };
+  const cost = quoteAmt * tokenPx(s, copy.quote) + baseIn * tokenPx(s, copy.base);
+  return { ...s, account: acc, pools: { ...s.pools, [poolId]: copy }, lp: upsertLp(s.lp, poolId, shares, cost) };
 }
 
 export function removeLiquidity(s: EngineState, poolId: PoolId, shares: number): EngineState | string {
@@ -1160,7 +1172,12 @@ export function removeLiquidity(s: EngineState, poolId: PoolId, shares: number):
   let acc = creditToken(s.account, pool.quote, quoteOut);
   acc = creditToken(acc, pool.base, baseOut);
   const lp = s.lp
-    .map((p) => (p.poolId === poolId ? { ...p, shares: p.shares - shares } : p))
+    .map((p) => {
+      if (p.poolId !== poolId) return p;
+      const left = p.shares - shares;
+      const cost = (p.costUsdc ?? 0) * (left / p.shares);
+      return { ...p, shares: left, costUsdc: cost };
+    })
     .filter((p) => p.shares > 1e-9);
   return { ...s, account: acc, pools: { ...s.pools, [poolId]: copy }, lp };
 }
@@ -1212,7 +1229,7 @@ export function createPool(
     ...s,
     account: acc,
     pools: { ...s.pools, [id]: pool },
-    lp: upsertLp(s.lp, id, pool.lpSupply),
+    lp: upsertLp(s.lp, id, pool.lpSupply, baseAmt * tokenPx(s, b) + quoteAmt * tokenPx({ ...s, account: acc }, q)),
   };
 }
 
@@ -1250,11 +1267,12 @@ export function issueToken(s: EngineState, symbol: string, amt: number): EngineS
   return { ...s, account: creditToken(s.account, sym, amt) };
 }
 
-function upsertLp(lp: EngineState["lp"], poolId: PoolId, shares: number) {
+function upsertLp(lp: EngineState["lp"], poolId: PoolId, shares: number, costUsdc = 0) {
   const i = lp.findIndex((p) => p.poolId === poolId);
-  if (i < 0) return [...lp, { poolId, shares }];
+  if (i < 0) return [...lp, { poolId, shares, costUsdc }];
   const copy = lp.slice();
-  copy[i] = { poolId, shares: copy[i]!.shares + shares };
+  const cur = copy[i]!;
+  copy[i] = { poolId, shares: cur.shares + shares, costUsdc: (cur.costUsdc ?? 0) + costUsdc };
   return copy;
 }
 
@@ -1319,6 +1337,7 @@ export function harvestFarm(s: EngineState): EngineState {
     ...s,
     account: { ...s.account, wpit: s.account.wpit + net },
     farmWpit: 0,
+    harvestedWpit: (s.harvestedWpit ?? 0) + net,
     insuranceUsdc: s.insuranceUsdc + tax * s.wpit,
   };
 }

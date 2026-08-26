@@ -121,8 +121,14 @@ export const useWolf = create<WolfStore>()(
         }
         apply(tradeFuture(get(), side, contracts, expiry), set);
       },
-      closeFut: (id) => apply(closeFuture(get(), id), set),
-      closeOpt: (id) => apply(closeOption(get(), id), set),
+      closeFut: (id) => {
+        apply(closeFuture(get(), id), set);
+        if (!get().lastError) ping("Mini closed", "brass");
+      },
+      closeOpt: (id) => {
+        apply(closeOption(get(), id), set);
+        if (!get().lastError) ping("Option closed", "brass");
+      },
       openOpt: (type, strike, expiry, contracts) => {
         const g = gated();
         if (g) {
@@ -204,6 +210,7 @@ export const useWolf = create<WolfStore>()(
         fills: s.fills,
         working: s.working,
         farmWpit: s.farmWpit,
+        harvestedWpit: s.harvestedWpit,
         insuranceUsdc: s.insuranceUsdc,
         circuitUntil: s.circuitUntil,
         simSpeed: s.simSpeed,
