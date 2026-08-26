@@ -24,6 +24,8 @@ import {
   futLiqPrice,
   hedgeDelta,
   spreadBps,
+  joinCompetition,
+  payCompPrize,
 } from "./engine.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
 import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
@@ -338,5 +340,23 @@ describe("cover, delta, liq", () => {
     s = hedgeDelta(s);
     assert.ok(s.vault.eth + 1e-9 >= reserved);
     assert.ok(Math.abs(s.vault.reservedEth - reserved) < 1e-9);
+  });
+});
+
+describe("Pit Open", () => {
+  it("join resets to 100k USDC paper", () => {
+    const s = joinCompetition(initialState(), Date.UTC(2026, 7, 26));
+    assert.equal(s.account.usdc, 100_000);
+    assert.equal(s.account.eth, 0);
+    assert.equal(s.compJoined, true);
+    assert.equal(s.account.startEquity, 100_000);
+  });
+
+  it("first place pays 1M WPIT once", () => {
+    let s = joinCompetition(initialState());
+    s = payCompPrize(s, 1);
+    assert.equal(s.account.wpit, 1_000_000);
+    const again = payCompPrize(s, 1);
+    assert.equal(again.account.wpit, 1_000_000);
   });
 });

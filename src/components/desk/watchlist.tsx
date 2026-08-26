@@ -75,11 +75,16 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
 
   function pick(l: Listing) {
     const listing = l.symbol === "WPIT" ? wpitListing(wpitPx, l.change24, l.volume24) : l;
+    if (onPick) {
+      onPick(listing);
+      setQ("");
+      setHits([]);
+      return;
+    }
     openCard(listing);
     listToken(listing.symbol, listing.price || 1);
     setQ("");
     setHits([]);
-    onPick?.(listing);
   }
 
   return (

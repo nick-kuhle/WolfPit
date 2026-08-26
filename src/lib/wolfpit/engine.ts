@@ -1,3 +1,4 @@
+import { PIT_OPEN } from "./comp";
 import {
   DERIV_FEE,
   FUT_IM,
@@ -133,6 +134,9 @@ export function initialState(now = T0): EngineState {
     circuitUntil: 0,
     simSpeed: 1,
     liquidations: 0,
+    equityTape: [{ t: now, o: START_USDC + START_ETH * eth + START_WPIT * wpit, h: START_USDC + START_ETH * eth + START_WPIT * wpit, l: START_USDC + START_ETH * eth + START_WPIT * wpit, c: START_USDC + START_ETH * eth + START_WPIT * wpit, v: 1 }],
+    compJoined: false,
+    compPaid: false,
   };
 }
 
@@ -202,7 +206,7 @@ export function tick(s: EngineState, dtSec: number): EngineState {
       wpit: next.account.wpit + (s.stake.amount * STAKE_APR * dtSec) / (365.25 * 24 * 3600),
     };
   }
-  return matchWorking(settleAndLiq(maybeCircuit(next)));
+  return matchWorking(pushEquity(hedgeDelta(settleAndLiq(maybeCircuit(next)))));
 }
 
 export function applyLive(
@@ -241,7 +245,7 @@ export function applyLive(
       startEquity: s.liveAt === 0 ? START_USDC + START_ETH * feed.eth : s.account.startEquity,
     },
   };
-  return matchWorking(settleAndLiq(maybeCircuit(next)));
+  return matchWorking(pushEquity(settleAndLiq(maybeCircuit(next))));
 }
 
 function pushCandle(candles: EngineState["candles"], t: number, px: number) {
@@ -283,6 +287,71 @@ export function equity(s: EngineState) {
   const opt = s.options.reduce((a, p) => a + optMark(s, p) * p.sizeEth, 0);
   const lpVal = s.lp.reduce((a, p) => a + lpValue(s, p.poolId, p.shares), 0);
   return spot + extras + fut + opt + lpVal + s.stake.amount * s.wpit;
+}
+
+export function pushEquity(s: EngineState): EngineState {
+  const eq = equity(s);
+  return { ...s, equityTape: pushCandle(s.equityTape ?? [], s.clock, eq) };
+}
+
+export function dayPnl(s: EngineState) {
+  const eq = equity(s);
+  const day = new Date(s.clock);
+  day.setUTCHours(0, 0, 0, 0);
+  const start = day.getTime();
+  const tape = s.equityTape ?? [];
+  const first = [...tape].reverse().find((c) => c.t <= start + 86_400_000 && c.t >= start) ?? tape[0];
+  if (!first) return eq - s.account.startEquity;
+  return eq - first.c;
+}
+
+export function liqHealth(s: EngineState) {
+  if (s.futures.length === 0) return { label: "CLEAR", score: 2, tone: "up" as const };
+  let worst = 99;
+  for (const p of s.futures) {
+    const eq = p.margin + futPnl(p, s.eth);
+    const maint = p.sizeEth * s.eth * FUT_MM;
+    worst = Math.min(worst, eq / Math.max(maint, 1e-9));
+  }
+  if (worst < 1.05) return { label: "LIQ", score: worst, tone: "down" as const };
+  if (worst < 1.4) return { label: "TIGHT", score: worst, tone: "warn" as const };
+  return { label: "SOLID", score: worst, tone: "up" as const };
+}
+
+export function joinCompetition(s: EngineState, now = Date.now()): EngineState {
+  const eq0 = PIT_OPEN.entryUsdc;
+  return {
+    ...s,
+    account: {
+      usdc: PIT_OPEN.entryUsdc,
+      eth: 0,
+      wpit: 0,
+      tokens: {},
+      realized: 0,
+      startEquity: eq0,
+    },
+    futures: [],
+    options: [],
+    working: [],
+    fills: [],
+    lp: [],
+    stake: { amount: 0, since: now },
+    farmWpit: 0,
+    equityTape: [{ t: now, o: eq0, h: eq0, l: eq0, c: eq0, v: 1 }],
+    clock: now,
+    compJoined: true,
+    compPaid: false,
+  };
+}
+
+export function payCompPrize(s: EngineState, place: number): EngineState {
+  if (s.compPaid || !s.compJoined) return s;
+  const amt = PIT_OPEN.prize.find((p) => p.place === place)?.wpit ?? 0;
+  return {
+    ...s,
+    compPaid: true,
+    account: { ...s.account, wpit: s.account.wpit + amt },
+  };
 }
 
 export function futPnl(p: EngineState["futures"][number], mark: number) {

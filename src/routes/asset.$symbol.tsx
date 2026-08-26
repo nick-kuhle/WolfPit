@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PitChart } from "@/components/desk/chart";
+import { OrderTicket } from "@/components/desk/order-ticket";
+import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
-import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { useDesk, wpitListing, type Listing } from "@/lib/wolfpit/desk";
 import { resampleCandles } from "@/lib/wolfpit/engine";
@@ -39,6 +40,7 @@ function AssetPage() {
     const local = seed(symbol, q, universe, wpitPx);
     setListing(local);
     listToken(local.symbol, local.price || 1);
+    openCard(local);
     if (local.symbol === "WPIT" || local.price) return;
     let dead = false;
     void lookupToken({ data: { q: q.contract || symbol } })
@@ -49,7 +51,7 @@ function AssetPage() {
     return () => {
       dead = true;
     };
-  }, [symbol, q.contract, q.chain, universe, wpitPx, listToken]);
+  }, [symbol, q.contract, q.chain, universe, wpitPx, listToken, openCard]);
 
   useEffect(() => {
     if (listing.symbol === "WPIT") {
@@ -86,65 +88,74 @@ function AssetPage() {
   const px = listing.symbol === "WPIT" ? wpitPx : listing.price;
 
   return (
-    <Shell>
-      <main className="mx-auto max-w-3xl px-4 py-8">
-        <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">
-          Pit ticket · {listing.chain || "live"}
-        </p>
-        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="font-display text-4xl font-medium tracking-tight">{listing.symbol}</h1>
-            <p className="text-muted">{listing.name || q.name}</p>
-          </div>
-          <div className="text-right">
-            <div className="font-mono text-3xl tabular-nums">{px ? fmtPx(px) : "—"}</div>
-            <div className={listing.change24 >= 0 ? "text-up" : "text-down"}>{fmtPct(listing.change24)}</div>
-          </div>
-        </div>
+    <Shell desk>
+      <ProductGate product="desk">
+        <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <main className="min-h-0 overflow-auto px-3 py-4 sm:px-5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">
+              Pit ticket · {listing.chain || "live"}
+            </p>
+            <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h1 className="font-display text-4xl font-medium tracking-tight">{listing.symbol}</h1>
+                <p className="text-muted">{listing.name || q.name}</p>
+              </div>
+              <div className="text-right">
+                <div className="font-mono text-3xl tabular-nums">{px ? fmtPx(px) : "—"}</div>
+                <div className={listing.change24 >= 0 ? "text-up" : "text-down"}>{fmtPct(listing.change24)}</div>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link to="/trade">
+                <Button size="sm" variant="outline">
+                  Floor
+                </Button>
+              </Link>
+              <Link to="/orders">
+                <Button size="sm" variant="outline">
+                  Fills
+                </Button>
+              </Link>
+              <Button size="sm" variant="ghost" onClick={() => void shareAsset(listing)}>
+                Share
+              </Button>
+            </div>
 
-        <dl className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat k="Volume 24h" v={fmtUsd(listing.volume24)} />
-          <Stat k="Chain" v={listing.chain || "—"} />
-          <Stat k="Contract" v={listing.contract ? `${listing.contract.slice(0, 6)}…${listing.contract.slice(-4)}` : "—"} />
-          <Stat k="Venue" v="WolfPit paper" />
-        </dl>
+            <div className="mt-4 overflow-hidden rounded-[var(--radius-xl)] border border-brass/30 bg-chart">
+              <div className="flex gap-1 border-b border-border px-2">
+                {(["1m", "5m", "15m", "1h", "1d"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setIv(k)}
+                    className={`pressable h-10 px-2.5 font-mono text-xs ${interval === k ? "text-fg" : "text-muted"}`}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+              <div className="h-64 sm:h-80">
+                {status === "ok" ? (
+                  <PitChart candles={bars} height={256} interval={interval} />
+                ) : (
+                  <p className="p-4 text-sm text-muted">{status === "load" ? "Loading candles…" : "No candles for this timeframe."}</p>
+                )}
+              </div>
+            </div>
 
-        <div className="mt-6 overflow-hidden rounded-[var(--radius-xl)] border border-border bg-chart">
-          <div className="flex gap-1 border-b border-border px-2">
-            {(["1m", "5m", "15m", "1h", "1d"] as const).map((k) => (
-              <button
-                key={k}
-                onClick={() => setIv(k)}
-                className={`h-10 px-2.5 font-mono text-xs ${interval === k ? "text-fg" : "text-muted"}`}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
-          <div className="h-64">
-            {status === "ok" ? <PitChart candles={bars} height={256} interval={interval} /> : (
-              <p className="p-4 text-sm text-muted">{status === "load" ? "Loading candles…" : "No candles for this timeframe."}</p>
-            )}
-          </div>
-        </div>
+            <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Stat k="Volume 24h" v={fmtUsd(listing.volume24)} />
+              <Stat k="Chain" v={listing.chain || "—"} />
+              <Stat k="Contract" v={listing.contract ? `${listing.contract.slice(0, 6)}…` : "—"} />
+              <Stat k="Venue" v="Paper pit" />
+            </dl>
 
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-          <Link
-            to="/trade"
-            onClick={() => openCard(listing)}
-            className="sm:flex-1"
-          >
-            <Button className="h-12 w-full">Trade {listing.symbol} on the desk</Button>
-          </Link>
-          <Button variant="outline" className="h-12 sm:w-40" onClick={() => void shareAsset(listing)}>
-            Share
-          </Button>
+            <RecentFills symbol={listing.symbol} />
+          </main>
+          <aside className="min-h-[28rem] border-t border-border lg:h-[calc(100dvh-3rem)] lg:border-l lg:border-t-0">
+            <OrderTicket />
+          </aside>
         </div>
-        {listing.contract ? (
-          <p className="mt-4 break-all font-mono text-[11px] text-subtle">{listing.contract}</p>
-        ) : null}
-      </main>
-      <SiteFooter />
+      </ProductGate>
     </Shell>
   );
 }
@@ -171,9 +182,43 @@ function seed(
   };
 }
 
+function RecentFills({ symbol }: { symbol: string }) {
+  const fills = useWolf((s) => s.fills.filter((f) => f.symbol.toUpperCase().includes(symbol.toUpperCase())).slice(0, 8));
+  const working = useWolf((s) => (s.working ?? []).slice(0, 6));
+  const cancel = useWolf((s) => s.cancelOrder);
+  return (
+    <section className="mt-6">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="font-display text-xl">Tickets</h2>
+        <Link to="/orders" className="text-xs text-brass">
+          All fills →
+        </Link>
+      </div>
+      {working.length === 0 && fills.length === 0 ? <p className="text-sm text-muted">No tickets yet. Shout one.</p> : null}
+      <div className="grid gap-2 sm:grid-cols-2">
+        {working.map((w) => (
+          <div key={w.id} className="ticket-card flex items-center justify-between rounded-[var(--radius-md)] border border-warn/40 bg-warn/10 px-3 py-2">
+            <span className="font-mono text-xs">
+              {w.side} {w.qty} {w.product}
+            </span>
+            <button className="pressable text-xs text-muted" onClick={() => cancel(w.id)}>
+              Cancel
+            </button>
+          </div>
+        ))}
+        {fills.map((f) => (
+          <div key={f.id} className="ticket-card rounded-[var(--radius-md)] border border-border bg-elevated px-3 py-2 font-mono text-xs">
+            {f.side} {f.size.toPrecision(4)} @ {fmtPx(f.price)}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Stat({ k, v }: { k: string; v: string }) {
   return (
-    <div className="rounded-[var(--radius-md)] border border-border bg-surface px-3 py-3">
+    <div className="ticket-card rounded-[var(--radius-md)] border border-border bg-surface px-3 py-3">
       <dt className="text-[10px] uppercase tracking-wider text-subtle">{k}</dt>
       <dd className="mt-1 truncate font-mono text-sm">{v}</dd>
     </div>

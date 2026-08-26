@@ -135,6 +135,9 @@ export type EngineState = {
   circuitUntil: number;
   simSpeed: 1 | 10 | 60;
   liquidations: number;
+  equityTape: Candle[];
+  compJoined: boolean;
+  compPaid: boolean;
 };
 
 export const START_ETH = 1000;

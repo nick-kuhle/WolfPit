@@ -1,8 +1,9 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { BrandLockup, ChainChip } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { LiveTicker } from "@/components/ticker";
 import { Button } from "@/components/ui/button";
+import { PIT_OPEN, compBoard, compLive } from "@/lib/wolfpit/comp";
 import { equity } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
@@ -12,6 +13,14 @@ export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
   const s = useWolf();
+  const join = useWolf((st) => st.joinComp);
+  const nav = useNavigate();
+  const now = Date.now();
+  const live = compLive(now);
+  const board = compBoard(now, { name: "You", equity: equity(s), joined: s.compJoined });
+  const you = board.find((r) => r.you);
+  const ends = new Date(PIT_OPEN.end).toUTCString().replace("GMT", "UTC");
+
   return (
     <div className="min-h-dvh bg-bg pb-16 text-fg lg:pb-0">
       <header className="flex h-14 items-center justify-between px-3 sm:px-5">
@@ -24,12 +33,72 @@ function Home() {
             Learn
           </Link>
           <Link to="/trade">
-            <Button size="sm">Try free</Button>
+            <Button size="sm">Take a seat</Button>
           </Link>
         </div>
       </header>
 
       <LiveTicker />
+
+      <section className="relative overflow-hidden border-b border-brass/40 bg-brass text-bg">
+        <div className="pointer-events-none absolute inset-0 opacity-30">
+          <span className="fly-ticket absolute left-[8%] top-6 rounded-sm bg-ticket px-3 py-1 font-mono text-[10px] text-bg">BUY 12</span>
+          <span className="fly-ticket absolute right-[12%] top-10 rounded-sm bg-bg px-3 py-1 font-mono text-[10px] text-brass" style={{ animationDelay: "0.8s" }}>
+            SELL 4
+          </span>
+          <span className="fly-ticket absolute left-[40%] top-2 rounded-sm bg-down px-3 py-1 font-mono text-[10px] text-fg" style={{ animationDelay: "1.4s" }}>
+            FILL
+          </span>
+        </div>
+        <div className="relative mx-auto grid max-w-5xl gap-6 px-4 py-8 sm:grid-cols-[minmax(0,1fr)_16rem] sm:py-10">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.28em]">Trading competition</p>
+            <h2 className="mt-2 font-display text-4xl font-medium leading-none sm:text-5xl">{PIT_OPEN.name}</h2>
+            <p className="mt-3 max-w-lg text-sm leading-relaxed">
+              Everyone starts with <strong>${PIT_OPEN.entryUsdc.toLocaleString()}</strong> paper USDC. Last shout{" "}
+              <strong>{ends}</strong>. First place takes <strong>{PIT_OPEN.prize[0].wpit.toLocaleString()} WPIT</strong>.
+              Simulated. Loud. Free.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {s.compJoined ? (
+                <Link to="/trade">
+                  <Button className="bg-bg text-brass hover:bg-bg">You're in · trade now</Button>
+                </Link>
+              ) : (
+                <Button
+                  className="bg-bg text-brass hover:bg-bg"
+                  onClick={() => {
+                    join();
+                    void nav({ to: "/trade" });
+                  }}
+                  disabled={!live}
+                >
+                  {live ? "Join · $100k paper" : "Doors closed"}
+                </Button>
+              )}
+              <Link to="/trade">
+                <Button variant="outline" className="border-bg text-bg hover:bg-bg/10">
+                  Open the floor
+                </Button>
+              </Link>
+            </div>
+            {you ? <p className="mt-3 font-mono text-xs">You're #{you.place} · {fmtUsd(you.equity)}</p> : null}
+          </div>
+          <ol className="space-y-2">
+            {board.slice(0, 5).map((r) => (
+              <li
+                key={r.name}
+                className={`ticket-card flex items-center justify-between rounded-md px-3 py-2 ${r.you ? "bg-bg text-brass" : "bg-bg/15"}`}
+              >
+                <span className="font-mono text-xs">
+                  {r.place}. {r.name}
+                </span>
+                <span className="font-mono text-xs">{fmtUsd(r.equity)}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
 
       <section className="relative overflow-hidden">
         <img src="/brand/hero-pit.jpg" alt="" decoding="async" className="absolute inset-0 size-full object-cover object-center" />
@@ -63,15 +132,15 @@ function Home() {
           img="/brand/card-farm.jpg"
           kicker="Farms"
           title={`Stake ${(STAKE_APR * 100).toFixed(0)}%. Farm more.`}
-          body="WPIT-USDC and WPIT-ETH farms emit into LPs. Harvest. A 1% tax feeds insurance. It is supposed to feel like interest. It is still paper."
+          body="WPIT-USDC and WPIT-ETH farms emit into LPs. Harvest. A 1% tax feeds insurance."
           to="/pools"
           cta="Open the farms"
         />
         <Wow
           img="/brand/card-paper.jpg"
           kicker="Free paper"
-          title="No wallet. No card. Press buy."
-          body={`${fmtUsd(equity(s))} on the book right now. Reset anytime. Live ETH at ${fmtPx(s.eth)}. The bruise is real. The money isn’t.`}
+          title="No wallet. Press buy."
+          body={`${fmtUsd(equity(s))} on the book. Live ETH at ${fmtPx(s.eth)}. The bruise is real. The money isn’t.`}
           to="/trade"
           cta="Take a seat"
         />
@@ -79,51 +148,12 @@ function Home() {
           img="/brand/card-options.jpg"
           kicker="Vanillas"
           title="Calls and puts. With an expiry."
-          body="Covered, cash-settled, weekly and monthly. If you’ve only ever touched perps, this will feel like a different sport. That’s the idea."
+          body="Covered, cash-settled, weekly and monthly. If you’ve only ever touched perps, this is a different sport."
           to="/learn"
           cta="How a call works"
         />
       </section>
-
-      <section className="border-y border-border bg-surface">
-        <div className="mx-auto grid max-w-5xl gap-8 px-4 py-12 sm:grid-cols-3 sm:py-16">
-          <Stat n="1,000 ETH" l="Paper stack" />
-          <Stat n="$100,000" l="Paper USDC" />
-          <Stat n="4×" l="Mini initial margin" />
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
-        <h2 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">Three rings. One floor.</h2>
-        <ol className="mt-8 grid gap-4 sm:grid-cols-3">
-          <Step n="01" title="Paper desk" body="Board of the world’s most traded coins. Chart any ticker or 0x. Spot, minis, vanillas." />
-          <Step n="02" title="Pools & farms" body="Add both legs. Watch APY. Harvest WPIT. Create a pair like Sushi." />
-          <Step n="03" title="Stake" body="Junior to insurance. 12% simulated APR. First-loss if the pit has a bad day." />
-        </ol>
-        <Link to="/learn" className="mt-8 inline-block text-brass">
-          Pit school — five minutes →
-        </Link>
-      </section>
-
       <SiteFooter />
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
-        <div className="grid grid-cols-4">
-          {[
-            { to: "/trade" as const, label: "Desk" },
-            { to: "/pools" as const, label: "Farms" },
-            { to: "/stake" as const, label: "Stake" },
-            { to: "/learn" as const, label: "Learn" },
-          ].map((n) => (
-            <Link
-              key={n.to}
-              to={n.to}
-              className="flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider text-muted"
-            >
-              {n.label}
-            </Link>
-          ))}
-        </div>
-      </nav>
     </div>
   );
 }
@@ -144,7 +174,7 @@ function Wow({
   cta: string;
 }) {
   return (
-    <Link to={to} className="group overflow-hidden rounded-[var(--radius-xl)] border border-border bg-panel">
+    <Link to={to} className="ticket-card group overflow-hidden rounded-[var(--radius-xl)] border border-border bg-panel">
       <img src={img} alt="" decoding="async" className="aspect-[4/3] w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
       <div className="p-5">
         <div className="font-mono text-[11px] uppercase tracking-wider text-brass">{kicker}</div>
@@ -153,24 +183,5 @@ function Wow({
         <div className="mt-4 text-sm text-fg">{cta} →</div>
       </div>
     </Link>
-  );
-}
-
-function Stat({ n, l }: { n: string; l: string }) {
-  return (
-    <div>
-      <div className="font-display text-4xl font-medium tracking-tight text-brass sm:text-5xl">{n}</div>
-      <div className="mt-1 text-sm text-muted">{l}</div>
-    </div>
-  );
-}
-
-function Step({ n, title, body }: { n: string; title: string; body: string }) {
-  return (
-    <li className="rounded-[var(--radius-lg)] border border-border bg-surface p-5">
-      <div className="font-mono text-[11px] text-brass">{n}</div>
-      <h3 className="mt-2 text-lg font-medium">{title}</h3>
-      <p className="mt-2 text-sm leading-relaxed text-muted">{body}</p>
-    </li>
   );
 }

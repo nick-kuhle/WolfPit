@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as LearnRouteImport } from './routes/learn'
+import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as PlanRouteImport } from './routes/plan'
 import { Route as PoolsRouteImport } from './routes/pools'
 import { Route as StakeRouteImport } from './routes/stake'
@@ -33,6 +34,11 @@ const AdminRoute = AdminRouteImport.update({
 const LearnRoute = LearnRouteImport.update({
   id: '/learn',
   path: '/learn',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrdersRoute = OrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlanRoute = PlanRouteImport.update({
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/learn': typeof LearnRoute
+  '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
@@ -87,6 +94,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/learn': typeof LearnRoute
+  '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
@@ -100,6 +108,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/learn': typeof LearnRoute
+  '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/stake': typeof StakeRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/learn'
+    | '/orders'
     | '/plan'
     | '/pools'
     | '/stake'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/learn'
+    | '/orders'
     | '/plan'
     | '/pools'
     | '/stake'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/learn'
+    | '/orders'
     | '/plan'
     | '/pools'
     | '/stake'
@@ -151,6 +163,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   LearnRoute: typeof LearnRoute
+  OrdersRoute: typeof OrdersRoute
   PlanRoute: typeof PlanRoute
   PoolsRoute: typeof PoolsRoute
   StakeRoute: typeof StakeRoute
@@ -180,6 +193,13 @@ declare module '@tanstack/react-router' {
       path: '/learn'
       fullPath: '/learn'
       preLoaderRoute: typeof LearnRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orders': {
+      id: '/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof OrdersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/plan': {
@@ -248,6 +268,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   LearnRoute: LearnRoute,
+  OrdersRoute: OrdersRoute,
   PlanRoute: PlanRoute,
   PoolsRoute: PoolsRoute,
   StakeRoute: StakeRoute,

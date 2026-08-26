@@ -12,11 +12,12 @@
   --color-accent-fg: #0b0c0b;
   --color-border: #262826;
   --color-border-strong: #3a3d38;
-  --color-up: #3f9d6e;
-  --color-down: #c45c52;
-  --color-warn: #c4a15c;
-  --color-brass: #d4b56a;
-  --color-gold: #e8d5a3;
+  --color-up: #3dcc7a;
+  --color-down: #ef5a4e;
+  --color-warn: #f0c14b;
+  --color-brass: #f0c14b;
+  --color-gold: #ffe9a3;
+  --color-ticket: #f6e7b0;
   --color-ring: #d4d0c4;
   --color-chart: #101210;
   --color-grid: #262826;
@@ -136,8 +137,29 @@
   transform: scale(0.97);
 }
 
-.ticker-track:hover {
-  animation-play-state: paused;
+.ticket-card {
+  transform: rotate(-0.4deg);
+  box-shadow: 3px 4px 0 color-mix(in oklab, var(--color-brass) 22%, transparent);
+}
+.ticket-card:nth-child(even) {
+  transform: rotate(0.5deg);
+}
+.ticket-card:hover {
+  transform: rotate(0deg) translateY(-2px);
+}
+
+.fly-ticket {
+  animation: flutter 4.5s ease-in-out infinite;
+}
+
+@keyframes flutter {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-8deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(6deg);
+  }
 }
 
 .pit-hero {

@@ -3,19 +3,20 @@ import type { ReactNode } from "react";
 import { WolfMark } from "@/components/mark";
 import { cn } from "@/lib/utils";
 import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
+import { useDesk } from "@/lib/wolfpit/desk";
 
 const NAV = [
-  { to: "/trade" as const, label: "Desk" },
+  { to: "/trade" as const, label: "Floor" },
+  { to: "/orders" as const, label: "Fills" },
   { to: "/pools" as const, label: "Farms" },
   { to: "/stake" as const, label: "Stake" },
-  { to: "/learn" as const, label: "Learn" },
 ];
 
 export function BrandLockup({ className, markClass }: { className?: string; markClass?: string }) {
   return (
     <Link to="/" className={cn("flex min-h-11 items-center gap-2 text-fg", className)}>
-      <WolfMark className={cn("size-7 text-accent", markClass)} />
-      <span className="text-[13px] font-medium tracking-[0.28em]">WOLFPIT</span>
+      <WolfMark className={cn("size-7 text-brass", markClass)} />
+      <span className="text-[13px] font-medium tracking-[0.28em] text-brass">WOLFPIT</span>
     </Link>
   );
 }
@@ -36,6 +37,7 @@ export function ChainChip() {
 
 export function Shell({ children, desk }: { children: ReactNode; desk?: boolean }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const focus = useDesk((s) => s.focus.symbol);
   return (
     <div className="flex min-h-dvh flex-col bg-bg text-fg">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:gap-3 sm:px-4">
@@ -49,28 +51,27 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
               key={n.to}
               to={n.to}
               className={cn(
-                "flex h-11 items-center px-3 text-sm text-muted hover:text-fg",
-                pathname === n.to && "text-fg",
+                "pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg",
+                pathname === n.to && "text-brass",
               )}
             >
               {n.label}
             </Link>
           ))}
           <Link
-            to="/admin"
-            className={cn(
-              "flex h-11 items-center px-3 text-sm text-muted hover:text-fg",
-              pathname.startsWith("/admin") && "text-fg",
-            )}
+            to="/asset/$symbol"
+            params={{ symbol: focus || "ETH" }}
+            search={{ name: "", chain: "", contract: "", network: "" }}
+            className={cn("pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg", pathname.startsWith("/asset") && "text-brass")}
           >
-            Ops
+            Ticket
+          </Link>
+          <Link to="/learn" className="pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg">
+            Learn
           </Link>
         </nav>
       </header>
-      <div className={cn("min-h-0 flex-1", desk ? "" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>
-        {children}
-      </div>
-      {desk ? null : (
+      <div className={cn("min-h-0 flex-1", "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>{children}</div>
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
         <div className="grid grid-cols-5">
           {NAV.map((n) => (
@@ -78,25 +79,26 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
               key={n.to}
               to={n.to}
               className={cn(
-                "flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
-                pathname === n.to ? "text-fg" : "text-muted",
+                "pressable flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
+                pathname === n.to ? "text-brass" : "text-muted",
               )}
             >
               {n.label}
             </Link>
           ))}
           <Link
-            to="/admin"
+            to="/asset/$symbol"
+            params={{ symbol: focus || "ETH" }}
+            search={{ name: "", chain: "", contract: "", network: "" }}
             className={cn(
-              "flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
-              pathname.startsWith("/admin") ? "text-fg" : "text-muted",
+              "pressable flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
+              pathname.startsWith("/asset") ? "text-brass" : "text-muted",
             )}
           >
-            Ops
+            Ticket
           </Link>
         </div>
       </nav>
-      )}
     </div>
   );
 }

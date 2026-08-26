@@ -16,6 +16,8 @@ import {
   placeDeskOrder,
   removeLiquidity,
   stakeWpit,
+  joinCompetition as joinCompEngine,
+  payCompPrize,
   tick,
   tradeFuture,
   tradeSpot,
@@ -23,6 +25,7 @@ import {
 } from "./engine";
 import type { EngineState, FutSide, OptType, PoolId, WorkingOrder } from "./types";
 import { useAdmin } from "@/lib/admin/config";
+import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
 
 type Actions = {
@@ -58,6 +61,7 @@ type Actions = {
   sendOrder: (o: Omit<WorkingOrder, "id" | "created">) => void;
   cancelOrder: (id: string) => void;
   listToken: (symbol: string, mark: number) => void;
+  joinComp: () => void;
 };
 
 type WolfStore = EngineState & Actions;
@@ -92,7 +96,16 @@ export const useWolf = create<WolfStore>()(
       rehydrate: () => {
         void useWolf.persist.rehydrate();
       },
-      step: (dtSec) => set(tick(get(), dtSec)),
+      step: (dtSec) => {
+        let next = tick(get(), dtSec);
+        if (next.compJoined && !next.compPaid && Date.now() >= PIT_OPEN.end) {
+          const board = compBoard(Date.now(), { name: "You", equity: equity(next), joined: true });
+          const you = board.find((r) => r.you);
+          next = payCompPrize(next, you?.place ?? 99);
+          if ((you?.place ?? 99) <= 3) ping(`Pit Open prize · ${you?.place}`, "brass");
+        }
+        set(next);
+      },
       setSpeed: (simSpeed) => set({ simSpeed }),
       buySpot: (pool, usd) => apply(tradeSpot(get(), pool, "buy", usd), set),
       sellSpot: (pool, baseAmt) => apply(tradeSpot(get(), pool, "sell", baseAmt), set),
@@ -147,6 +160,10 @@ export const useWolf = create<WolfStore>()(
         set(cancelWorking(get(), id));
       },
       listToken: (symbol, mark) => set(ensureListed(get(), symbol, mark)),
+      joinComp: () => {
+        ping("You're in the Pit Open. $100k paper. Go shout.", "brass");
+        set({ ...joinCompEngine(get()), lastError: null });
+      },
       reset: () => {
         ping("Paper reset", "brass");
         set({ ...initialState(), lastError: null });
@@ -154,7 +171,7 @@ export const useWolf = create<WolfStore>()(
       clearError: () => set({ lastError: null }),
     }),
     {
-      name: "wolfpit-sim-v8",
+      name: "wolfpit-sim-v9",
       skipHydration: true,
       partialize: (s) => ({
         clock: s.clock,
@@ -183,6 +200,9 @@ export const useWolf = create<WolfStore>()(
         circuitUntil: s.circuitUntil,
         simSpeed: s.simSpeed,
         liquidations: s.liquidations,
+        equityTape: s.equityTape,
+        compJoined: s.compJoined,
+        compPaid: s.compPaid,
       }),
     },
   ),
