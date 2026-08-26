@@ -21,7 +21,7 @@ function LearnPage() {
         <div className="mt-10 space-y-3">
           <Lesson
             q="What is paper trading?"
-            a="You start with 1,000 ETH and 100,000 USDC that are not withdrawable and not real. Fills, P&L, and liquidations run on the same rules we intend to use live. Lose the book, hit Reset paper. No card. No wallet required to try."
+            a="You start with 100,000 USDT and 100,000 WPIT that are not withdrawable and not real. Fills, P&L, and liquidations run on the same rules we intend to use live. Lose the book, hit Reset paper. No card. No wallet required to try paper. Wallet is required for competitions and live markets."
           />
           <Lesson
             q="What is a farm, and why does it pay?"

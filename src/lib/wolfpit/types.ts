@@ -206,7 +206,7 @@ export type EngineState = {
 
 export const START_ETH = 1000;
 export const START_USDC = 100_000;
-export const START_WPIT = 50_000;
+export const START_WPIT = 100_000;
 export const MINI_ETH = 0.1;
 export const FUT_IM = 0.25;
 export const FUT_MM = 0.125;

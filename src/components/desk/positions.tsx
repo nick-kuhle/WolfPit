@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -66,11 +66,11 @@ export function Positions({ flush }: { flush?: boolean }) {
   const trackPnl = gamesPnl(s);
   const settled = groupTickets((s.games?.bets ?? []).filter((b) => b.status !== "open")).slice(0, 8);
   const holdings = [
-    { k: "USDC", qty: s.account.usdc, mark: 1 },
+    { k: "USDT", qty: s.account.usdc, mark: 1 },
     { k: "ETH", qty: s.account.eth, mark: s.eth },
     { k: "WPIT", qty: s.account.wpit, mark: s.wpit },
     ...extras.map(([k, qty]) => ({ k, qty, mark: tokenPx(s, k) })),
-  ].filter((h) => h.k === "USDC" || Math.abs(h.qty) > 1e-6);
+  ].filter((h) => h.k === "USDT" || Math.abs(h.qty) > 1e-6);
 
   return (
     <aside className={cn("flex h-full min-h-0 flex-col overflow-hidden bg-panel", !flush && "border-l border-border")}>
@@ -133,7 +133,7 @@ export function Positions({ flush }: { flush?: boolean }) {
                 <span className="text-right tabular-nums">{fmtUsd(h.qty * h.mark)}</span>
               </div>
               <div className="mt-0.5 flex justify-end px-3">
-                {h.k === "USDC" ? (
+                {h.k === "USDT" ? (
                   <button
                     type="button"
                     className="pressable rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider text-brass hover:bg-brass/15"
@@ -389,6 +389,37 @@ export function Positions({ flush }: { flush?: boolean }) {
                 </div>
               </div>
             ))}
+          </Sec>
+        ) : null}
+
+        {s.fills.length > 0 ? (
+          <Sec title="History" count={s.fills.length}>
+            {s.fills.slice(0, 24).map((f) => (
+              <div key={f.id} className="border-t border-border/50 px-3 py-2">
+                <div className={cn(COLS, "font-mono text-[12px]")}>
+                  <span
+                    className={cn(
+                      "truncate font-medium",
+                      f.side === "win" || f.side === "buy" || f.side === "long" ? "text-up" : f.side === "lose" || f.side === "sell" || f.side === "short" ? "text-down" : "text-brass",
+                    )}
+                  >
+                    {f.side} {f.symbol}
+                  </span>
+                  <span className="text-right tabular-nums">{fmtQty(f.size)}</span>
+                  <span className="text-right tabular-nums text-muted">{fmtPx(f.price)}</span>
+                  <span className={cn("text-right tabular-nums", (f.pnl ?? 0) >= 0 ? "text-up" : "text-down")}>
+                    {f.pnl != null ? signed(f.pnl) : "—"}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate font-mono text-[10px] text-subtle">{f.note ?? new Date(f.t).toLocaleString()}</p>
+              </div>
+            ))}
+            <Link
+              to="/orders"
+              className="flex h-10 items-center justify-center border-t border-border font-mono text-[11px] uppercase tracking-wider text-brass"
+            >
+              Full blotter
+            </Link>
           </Sec>
         ) : null}
       </div>

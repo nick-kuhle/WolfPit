@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PIT_OPEN, compBoard, compLive } from "@/lib/wolfpit/comp";
 import { equity, farmApy } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
+import { useWallet } from "@/lib/wallet/session";
 import { STAKE_APR } from "@/lib/wolfpit/types";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
@@ -15,6 +16,7 @@ export const Route = createFileRoute("/")({ component: Home });
 function Home() {
   const s = useWolf();
   const join = useWolf((st) => st.joinComp);
+  const wallet = useWallet((s) => s.address);
   const nav = useNavigate();
   const now = Date.now();
   const live = compLive(now);
@@ -64,12 +66,16 @@ function Home() {
                 <Button
                   className="h-12 bg-bg px-6 text-brass hover:bg-bg"
                   onClick={() => {
+                    if (!wallet) {
+                      void nav({ to: "/profile" });
+                      return;
+                    }
                     join();
                     void nav({ to: "/trade" });
                   }}
                   disabled={!live}
                 >
-                  {live ? "Enter free · $100k paper" : "Doors closed"}
+                  {!wallet ? "Connect to enter" : live ? "Enter free · $100k paper" : "Doors closed"}
                 </Button>
               )}
               <Link to="/trade">

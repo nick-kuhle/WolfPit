@@ -28,7 +28,7 @@ export function AccountBar() {
         </div>
       </div>
       <div>
-        <div className="text-[10px] uppercase tracking-wider text-subtle">Cash USDC</div>
+        <div className="text-[10px] uppercase tracking-wider text-subtle">Cash USDT</div>
         <div className="font-mono tabular-nums text-sm">{fmtUsd(usdc)}</div>
       </div>
       <div>

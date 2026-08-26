@@ -51,8 +51,24 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
           {address ? truncAddr(address) : "Connect"}
         </Link>
       </header>
+      <SimBanner />
       <div className={cn("min-h-0 flex-1 overflow-x-hidden", pathname.startsWith("/admin") ? "" : "pb-[calc(4.6rem+env(safe-area-inset-bottom))] lg:pb-0")}>{children}</div>
       {pathname.startsWith("/admin") ? null : <PitDock />}
+    </div>
+  );
+}
+
+function SimBanner() {
+  const address = useWallet((s) => s.address);
+  const ready = useWallet((s) => s.ready);
+  if (!ready || address) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-brass/40 bg-brass/15 px-3 py-2 text-center">
+      <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-brass">Simulated funds</span>
+      <span className="font-mono text-[11px] text-fg">100,000 USDT · 100,000 WPIT</span>
+      <Link to="/profile" className="font-mono text-[11px] uppercase tracking-wider text-brass underline-offset-2 hover:underline">
+        Connect wallet for live trading, betting & competitions
+      </Link>
     </div>
   );
 }

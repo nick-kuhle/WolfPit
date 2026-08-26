@@ -14,7 +14,6 @@ export function ProductGate({
 }) {
   const accepted = useTerms((s) => s.accepted && s.version === TERMS_VERSION);
   const rehydrate = useTerms((s) => s.rehydrate);
-  const address = useWallet((s) => s.address);
   const readyW = useWallet((s) => s.ready);
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -23,7 +22,6 @@ export function ProductGate({
   }, [rehydrate]);
   if (!ready || !readyW) return <div className="min-h-[50vh] bg-bg" />;
   if (!accepted) return <TermsWall product={product} />;
-  if (!address) return <WalletWall product={product} />;
   return <>{children}</>;
 }
 
@@ -76,8 +74,8 @@ function TermsWall({ product }: { product: string }) {
       <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">Clickwrap · {TERMS_VERSION}</p>
       <h1 className="mt-3 font-display text-3xl font-medium tracking-tight">Agree before you enter the {product}.</h1>
       <p className="mt-4 text-sm leading-relaxed text-muted">
-        WolfPit is a <strong className="text-fg">paper / simulation venue</strong>. Balances you see (including 1,000 ETH
-        and 100,000 USDC) are not real assets. Yields are simulated. Derivatives are educational. Nothing here is an
+        WolfPit is a <strong className="text-fg">paper / simulation venue</strong>. Balances you see (including 100,000
+        USDT and 100,000 WPIT) are not real assets. Yields are simulated. Derivatives are educational. Nothing here is an
         offer of securities, a solicitation, or investment advice.
       </p>
       <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-muted">

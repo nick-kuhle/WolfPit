@@ -29,6 +29,7 @@ import { useAdmin } from "@/lib/admin/config";
 import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
 import { sanitizeState } from "./sanitize";
+import { useWallet } from "@/lib/wallet/session";
 
 function announceSettled(prev: EngineState, next: EngineState) {
   const prevFill = prev.fills[0]?.id;
@@ -230,6 +231,10 @@ export const useWolf = create<WolfStore>()(
           return next === s ? s : next;
         }),
       joinComp: () => {
+        if (!useWallet.getState().address) {
+          ping("Connect a wallet to enter the Pit Open.", "brass");
+          return;
+        }
         ping("You're in the Pit Open. $100k paper. Go shout.", "brass");
         set({ ...joinCompEngine(get()), lastError: null });
       },
@@ -258,7 +263,7 @@ export const useWolf = create<WolfStore>()(
       clearError: () => set({ lastError: null }),
     }),
     {
-      name: "wolfpit-sim-v11",
+      name: "wolfpit-sim-v12",
       skipHydration: true,
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<EngineState>;

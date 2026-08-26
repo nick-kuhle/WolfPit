@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { EntryBoard, FairProof, OddsTape, RaceTrack } from "@/components/desk/race-track";
 import { RunnerGfx } from "@/components/desk/runner-gfx";
@@ -378,13 +378,15 @@ function Tickets() {
   const s = useWolf();
   const open = groupTickets(openTickets(s));
   const recent = groupTickets((s.games?.bets ?? []).filter((b) => b.status !== "open")).slice(0, 8);
-  if (!open.length && !recent.length) return null;
   return (
     <section className="mx-auto max-w-5xl px-4 pb-10">
       <h2 className="font-display text-2xl">Your tickets</h2>
+      {!open.length && !recent.length ? (
+        <p className="mt-2 text-sm text-muted">No tickets yet. Tap a runner during Entry.</p>
+      ) : null}
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {open.map((b) => (
-          <article key={b.id} className="rounded-[var(--radius-lg)] border border-brass/40 bg-elevated p-3">
+          <article key={b.id} className="rounded-[var(--radius-lg)] border border-brass/40 bg-brass/10 p-3">
             <div className="font-mono text-[10px] uppercase tracking-wider text-brass">
               Open · {b.market} · {b.kind}
               {b.legs > 1 ? ` · box ${b.legs}` : ""}
@@ -396,19 +398,31 @@ function Tickets() {
           </article>
         ))}
         {recent.map((b) => (
-          <article key={b.id} className={cn("rounded-[var(--radius-lg)] border p-3", b.status === "won" ? "border-up/40 bg-up/10" : "border-border bg-panel")}>
-            <div className="font-mono text-[10px] uppercase tracking-wider text-subtle">
+          <article
+            key={b.id}
+            className={cn(
+              "rounded-[var(--radius-lg)] border p-3",
+              b.status === "won" ? "border-up/40 bg-up/10" : "border-down/50 bg-down/15",
+            )}
+          >
+            <div className={cn("font-mono text-[10px] uppercase tracking-wider", b.status === "won" ? "text-up" : "text-down")}>
               {b.status} · {b.market} · {b.kind}
               {b.legs > 1 ? ` · box ${b.legs}` : ""}
             </div>
             <div className="font-display text-xl">{b.name}</div>
-            <div className="font-mono text-[12px] text-muted">
+            <div className={cn("font-mono text-[12px]", b.status === "won" ? "text-up" : "text-down")}>
               {fmtQty(b.stake)} WPIT @ {fracOdds(b.odds)}
               {b.status === "won" ? ` · prize ${fmtQty(b.payout)}` : ` · lost ${fmtQty(b.stake)}`}
             </div>
           </article>
         ))}
       </div>
+      <Link
+        to="/book"
+        className="pressable mt-4 flex h-12 w-full items-center justify-center rounded-full border border-brass font-mono text-[12px] uppercase tracking-[0.2em] text-brass"
+      >
+        More · transaction history
+      </Link>
     </section>
   );
 }
