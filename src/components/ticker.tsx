@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useDesk, type Listing } from "@/lib/wolfpit/desk";
 import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
+import { assetSearch } from "@/lib/wolfpit/share";
 import { fmtPct, fmtPx } from "@/lib/utils";
 
 type TapeItem =
@@ -28,12 +29,7 @@ export function LiveTicker() {
       void nav({
         to: "/asset/$symbol",
         params: { symbol: it.listing.symbol },
-        search: {
-          name: it.listing.name || undefined,
-          chain: it.listing.chain || undefined,
-          contract: it.listing.contract || undefined,
-          network: it.listing.network || undefined,
-        },
+        search: assetSearch(it.listing),
       });
       return;
     }

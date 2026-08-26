@@ -14,12 +14,14 @@ import type { Candle } from "@/lib/wolfpit/types";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
 export const Route = createFileRoute("/asset/$symbol")({
-  validateSearch: (s: Record<string, unknown>) => ({
-    name: typeof s.name === "string" && s.name ? s.name : undefined,
-    chain: typeof s.chain === "string" && s.chain ? s.chain : undefined,
-    contract: typeof s.contract === "string" && s.contract ? s.contract : undefined,
-    network: typeof s.network === "string" && s.network ? s.network : undefined,
-  }),
+  validateSearch: (s: Record<string, unknown>) => {
+    const out: { name?: string; chain?: string; contract?: string; network?: string } = {};
+    if (typeof s.name === "string" && s.name) out.name = s.name;
+    if (typeof s.chain === "string" && s.chain) out.chain = s.chain;
+    if (typeof s.contract === "string" && s.contract) out.contract = s.contract;
+    if (typeof s.network === "string" && s.network) out.network = s.network;
+    return out;
+  },
   component: AssetPage,
 });
 
@@ -27,7 +29,6 @@ function AssetPage() {
   const { symbol } = Route.useParams();
   const q = Route.useSearch();
   const wpitPx = useWolf((s) => s.wpit);
-  const wpitBars = useWolf((s) => s.wpitCandles);
   const [listing, setListing] = useState<Listing>(() =>
     seed(symbol, q, useDesk.getState().universe, wpitPx),
   );
@@ -60,7 +61,7 @@ function AssetPage() {
 
   useEffect(() => {
     if (listing.symbol === "WPIT") {
-      const rows = resampleCandles(wpitBars, 3_600_000);
+      const rows = resampleCandles(useWolf.getState().wpitCandles, 3_600_000);
       setBars(rows);
       setStatus(rows.length >= 2 ? "ok" : "empty");
       return;
@@ -88,7 +89,7 @@ function AssetPage() {
     return () => {
       dead = true;
     };
-  }, [listing.symbol, listing.binance, listing.geckoId, listing.network, listing.poolAddress, interval, wpitBars, q.network]);
+  }, [listing.symbol, listing.binance, listing.geckoId, listing.network, listing.poolAddress, interval, q.network]);
 
   const px = listing.symbol === "WPIT" ? wpitPx : listing.price;
 

@@ -18,6 +18,7 @@ import {
 } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
+import { assetSearch } from "@/lib/wolfpit/share";
 import { cn, fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
 export function Desk() {
@@ -38,12 +39,7 @@ export function Desk() {
     void nav({
       to: "/asset/$symbol",
       params: { symbol: l.symbol },
-      search: {
-        name: l.name || undefined,
-        chain: l.chain || undefined,
-        contract: l.contract || undefined,
-        network: l.network || undefined,
-      },
+      search: assetSearch(l),
     });
   }
 
