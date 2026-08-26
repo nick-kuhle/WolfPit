@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { PitChart } from "@/components/desk/chart";
 import { OrderTicket } from "@/components/desk/order-ticket";
 import { Button } from "@/components/ui/button";
+import { SideToggle } from "@/components/ui/toggle";
 import { useDesk } from "@/lib/wolfpit/desk";
 import { resampleCandles } from "@/lib/wolfpit/engine";
 import { getSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
@@ -148,24 +149,14 @@ export function AssetCard() {
               Share
             </button>
           </div>
-          <div className="grid shrink-0 grid-cols-2 gap-2 p-3">
+          <div className="shrink-0 space-y-2 p-3">
+            <SideToggle value={side} onChange={setSide} />
             <Button
-              variant="up"
-              onClick={() => {
-                setSide("buy");
-                setTab("trade");
-              }}
+              variant={side === "buy" ? "up" : "down"}
+              className="w-full"
+              onClick={() => setTab("trade")}
             >
-              Buy
-            </Button>
-            <Button
-              variant="down"
-              onClick={() => {
-                setSide("sell");
-                setTab("trade");
-              }}
-            >
-              Sell
+              Ticket {side}
             </Button>
           </div>
         </div>

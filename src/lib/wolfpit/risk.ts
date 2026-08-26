@@ -1,4 +1,4 @@
-import { UTIL_CAP, type EngineState, type FutSide, type OptType } from "./types";
+import { DERIV_FEE, FUT_IM, UTIL_CAP, type EngineState, type FutSide, type OptType } from "./types";
 import { bsGamma, bsVega, clamp, ivSmile, yearsTo } from "./math";
 
 export const GAMMA_NAV = 0.02;
@@ -102,6 +102,10 @@ export function smileVol(s: EngineState, type: OptType, strike: number, T: numbe
 export function rejectFuture(s: EngineState, side: FutSide, sizeEth: number, expiry: number): string | null {
   if (sizeEth <= 0) return "Size must be positive.";
   if (side === "short" && circuitActive(s)) return "Circuit: new shorts halted.";
+  const notional = sizeEth * s.eth;
+  const im = notional * FUT_IM;
+  const fee = notional * DERIV_FEE;
+  if (s.account.usdc + 1e-9 < im + fee) return "Not enough buying power for initial margin + fee.";
   const cap = remainingCap(s, side);
   if (sizeEth > cap + 1e-9) return `Inventory cap. Max ${cap.toFixed(2)} ETH net this side.`;
   if (oiExpiry(s, expiry) + sizeEth > s.vault.eth * OI_EXPIRY + 1e-9) {

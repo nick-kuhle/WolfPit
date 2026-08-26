@@ -20,6 +20,10 @@ import {
   tick,
   tradeFuture,
   tradeSpot,
+  residualDelta,
+  futLiqPrice,
+  hedgeDelta,
+  spreadBps,
 } from "./engine.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
 import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
@@ -285,7 +289,54 @@ describe("WPIT moon", () => {
   });
 });
 
-void closeFuture;
-void settleNow;
-void advanceClock;
-void tradeSpot;
+describe("cover, delta, liq", () => {
+  it("long mini residual delta ~ 0 and cover reserved", () => {
+    const s = initialState();
+    const r = tradeFuture(s, "long", 2, exp);
+    assert.equal(typeof r, "object", String(r));
+    const next = r as typeof s;
+    assert.ok(Math.abs(residualDelta(next)) < 0.02);
+    assert.ok(next.vault.reservedEth >= 0.2 - 1e-9);
+    assert.ok(next.vault.eth - next.vault.reservedEth >= -1e-9);
+    const p = next.futures[0]!;
+    const liq = futLiqPrice(p);
+    assert.ok(liq < p.entry);
+    assert.ok(liq > p.entry * 0.7);
+  });
+
+  it("short mini residual ~ 0 and USDC reserved", () => {
+    const s = initialState();
+    const r = tradeFuture(s, "short", 2, exp);
+    assert.equal(typeof r, "object", String(r));
+    const next = r as typeof s;
+    assert.ok(Math.abs(residualDelta(next)) < 0.05);
+    assert.ok(next.vault.reservedUsdc > 0);
+    const p = next.futures[0]!;
+    assert.ok(futLiqPrice(p) > p.entry);
+  });
+
+  it("written call is covered and hedge flattens residual", () => {
+    const s = initialState();
+    const r = buyOption(s, "call", 4000, exp, 2);
+    assert.equal(typeof r, "object", String(r));
+    const next = r as typeof s;
+    assert.ok(next.vault.reservedEth >= 0.2 - 1e-9);
+    assert.ok(Math.abs(residualDelta(next)) < 0.08);
+    assert.ok(next.insuranceUsdc >= s.insuranceUsdc);
+  });
+
+  it("spread widens with vol", () => {
+    const a = initialState();
+    const b = { ...a, realizedVol: 1.2, iv: 1.2 };
+    assert.ok(spreadBps(b) > spreadBps(a));
+  });
+
+  it("hedge does not spend reserved ETH", () => {
+    let s = initialState();
+    s = tradeFuture(s, "long", 3, exp) as typeof s;
+    const reserved = s.vault.reservedEth;
+    s = hedgeDelta(s);
+    assert.ok(s.vault.eth + 1e-9 >= reserved);
+    assert.ok(Math.abs(s.vault.reservedEth - reserved) < 1e-9);
+  });
+});

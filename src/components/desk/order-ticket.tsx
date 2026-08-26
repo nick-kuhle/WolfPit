@@ -1,10 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { expiries, maxNetLongEth, maxNetShortEth, optionQuote, quoteInForBaseOut, reservationPx, spreadBps } from "@/lib/wolfpit/engine";
+import { SideToggle } from "@/components/ui/toggle";
+import {
+  buyingPower,
+  expiries,
+  futLiqPrice,
+  maxMiniContracts,
+  maxNetLongEth,
+  maxNetShortEth,
+  optionQuote,
+  quoteInForBaseOut,
+  reservationPx,
+  spreadBps,
+  usedMargin,
+} from "@/lib/wolfpit/engine";
 import { rejectFuture } from "@/lib/wolfpit/risk";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { DeskSide, OrderKind, OptType, PoolId, Product, Tif } from "@/lib/wolfpit/types";
-import { FUT_IM, MINI_ETH } from "@/lib/wolfpit/types";
+import { FUT_IM, FUT_MM, MINI_ETH } from "@/lib/wolfpit/types";
 import { useAdmin } from "@/lib/admin/config";
 import { useDesk } from "@/lib/wolfpit/desk";
 import { cn, fmtPx, fmtUsd } from "@/lib/utils";
@@ -65,6 +78,7 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
   const spr = ask - bid;
   const clock = s.clock;
   const exps = useMemo(() => expiries(clock), [clock]);
+  const exp = exps[exi]!;
   const strikes = useMemo(() => {
     const atm = Math.round(s.eth / 100) * 100;
     return [atm - 200, atm - 100, atm, atm + 100, atm + 200];
@@ -72,10 +86,20 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
   const strike = strikes[kIdx] ?? strikes[2]!;
   const n = Number(qty) || 0;
   const products: Product[] = geo ? ["spot"] : ["spot", "future", "option"];
+  const futSide = side === "buy" ? "long" : "short";
+  const sizeEth = n * MINI_ETH;
+  const im = sizeEth * s.eth * FUT_IM;
+  const mm = sizeEth * s.eth * FUT_MM;
+  const liq =
+    futSide === "long"
+      ? futLiqPrice({ id: "", side: "long", sizeEth: Math.max(sizeEth, MINI_ETH), entry: s.eth, expiry: exp.at, margin: Math.max(im, 1), openedAt: 0 })
+      : futLiqPrice({ id: "", side: "short", sizeEth: Math.max(sizeEth, MINI_ETH), entry: s.eth, expiry: exp.at, margin: Math.max(im, 1), openedAt: 0 });
+  const bp = buyingPower(s);
+  const used = usedMargin(s);
+  const maxN = maxMiniContracts(s, futSide);
 
-  const q = product === "option" ? optionQuote(s, optType, strike, exps[exi]!.at) : null;
-  const futWhy =
-    product === "future" ? rejectFuture(s, side === "buy" ? "long" : "short", n * MINI_ETH, exps[exi]!.at) : null;
+  const q = product === "option" ? optionQuote(s, optType, strike, exp.at) : null;
+  const futWhy = product === "future" ? rejectFuture(s, futSide, sizeEth, exp.at) : null;
 
   const est = (() => {
     if (product === "spot") {
@@ -89,8 +113,7 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
       return { label: `Credit ${fmtUsd(out)}`, usd: -out };
     }
     if (product === "future") {
-      const im = n * MINI_ETH * s.eth * FUT_IM;
-      return { label: `IM ${fmtUsd(im)} · 4×`, usd: im };
+      return { label: `IM ${fmtUsd(im)} · maint ${fmtUsd(mm)} · ${((1 / FUT_IM)).toFixed(1)}×`, usd: im };
     }
     const debit = (q?.ask ?? 0) * n * MINI_ETH;
     return { label: `Debit ${fmtUsd(debit)}`, usd: debit };
@@ -125,13 +148,8 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <Button variant={side === "buy" ? "up" : "outline"} onClick={() => setSide("buy")}>
-            Buy
-          </Button>
-          <Button variant={side === "sell" ? "down" : "outline"} onClick={() => setSide("sell")}>
-            Sell
-          </Button>
+        <div className="mt-3">
+          <SideToggle value={side} onChange={setSide} />
         </div>
 
         {product === "spot" && (
@@ -150,14 +168,18 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
 
         {product === "future" && (
           <Field label="Expiry">
-            <div className="grid grid-cols-3 gap-1">
+            <div className="grid grid-cols-1 gap-1">
               {exps.map((e, i) => (
                 <button
                   key={e.at}
                   onClick={() => setExi(i)}
-                  className={cn("h-11 rounded-[var(--radius-sm)] border text-xs", i === exi ? "border-accent text-fg" : "border-border text-muted")}
+                  className={cn(
+                    "pressable flex h-12 items-center justify-between rounded-[var(--radius-sm)] border px-3 text-left",
+                    i === exi ? "border-brass text-fg" : "border-border text-muted hover:text-fg",
+                  )}
                 >
-                  {e.label}
+                  <span className="font-mono text-xs">{e.label}</span>
+                  <span className="font-mono text-[11px]">{e.when}</span>
                 </button>
               ))}
             </div>
@@ -166,13 +188,8 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
 
         {product === "option" && (
           <>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Button variant={optType === "call" ? "up" : "outline"} onClick={() => setOptType("call")}>
-                Call
-              </Button>
-              <Button variant={optType === "put" ? "down" : "outline"} onClick={() => setOptType("put")}>
-                Put
-              </Button>
+            <div className="mt-3">
+              <SideToggle value={optType === "call" ? "buy" : "sell"} onChange={(v) => setOptType(v === "buy" ? "call" : "put")} buyLabel="Call" sellLabel="Put" />
             </div>
             <Field label="Strike">
               <div className="grid grid-cols-5 gap-1">
@@ -191,7 +208,7 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
               <select className={inp} value={exi} onChange={(e) => setExi(Number(e.target.value))}>
                 {exps.map((e, i) => (
                   <option key={e.at} value={i}>
-                    {e.label} {new Date(e.at).toISOString().slice(0, 10)}
+                    {e.label} {e.when}
                   </option>
                 ))}
               </select>
@@ -249,17 +266,26 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
           <Row k="House spread" v={`${spreadBps(s).toFixed(0)} bps`} />
           {product === "future" && (
             <>
-              <Row k="Size" v={`${(n * MINI_ETH).toFixed(2)} ETH`} />
+              <Row k="Expiry" v={exp.when} />
+              <Row k="Size" v={`${sizeEth.toFixed(2)} ETH · ${n} mini`} />
+              <Row k="Initial margin" v={fmtUsd(im)} />
+              <Row k="Maintenance" v={fmtUsd(mm)} />
+              <Row k="Liq. price" v={fmtPx(liq)} />
+              <Row k="Leverage" v={`${(1 / FUT_IM).toFixed(1)}× max`} />
+              <Row k="Buying power" v={fmtUsd(bp)} />
+              <Row k="Margin in use" v={fmtUsd(used)} />
+              <Row k="Max new" v={`${maxN} mini`} />
               <Row k="Max net" v={`${(side === "buy" ? maxNetLongEth(s) : maxNetShortEth(s)).toFixed(2)} ETH`} />
             </>
           )}
           {product === "option" && q && (
             <>
+              <Row k="Expiry" v={exp.when} />
               <Row k="Ask / Δ" v={`${fmtPx(q.ask)} / ${q.delta.toFixed(2)}`} />
-              <Row k="IV" v={`${(s.iv * 100).toFixed(1)}`} />
+              <Row k="IV" v={`${(s.iv * 100).toFixed(1)}%`} />
             </>
           )}
-          <Row k="Buying power" v={fmtUsd(s.account.usdc)} />
+          {product !== "future" ? <Row k="Buying power" v={fmtUsd(s.account.usdc)} /> : null}
           <Row k="Est." v={est.label} />
         </dl>
 
@@ -286,7 +312,10 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
               <h3 className="mt-2 font-display text-2xl font-medium">
                 {side.toUpperCase()} {n} {product === "spot" ? poolId : product}
               </h3>
-              <p className="mt-2 text-sm text-muted">{est.label} · {kind.toUpperCase()} · {tif.toUpperCase()}</p>
+              <p className="mt-2 text-sm text-muted">
+                {est.label} · {kind.toUpperCase()} · {tif.toUpperCase()}
+                {product === "future" ? ` · ${exp.when} · liq ${fmtPx(liq)}` : ""}
+              </p>
               <p className="mt-1 text-xs text-subtle">Paper funds. You must confirm before the order is sent.</p>
               <div className="mt-5 grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => setConfirm(false)}>

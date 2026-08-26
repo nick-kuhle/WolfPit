@@ -1,4 +1,4 @@
-import { futPnl, lpValue, optMark, tokenPx } from "@/lib/wolfpit/engine";
+import { fmtExpiry, futLiqPrice, futPnl, lpValue, optMark, tokenPx, usedMargin } from "@/lib/wolfpit/engine";
 import { useDesk, type Listing } from "@/lib/wolfpit/desk";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtPx, fmtUsd } from "@/lib/utils";
@@ -71,11 +71,18 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
       ))}
 
       <h3 className="mb-2 mt-5 text-[10px] uppercase tracking-wider text-subtle">Minis</h3>
+      <div className="mb-2 flex justify-between text-[11px] text-muted">
+        <span>Margin in use {fmtUsd(usedMargin(s))}</span>
+        <span>Free {fmtUsd(s.account.usdc)}</span>
+      </div>
       {s.futures.length === 0 && s.options.length === 0 ? (
         <p className="text-xs text-muted">No open derivatives. Trade from the ticket.</p>
       ) : null}
       {s.futures.map((p) => {
         const pnl = futPnl(p, s.eth);
+        const eq = p.margin + pnl;
+        const lev = (p.sizeEth * s.eth) / Math.max(eq, 1e-9);
+        const liq = futLiqPrice(p);
         return (
           <div key={p.id} className="mb-2 flex items-center justify-between border-b border-border pb-2 text-xs">
             <div>
@@ -85,10 +92,13 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
               <div className="font-mono text-muted">
                 {fmtPx(p.entry)} → {fmtPx(s.eth)}
               </div>
+              <div className="font-mono text-[10px] text-subtle">
+                {fmtExpiry(p.expiry)} · IM {fmtUsd(p.margin)} · liq {fmtPx(liq)} · {lev.toFixed(1)}×
+              </div>
             </div>
             <div className="text-right">
               <div className={`font-mono ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</div>
-              <button className="h-10 text-muted" onClick={() => closeFut(p.id)}>
+              <button className="pressable h-10 text-muted hover:text-fg" onClick={() => closeFut(p.id)}>
                 Close
               </button>
             </div>
@@ -104,10 +114,11 @@ export function Portfolio({ onPick }: { onPick?: (l: Listing) => void }) {
               <div className="font-medium">
                 LONG {p.sizeEth} {p.strike} {p.type}
               </div>
+              <div className="font-mono text-[10px] text-subtle">{fmtExpiry(p.expiry)}</div>
             </div>
             <div className="text-right">
               <div className={`font-mono ${pnl >= 0 ? "text-up" : "text-down"}`}>{fmtUsd(pnl)}</div>
-              <button className="h-10 text-muted" onClick={() => closeOpt(p.id)}>
+              <button className="pressable h-10 text-muted hover:text-fg" onClick={() => closeOpt(p.id)}>
                 Close
               </button>
             </div>

@@ -37,10 +37,13 @@ import {
 } from "./math";
 import {
   maybeCircuit,
+  maxFillEth,
   rejectFuture,
   rejectOption,
   smileVol,
   spotFeeBps,
+  gammaCash1h,
+  vaultNav,
 } from "./risk";
 
 function rng(seed: number) {
@@ -88,6 +91,7 @@ export function initialState(now = T0): EngineState {
       usdc: 400_000,
       reservedEth: 0,
       reservedUsdc: 0,
+      hedgeEth: 0,
     },
     pools: {
       "ETH-USDC": {
@@ -354,9 +358,15 @@ export function maxNetShortEth(s: EngineState) {
 
 export function spreadBps(s: EngineState) {
   const g = bookGreeks(s);
+  const nav = Math.max(vaultNav(s), 1);
   const inv = Math.abs(g.delta) / Math.max(s.vault.eth, 1e-6);
-  const as = 8 + utilEth(s) * 80 + Math.max(0, s.realizedVol - 0.4) * 40 + inv * 25;
-  return as;
+  const gCash = gammaCash1h(Math.abs(g.gamma), s.eth, s.iv) / nav;
+  const vega = Math.abs(g.vega) / nav;
+  const pool = s.pools["ETH-USDC"];
+  const depth = pool?.baseReserve ?? 1;
+  const thin = clamp(50 / Math.max(depth, 1), 0, 50);
+  const vol = Math.max(s.realizedVol, s.iv);
+  return clamp(8 + utilEth(s) * 70 + Math.max(0, vol - 0.4) * 90 + inv * 45 + gCash * 220 + vega * 90 + thin, 8, 280);
 }
 
 export function reservationPx(s: EngineState) {
@@ -479,6 +489,88 @@ export function bookGreeks(s: EngineState) {
     vega += -bsVega(s.eth, p.strike, T, 0.03, vol) * p.sizeEth;
   }
   return { delta, gamma, vega };
+}
+
+export function residualDelta(s: EngineState) {
+  const g = bookGreeks(s);
+  const hedge = s.vault.hedgeEth ?? 0;
+  return g.delta + s.vault.reservedEth - s.vault.reservedUsdc / Math.max(s.eth, 1e-9) + hedge;
+}
+
+export function futLiqPrice(p: EngineState["futures"][number], mm = FUT_MM) {
+  const q = p.sizeEth;
+  if (q <= 0) return p.entry;
+  if (p.side === "long") return (p.entry * q - p.margin) / (q * (1 - mm));
+  return (p.margin + p.entry * q) / (q * (1 + mm));
+}
+
+export function futMaint(p: EngineState["futures"][number], mark: number) {
+  return p.sizeEth * mark * FUT_MM;
+}
+
+export function usedMargin(s: EngineState) {
+  return s.futures.reduce((a, p) => a + p.margin, 0);
+}
+
+export function buyingPower(s: EngineState) {
+  return Math.max(0, s.account.usdc);
+}
+
+export function maxMiniContracts(s: EngineState, side: FutSide) {
+  const im = MINI_ETH * s.eth * FUT_IM;
+  const fee = MINI_ETH * s.eth * DERIV_FEE;
+  const byCash = Math.floor(buyingPower(s) / Math.max(im + fee, 1e-9));
+  const cap = side === "long" ? maxNetLongEth(s) : maxNetShortEth(s);
+  const byInv = Math.floor(cap / MINI_ETH);
+  const byFill = Math.floor(maxFillEth(s, side) / MINI_ETH);
+  return Math.max(0, Math.min(byCash, byInv, byFill));
+}
+
+export function refreshQuotes(s: EngineState): EngineState {
+  const mid = reservationPx(s);
+  const bps = spreadBps(s);
+  return { ...s, ethBid: mid * (1 - bps / 10_000), ethAsk: mid * (1 + bps / 10_000) };
+}
+
+function takeFee(s: EngineState, fee: number): EngineState {
+  if (fee <= 0) return s;
+  return {
+    ...s,
+    vault: { ...s.vault, usdc: s.vault.usdc + fee * 0.5 },
+    insuranceUsdc: s.insuranceUsdc + fee * 0.5,
+  };
+}
+
+export function hedgeDelta(s: EngineState): EngineState {
+  const gap = residualDelta(s);
+  if (Math.abs(gap) < 0.005) return refreshQuotes(s);
+  const pool0 = s.pools["ETH-USDC"];
+  if (!pool0) return refreshQuotes(s);
+  const vault = { ...s.vault, hedgeEth: s.vault.hedgeEth ?? 0 };
+  const pool = { ...pool0 };
+  const band = pool.baseReserve * 0.08;
+  if (gap > 0) {
+    const sell = Math.min(gap, band, Math.max(0, vault.eth - vault.reservedEth));
+    if (sell < 0.005) return refreshQuotes({ ...s, vault });
+    const out = ammOut(sell, pool.baseReserve, pool.quoteReserve, pool.feeBps);
+    vault.eth -= sell;
+    vault.usdc += out;
+    vault.hedgeEth -= sell;
+    pool.baseReserve += sell;
+    pool.quoteReserve -= out;
+  } else {
+    const want = Math.min(-gap, band);
+    const cost = quoteInForBaseOut(pool, want);
+    const freeUsdc = Math.max(0, vault.usdc - vault.reservedUsdc);
+    if (!Number.isFinite(cost) || cost > freeUsdc || want < 0.005) return refreshQuotes({ ...s, vault });
+    const got = ammOut(cost, pool.quoteReserve, pool.baseReserve, pool.feeBps);
+    vault.usdc -= cost;
+    vault.eth += got;
+    vault.hedgeEth += got;
+    pool.quoteReserve += cost;
+    pool.baseReserve -= got;
+  }
+  return refreshQuotes({ ...s, vault, pools: { ...s.pools, "ETH-USDC": pool } });
 }
 
 function pushFill(s: EngineState, fill: EngineState["fills"][number]): EngineState {
@@ -608,17 +700,22 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
     vault,
     futures: [...s.futures, pos],
   };
-  return pushFill(next, {
-    id: uid("f"),
-    t: s.clock,
-    product: "future",
-    symbol: `ETH mini ${new Date(expiry).toISOString().slice(0, 10)}`,
-    side,
-    size: sizeEth,
-    price: px,
-    fee,
-    note: "inventory-backed",
-  });
+  return hedgeDelta(
+    takeFee(
+      pushFill(next, {
+        id: uid("f"),
+        t: s.clock,
+        product: "future",
+        symbol: `ETH mini ${new Date(expiry).toISOString().slice(0, 16).replace("T", " ")} UTC`,
+        side,
+        size: sizeEth,
+        price: px,
+        fee,
+        note: "covered · delta-hedged",
+      }),
+      fee,
+    ),
+  );
 }
 
 export function closeFuture(s: EngineState, id: string): EngineState | string {
@@ -643,17 +740,19 @@ export function closeFuture(s: EngineState, id: string): EngineState | string {
     vault,
     futures: s.futures.filter((p) => p.id !== id),
   };
-  return pushFill(next, {
-    id: uid("f"),
-    t: s.clock,
-    product: "future",
-    symbol: "ETH mini close",
-    side: pos.side === "long" ? "sell" : "buy",
-    size: pos.sizeEth,
-    price: s.eth,
-    fee: 0,
-    note: `PnL ${pnl.toFixed(2)}`,
-  });
+  return hedgeDelta(
+    pushFill(next, {
+      id: uid("f"),
+      t: s.clock,
+      product: "future",
+      symbol: "ETH mini close",
+      side: pos.side === "long" ? "sell" : "buy",
+      size: pos.sizeEth,
+      price: s.eth,
+      fee: 0,
+      note: `PnL ${pnl.toFixed(2)}`,
+    }),
+  );
 }
 
 export function buyOption(s: EngineState, type: OptType, strike: number, expiry: number, contracts: number): EngineState | string {
@@ -691,17 +790,22 @@ export function buyOption(s: EngineState, type: OptType, strike: number, expiry:
     vault,
     options: [...s.options, pos],
   };
-  return pushFill(next, {
-    id: uid("f"),
-    t: s.clock,
-    product: "option",
-    symbol: `ETH ${strike} ${type} mini`,
-    side: "buy",
-    size: sizeEth,
-    price: px,
-    fee,
-    note: "covered / cash-secured",
-  });
+  return hedgeDelta(
+    takeFee(
+      pushFill(next, {
+        id: uid("f"),
+        t: s.clock,
+        product: "option",
+        symbol: `ETH ${strike} ${type} mini`,
+        side: "buy",
+        size: sizeEth,
+        price: px,
+        fee,
+        note: "covered / cash-secured · delta-hedged",
+      }),
+      fee,
+    ),
+  );
 }
 
 function settleAndLiq(s: EngineState): EngineState {
@@ -737,7 +841,7 @@ function settleAndLiq(s: EngineState): EngineState {
     if (p.type === "call") vault.reservedEth = Math.max(0, vault.reservedEth - p.sizeEth);
     else vault.reservedUsdc = Math.max(0, vault.reservedUsdc - p.strike * p.sizeEth);
   }
-  return { ...next, options: remaining, vault, account: acc };
+  return hedgeDelta({ ...next, options: remaining, vault, account: acc });
 }
 
 export function settleNow(s: EngineState): EngineState {
@@ -941,17 +1045,19 @@ export function closeOption(s: EngineState, id: string): EngineState | string {
     vault,
     options: s.options.filter((p) => p.id !== id),
   };
-  return pushFill(next, {
-    id: uid("f"),
-    t: s.clock,
-    product: "option",
-    symbol: `ETH ${pos.strike} ${pos.type} close`,
-    side: "sell",
-    size: pos.sizeEth,
-    price: px,
-    fee: 0,
-    note: `PnL ${pnl.toFixed(2)}`,
-  });
+  return hedgeDelta(
+    pushFill(next, {
+      id: uid("f"),
+      t: s.clock,
+      product: "option",
+      symbol: `ETH ${pos.strike} ${pos.type} close`,
+      side: "sell",
+      size: pos.sizeEth,
+      price: px,
+      fee: 0,
+      note: `PnL ${pnl.toFixed(2)}`,
+    }),
+  );
 }
 
 export function stakeWpit(s: EngineState, amt: number): EngineState | string {
@@ -984,11 +1090,25 @@ export function harvestFarm(s: EngineState): EngineState {
 }
 
 export function expiries(now: number) {
-  return [
+  const rows = [
     { label: "W1", at: nextFriday(now, 0) },
     { label: "W2", at: nextFriday(now, 1) },
     { label: "M", at: monthEnd(now) },
   ];
+  return rows.map((r) => ({
+    ...r,
+    when: fmtExpiry(r.at),
+    hours: (r.at - now) / 3_600_000,
+  }));
+}
+
+export function fmtExpiry(at: number) {
+  const d = new Date(at);
+  const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${wd} ${d.getUTCDate()} ${mon} ${hh}:${mm} UTC`;
 }
 
 export function strikes(spot: number) {

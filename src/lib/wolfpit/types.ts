@@ -56,6 +56,7 @@ export type VaultState = {
   usdc: number;
   reservedEth: number;
   reservedUsdc: number;
+  hedgeEth: number;
 };
 
 export type PoolState = {
