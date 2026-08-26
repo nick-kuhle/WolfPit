@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   buyingPower,
   dayPnl,
@@ -23,10 +24,19 @@ import {
 } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
-import type { Candle } from "@/lib/wolfpit/types";
+import type { Candle, PoolId } from "@/lib/wolfpit/types";
 import { cn, fmtPct, fmtPx, fmtQty, fmtUsd } from "@/lib/utils";
 
 const COLS = "grid grid-cols-[minmax(0,1fr)_5.1rem_4.6rem_5.4rem] items-baseline gap-x-2 px-3";
+
+type Pending = {
+  title: string;
+  hint: string;
+  rows: { k: string; v: string }[];
+  confirm: string;
+  tone?: "up" | "down" | "brass";
+  run: () => void;
+};
 
 export function Positions({ flush }: { flush?: boolean }) {
   const nav = useNavigate();
@@ -36,6 +46,9 @@ export function Positions({ flush }: { flush?: boolean }) {
   const lpRemove = useWolf((st) => st.lpRemove);
   const unstake = useWolf((st) => st.unstake);
   const harvest = useWolf((st) => st.harvest);
+  const sellSpot = useWolf((st) => st.sellSpot);
+  const buySpot = useWolf((st) => st.buySpot);
+  const [pending, setPending] = useState<Pending | null>(null);
   const eq = equity(s);
   const day = dayPnl(s);
   const start = s.account.startEquity || eq;
@@ -107,11 +120,70 @@ export function Positions({ flush }: { flush?: boolean }) {
 
         <Sec title="Holdings">
           {holdings.map((h) => (
-            <div key={h.k} className={cn(COLS, "h-9 font-mono text-[12px]")}>
-              <span className="truncate font-medium">{h.k}</span>
-              <span className="text-right tabular-nums">{fmtQty(h.qty)}</span>
-              <span className="text-right tabular-nums text-muted">{fmtPx(h.mark)}</span>
-              <span className="text-right tabular-nums">{fmtUsd(h.qty * h.mark)}</span>
+            <div key={h.k} className="border-t border-border/50 py-2 first:border-t-0">
+              <div className={cn(COLS, "font-mono text-[12px]")}>
+                <span className="truncate font-medium">{h.k}</span>
+                <span className="text-right tabular-nums">{fmtQty(h.qty)}</span>
+                <span className="text-right tabular-nums text-muted">{fmtPx(h.mark)}</span>
+                <span className="text-right tabular-nums">{fmtUsd(h.qty * h.mark)}</span>
+              </div>
+              <div className="mt-0.5 flex justify-end px-3">
+                {h.k === "USDC" ? (
+                  <button
+                    type="button"
+                    className="pressable rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider text-brass hover:bg-brass/15"
+                    onClick={() => {
+                      const pool = s.pools["ETH-USDC"];
+                      const usd = h.qty;
+                      const rec = pool ? baseOutForQuote(pool, usd) : usd / Math.max(s.eth, 1e-9);
+                      setPending({
+                        title: "Bridge USDC",
+                        hint: "USDC is the quote. Closing it sells USDC for ETH on the ETH-USDC pool — the paper stand-in for an off-pit bridge (Circle CCTP / Base).",
+                        rows: [
+                          { k: "Sell", v: `${fmtQty(usd)} USDC` },
+                          { k: "Route", v: "ETH-USDC AMM" },
+                          { k: "Receive ~", v: `${fmtQty(rec)} ETH` },
+                          { k: "Mark", v: fmtPx(s.eth) },
+                          { k: "Cash after", v: "$0.00 USDC" },
+                        ],
+                        confirm: "Bridge to ETH",
+                        tone: "brass",
+                        run: () => buySpot("ETH-USDC", usd),
+                      });
+                    }}
+                  >
+                    Bridge
+                  </button>
+                ) : h.qty > 1e-8 ? (
+                  <button
+                    type="button"
+                    className="pressable rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider text-brass hover:bg-brass/15"
+                    onClick={() => {
+                      const poolId = spotPool(s, h.k);
+                      const pool = poolId ? s.pools[poolId] : undefined;
+                      const credit = pool ? h.qty * (pool.quoteReserve / pool.baseReserve) * (1 - pool.feeBps / 10_000) : h.qty * h.mark;
+                      setPending({
+                        title: `Close ${h.k} spot`,
+                        hint: "Market sell into the pool. Confirm to send.",
+                        rows: [
+                          { k: "Sell", v: `${fmtQty(h.qty)} ${h.k}` },
+                          { k: "Pool", v: poolId ?? "—" },
+                          { k: "Mark", v: fmtPx(h.mark) },
+                          { k: "Credit ~", v: fmtUsd(credit) },
+                          { k: "Cash after ~", v: fmtUsd(s.account.usdc + credit) },
+                        ],
+                        confirm: "Confirm sell",
+                        tone: "down",
+                        run: () => {
+                          if (poolId) sellSpot(poolId, h.qty);
+                        },
+                      });
+                    }}
+                  >
+                    Close
+                  </button>
+                ) : null}
+              </div>
             </div>
           ))}
         </Sec>
@@ -134,7 +206,25 @@ export function Positions({ flush }: { flush?: boolean }) {
                 mark={mark}
                 pnl={pnlP}
                 long={p.side === "long"}
-                onClose={() => closeFut(p.id)}
+                onClose={() =>
+                  setPending({
+                    title: `Close ${under} mini`,
+                    hint: "Flatten the dated mini at the live mark. Margin comes back to cash.",
+                    rows: [
+                      { k: "Side", v: p.side.toUpperCase() },
+                      { k: "Contracts", v: fmtQty(Math.abs(qty), true) },
+                      { k: "Underlying", v: `${fmtQty(p.sizeEth)} ${under}` },
+                      { k: "Mark", v: fmtPx(mark) },
+                      { k: "P/L", v: signed(pnlP) },
+                      { k: "Margin released", v: fmtUsd(p.margin) },
+                      { k: "Liquidation was", v: fmtPx(futLiqPrice(p)) },
+                      { k: "Expiry", v: fmtExpiry(p.expiry) },
+                    ],
+                    confirm: "Confirm close",
+                    tone: "brass",
+                    run: () => closeFut(p.id),
+                  })
+                }
               />
             );
           })}
@@ -156,7 +246,24 @@ export function Positions({ flush }: { flush?: boolean }) {
                 qty={contracts}
                 mark={mid}
                 pnl={pnlP}
-                onClose={() => closeOpt(p.id)}
+                onClose={() =>
+                  setPending({
+                    title: `Close ${under} ${p.type}`,
+                    hint: "Sell the vanilla back to the vault at the bid.",
+                    rows: [
+                      { k: "Contract", v: `${under} ${fmtPx(p.strike)} ${p.type.toUpperCase()}` },
+                      { k: "Contracts", v: fmtQty(contracts) },
+                      { k: "Mark / bid", v: fmtPx(mid) },
+                      { k: "Paid", v: fmtPx(p.premium) },
+                      { k: "P/L", v: signed(pnlP) },
+                      { k: "Credit ~", v: fmtUsd(mid * p.sizeEth) },
+                      { k: "Expiry", v: fmtExpiry(p.expiry) },
+                    ],
+                    confirm: "Confirm close",
+                    tone: "brass",
+                    run: () => closeOpt(p.id),
+                  })
+                }
               />
             );
           })}
@@ -175,7 +282,21 @@ export function Positions({ flush }: { flush?: boolean }) {
                   qty={p.shares}
                   mark={p.shares > 0 ? val / p.shares : 0}
                   pnl={lpPnl(s, p)}
-                  onClose={() => lpRemove(p.poolId, p.shares)}
+                  onClose={() =>
+                    setPending({
+                      title: `Remove ${p.poolId.replace("-TEST", "")} LP`,
+                      hint: "Both legs return to the wallet. Confirm to pull the stall.",
+                      rows: [
+                        { k: "Shares", v: fmtQty(p.shares) },
+                        { k: "Value", v: fmtUsd(val) },
+                        { k: "P/L", v: signed(lpPnl(s, p)) },
+                        { k: "Ripe WPIT", v: fmtQty(pending) },
+                      ],
+                      confirm: "Confirm remove",
+                      tone: "brass",
+                      run: () => lpRemove(p.poolId, p.shares),
+                    })
+                  }
                   closeLabel="Remove"
                 />
               );
@@ -197,12 +318,38 @@ export function Positions({ flush }: { flush?: boolean }) {
               qty={s.stake.amount}
               mark={s.wpit}
               pnl={0}
-              onClose={() => unstake()}
+              onClose={() =>
+                setPending({
+                  title: "Unstake WPIT",
+                  hint: "Junior stake returns to the wallet. Yield stops.",
+                  rows: [
+                    { k: "Amount", v: `${fmtQty(s.stake.amount)} WPIT` },
+                    { k: "Mark", v: fmtPx(s.wpit) },
+                    { k: "Value", v: fmtUsd(s.stake.amount * s.wpit) },
+                  ],
+                  confirm: "Confirm unstake",
+                  tone: "brass",
+                  run: () => unstake(),
+                })
+              }
               closeLabel="Unstake"
             />
           </Sec>
         ) : null}
       </div>
+      {pending && typeof document !== "undefined"
+        ? createPortal(
+            <ConfirmSheet
+              p={pending}
+              onEdit={() => setPending(null)}
+              onOk={() => {
+                pending.run();
+                setPending(null);
+              }}
+            />,
+            document.body,
+          )
+        : null}
     </aside>
   );
 }
@@ -328,4 +475,53 @@ function shortExp(at: number) {
   const full = fmtExpiry(at);
   const parts = full.split(" ");
   return parts.length >= 3 ? `${parts[1]} ${parts[2]}` : full;
+}
+
+function spotPool(s: { pools: Record<string, { base: string }> }, sym: string): PoolId | null {
+  if (sym === "ETH" && s.pools["ETH-USDC"]) return "ETH-USDC";
+  const hit = Object.keys(s.pools).find((id) => s.pools[id]!.base === sym);
+  return (hit as PoolId) ?? null;
+}
+
+function baseOutForQuote(pool: { baseReserve: number; quoteReserve: number; feeBps: number }, quoteIn: number) {
+  const dx = quoteIn * (1 - pool.feeBps / 10_000);
+  if (!(pool.quoteReserve + dx > 0)) return 0;
+  return (pool.baseReserve * dx) / (pool.quoteReserve + dx);
+}
+
+function ConfirmSheet({ p, onEdit, onOk }: { p: Pending; onEdit: () => void; onOk: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-bg/80 p-3 pb-[calc(3.6rem+env(safe-area-inset-bottom))] sm:items-center">
+      <div className="sheet-in flex max-h-[min(88dvh,40rem)] w-full max-w-md flex-col overflow-hidden rounded-[1.1rem] border border-brass/40 bg-panel shadow-2xl">
+        <div className="border-b border-border px-4 py-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-brass">Confirm</p>
+          <h3 className="mt-1 font-display text-2xl leading-tight">{p.title}</h3>
+          <p className="mt-1 text-[12px] text-muted">{p.hint}</p>
+        </div>
+        <dl className="min-h-0 flex-1 overflow-auto px-4 py-2 font-mono text-[12px]">
+          {p.rows.map((r) => (
+            <div key={r.k} className="flex justify-between gap-3 border-b border-border/60 py-1.5">
+              <dt className="text-subtle">{r.k}</dt>
+              <dd className="text-right tabular-nums text-fg">{r.v}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="grid grid-cols-2 gap-2 border-t border-border p-3">
+          <button type="button" className="h-12 rounded-[var(--radius-sm)] border border-border" onClick={onEdit}>
+            Edit
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "h-12 rounded-[var(--radius-sm)] font-medium",
+              p.tone === "down" ? "bg-down text-fg" : p.tone === "up" ? "bg-up text-bg" : "bg-brass text-bg",
+            )}
+            onClick={onOk}
+          >
+            {p.confirm}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

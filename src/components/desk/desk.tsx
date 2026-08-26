@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AccountBar } from "@/components/desk/account-bar";
 import { ChartPane } from "@/components/desk/chart";
+import { MiniTape } from "@/components/desk/mini-tape";
 import { OrderTicket } from "@/components/desk/order-ticket";
 import { Positions } from "@/components/desk/positions";
 import { Watchlist } from "@/components/desk/watchlist";
@@ -18,6 +19,8 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
   const nav = useNavigate();
   const s = useWolf();
   const focus = useDesk((d) => d.focus);
+  const saved = useDesk((d) => d.saved);
+  const toggleSave = useDesk((d) => d.toggleSave);
   const [tab, setTab] = useState<Tab>(pane ?? (seed ? "trade" : "list"));
   const view = pane ?? tab;
   const [prefer, setPrefer] = useState<"buy" | "sell" | null>(null);
@@ -156,6 +159,14 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-baseline gap-2">
+                  <button
+                    type="button"
+                    className={cn("pressable text-lg leading-none", saved.includes(under) ? "text-brass" : "text-subtle")}
+                    onClick={() => toggleSave(under)}
+                    aria-label="Save to watchlist"
+                  >
+                    {saved.includes(under) ? "★" : "☆"}
+                  </button>
                   <h1 className="font-display text-xl font-medium leading-none">{under}</h1>
                   <span className={cn("font-mono text-lg tabular-nums", chg >= 0 ? "text-up" : "text-down")}>
                     {spot ? fmtPx(spot) : "—"}
@@ -192,6 +203,7 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
               </div>
             </div>
           </div>
+          <MiniTape onPick={pick} />
           <div className="shrink-0 border-b border-border">
             <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={96} />
           </div>

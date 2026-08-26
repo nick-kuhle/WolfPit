@@ -45,6 +45,7 @@ type DeskUi = {
   query: string;
   cardOpen: boolean;
   expanded: boolean;
+  saved: string[];
   setFocus: (l: Listing) => void;
   setUniverse: (rows: Listing[]) => void;
   setChainTape: (rows: Listing[]) => void;
@@ -53,7 +54,19 @@ type DeskUi = {
   openCard: (l: Listing) => void;
   closeCard: () => void;
   setExpanded: (v: boolean) => void;
+  toggleSave: (sym: string) => void;
 };
+
+function loadSaved(): string[] {
+  if (typeof window === "undefined") return ["ETH", "WPIT", "BTC"];
+  try {
+    const raw = window.localStorage.getItem("wolfpit-saved");
+    const v = raw ? JSON.parse(raw) : ["ETH", "WPIT", "BTC"];
+    return Array.isArray(v) && v.length ? v.map(String) : ["ETH", "WPIT", "BTC"];
+  } catch {
+    return ["ETH", "WPIT", "BTC"];
+  }
+}
 
 export const useDesk = create<DeskUi>((set) => ({
   focus: ETH_LISTING,
@@ -63,6 +76,7 @@ export const useDesk = create<DeskUi>((set) => ({
   query: "",
   cardOpen: false,
   expanded: false,
+  saved: loadSaved(),
   setFocus: (focus) => set({ focus }),
   setUniverse: (universe) => set({ universe }),
   setChainTape: (chainTape) => set({ chainTape }),
@@ -71,4 +85,11 @@ export const useDesk = create<DeskUi>((set) => ({
   openCard: (l) => set({ focus: l, cardOpen: true, expanded: false }),
   closeCard: () => set({ cardOpen: false, expanded: false }),
   setExpanded: (expanded) => set({ expanded }),
+  toggleSave: (sym) =>
+    set((s) => {
+      const key = sym.toUpperCase();
+      const saved = s.saved.includes(key) ? s.saved.filter((x) => x !== key) : [...s.saved, key];
+      if (typeof window !== "undefined") window.localStorage.setItem("wolfpit-saved", JSON.stringify(saved));
+      return { saved };
+    }),
 }));

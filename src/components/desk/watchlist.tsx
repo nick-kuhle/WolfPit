@@ -5,7 +5,7 @@ import { useWolf } from "@/lib/wolfpit/store";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
-type Tab = "hot" | "gainers" | "losers" | "chains";
+type Tab = "saved" | "hot" | "gainers" | "losers" | "chains";
 
 export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   const universe = useDesk((s) => s.universe);
@@ -15,6 +15,8 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
   const setChainTape = useDesk((s) => s.setChainTape);
   const focus = useDesk((s) => s.focus);
   const openCard = useDesk((s) => s.openCard);
+  const saved = useDesk((s) => s.saved);
+  const toggleSave = useDesk((s) => s.toggleSave);
   const [tab, setTab] = useState<Tab>("hot");
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Listing[]>([]);
@@ -67,10 +69,16 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
     if (q.trim()) return hits;
     if (tab === "chains") return chainTape;
     const u = universe.slice();
+    if (tab === "saved") {
+      const rank = new Map(saved.map((s, i) => [s, i]));
+      return u
+        .filter((r) => saved.includes(r.symbol.toUpperCase()))
+        .sort((a, b) => (rank.get(a.symbol.toUpperCase()) ?? 99) - (rank.get(b.symbol.toUpperCase()) ?? 99));
+    }
     if (tab === "gainers") return u.sort((a, b) => b.change24 - a.change24);
     if (tab === "losers") return u.sort((a, b) => a.change24 - b.change24);
     return u.sort((a, b) => (a.symbol === "WPIT" ? -1 : b.symbol === "WPIT" ? 1 : b.volume24 - a.volume24));
-  }, [universe, chainTape, tab, q, hits]);
+  }, [universe, chainTape, tab, q, hits, saved]);
 
   function pick(l: Listing) {
     const listing = l.symbol === "WPIT" ? wpitListing(wpitPx, l.change24, l.volume24) : l;
@@ -103,7 +111,7 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
       </div>
       {q.trim() ? null : (
         <div className="flex border-b border-border">
-          {(["hot", "gainers", "losers", "chains"] as const).map((t) => (
+          {(["saved", "hot", "gainers", "losers", "chains"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -147,6 +155,17 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
           >
             <div className="min-w-0">
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className={cn("pressable text-[12px]", saved.includes(r.symbol.toUpperCase()) ? "text-brass" : "text-subtle")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleSave(r.symbol);
+                  }}
+                  aria-label="Save"
+                >
+                  {saved.includes(r.symbol.toUpperCase()) ? "★" : "☆"}
+                </button>
                 <span className="font-mono text-xs">{r.symbol}</span>
                 <span className="truncate text-[10px] text-subtle">{r.chain}</span>
               </div>
