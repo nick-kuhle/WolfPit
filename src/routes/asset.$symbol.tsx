@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { PitChart } from "@/components/desk/chart";
+import { ChartPane } from "@/components/desk/chart";
 import { OrderTicket } from "@/components/desk/order-ticket";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
@@ -35,6 +35,7 @@ function AssetPage() {
   const [interval, setIv] = useState<ChartInterval>("1h");
   const [bars, setBars] = useState<Candle[]>([]);
   const [status, setStatus] = useState<"load" | "ok" | "empty">("load");
+  const [wide, setWide] = useState(false);
 
   useEffect(() => {
     const local = seed(symbol, q, useDesk.getState().universe, useWolf.getState().wpit);
@@ -97,21 +98,21 @@ function AssetPage() {
     <Shell desk>
       <ProductGate product="desk">
         <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_22rem]">
-          <main className="min-h-0 overflow-auto px-3 py-4 sm:px-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">
-              Pit ticket · {listing.chain || "live"}
-            </p>
-            <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
+          <main className="min-h-0 overflow-auto px-3 py-3 sm:px-4">
+            <div className="flex flex-wrap items-end justify-between gap-2">
               <div>
-                <h1 className="font-display text-4xl font-medium tracking-tight">{listing.symbol}</h1>
-                <p className="text-muted">{listing.name || q.name}</p>
+                <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">
+                  Pit ticket · {listing.chain || "live"}
+                </p>
+                <h1 className="font-display text-3xl font-medium tracking-tight">{listing.symbol}</h1>
+                <p className="text-sm text-muted">{listing.name || q.name}</p>
               </div>
               <div className="text-right">
-                <div className="font-mono text-3xl tabular-nums">{px ? fmtPx(px) : "—"}</div>
+                <div className="font-mono text-2xl tabular-nums">{px ? fmtPx(px) : "—"}</div>
                 <div className={listing.change24 >= 0 ? "text-up" : "text-down"}>{fmtPct(listing.change24)}</div>
               </div>
             </div>
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <Link to="/trade">
                 <Button size="sm" variant="outline">
                   Floor
@@ -127,28 +128,19 @@ function AssetPage() {
               </Button>
             </div>
 
-            <div className="mt-4 overflow-hidden rounded-[var(--radius-xl)] border border-brass/30 bg-chart">
-              <div className="flex gap-1 border-b border-border px-2">
-                {(["1m", "5m", "15m", "1h", "1d"] as const).map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setIv(k)}
-                    className={`pressable h-10 px-2.5 font-mono text-xs ${interval === k ? "text-fg" : "text-muted"}`}
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
-              <div className="h-64 sm:h-80">
-                {status === "ok" ? (
-                  <PitChart candles={bars} height={256} interval={interval} />
-                ) : (
-                  <p className="p-4 text-sm text-muted">{status === "load" ? "Loading candles…" : "No candles for this timeframe."}</p>
-                )}
-              </div>
+            <div className="mt-3">
+              <ChartPane
+                candles={bars}
+                interval={interval}
+                status={status}
+                onInterval={setIv}
+                expanded={wide}
+                onToggle={() => setWide((v) => !v)}
+                compact={140}
+              />
             </div>
 
-            <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Stat k="Volume 24h" v={fmtUsd(listing.volume24)} />
               <Stat k="Chain" v={listing.chain || "—"} />
               <Stat k="Contract" v={listing.contract ? `${listing.contract.slice(0, 6)}…` : "—"} />
@@ -157,7 +149,7 @@ function AssetPage() {
 
             <RecentFills symbol={listing.symbol} />
           </main>
-          <aside className="min-h-[28rem] border-t border-border lg:h-[calc(100dvh-3rem)] lg:border-l lg:border-t-0">
+          <aside className="min-h-[22rem] border-t border-border lg:h-[calc(100dvh-3rem)] lg:border-l lg:border-t-0">
             <OrderTicket under={listing.symbol} />
           </aside>
         </div>

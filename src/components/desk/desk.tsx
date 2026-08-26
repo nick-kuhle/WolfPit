@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { AccountBar } from "@/components/desk/account-bar";
-import { PitChart } from "@/components/desk/chart";
+import { ChartPane } from "@/components/desk/chart";
 import { Watchlist } from "@/components/desk/watchlist";
 import { Button } from "@/components/ui/button";
 import { useDesk, type Listing } from "@/lib/wolfpit/desk";
@@ -24,6 +25,7 @@ import { cn, fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 export function Desk() {
   const nav = useNavigate();
   const s = useWolf();
+  const [wide, setWide] = useState(false);
   const eq = equity(s);
   const day = dayPnl(s);
   const health = liqHealth(s);
@@ -69,8 +71,14 @@ export function Desk() {
                 {fmtUsd(Math.abs(day))}
               </div>
             </div>
-            <div className="h-52 bg-chart sm:h-64">
-              <PitChart candles={tape} height={208} interval="1h" />
+            <div className="px-3 pb-2 pt-3">
+              <ChartPane
+                candles={tape}
+                interval="1h"
+                expanded={wide}
+                onToggle={() => setWide((v) => !v)}
+                compact={128}
+              />
             </div>
           </section>
 

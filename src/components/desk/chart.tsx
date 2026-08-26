@@ -117,3 +117,51 @@ export function PitChart({
 
   return <canvas ref={ref} className="block h-full w-full" />;
 }
+
+export function ChartPane({
+  candles,
+  interval,
+  status,
+  onInterval,
+  expanded,
+  onToggle,
+  compact = 148,
+}: {
+  candles: Candle[];
+  interval: ChartInterval;
+  status?: "ok" | "load" | "empty";
+  onInterval?: (iv: ChartInterval) => void;
+  expanded: boolean;
+  onToggle: () => void;
+  compact?: number;
+}) {
+  const h = expanded ? 420 : compact;
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-brass/30 bg-chart">
+      <div className="flex items-center gap-1 border-b border-border px-2">
+        {onInterval
+          ? (["1m", "5m", "15m", "1h", "1d"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => onInterval(k)}
+                className={`pressable h-9 px-2 font-mono text-[11px] ${interval === k ? "text-fg" : "text-muted"}`}
+              >
+                {k}
+              </button>
+            ))
+          : <span className="h-9 px-2 font-mono text-[11px] leading-9 text-subtle">equity</span>}
+        <button type="button" className="pressable ml-auto h-9 px-2 font-mono text-[11px] text-brass" onClick={onToggle}>
+          {expanded ? "Shrink" : "Expand"}
+        </button>
+      </div>
+      <div style={{ height: h }}>
+        {status && status !== "ok" ? (
+          <p className="p-3 text-sm text-muted">{status === "load" ? "Loading candles…" : "No candles for this timeframe."}</p>
+        ) : (
+          <PitChart candles={candles} height={h} interval={interval} />
+        )}
+      </div>
+    </div>
+  );
+}
