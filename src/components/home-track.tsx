@@ -24,7 +24,7 @@ export function HomeTrack() {
 
   return (
     <section className="border-b border-brass/40 bg-panel">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:py-12">
+      <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-12">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-brass">Farm / Racetrack · prizes</p>

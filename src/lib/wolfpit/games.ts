@@ -216,16 +216,27 @@ export function fieldAt(card: RaceCard, now: number) {
   });
 }
 
-/** Strictly increasing in t. Show vol via passing; never reverse. Winner last-second sprint. */
+/** Strictly increasing. Pattern is unique per runner/race — winner is not always last. */
 export function raceX(t: number, place: number, no: number, seed: number) {
   const tt = Math.min(1, Math.max(0, t));
-  const finish = 0.9 - place * 0.03;
-  const r = ((seed >>> ((no % 8) * 3)) & 255) / 255;
-  const fast = 0.55 + r * 0.28;
-  const slow = 2.2 + r * 0.9;
-  const w = place === 0 ? 0.08 + r * 0.06 : 0.72 + r * 0.2;
-  const e = w * Math.pow(tt, fast) + (1 - w) * Math.pow(tt, slow);
-  return finish * e;
+  const finish = 0.86 - place * 0.03;
+  const r = rng(seed ^ Math.imul(no + 1, 2654435761));
+  const p = 0.4 + r() * 2.4;
+  const knots = 7;
+  const ys: number[] = [0];
+  for (let i = 1; i < knots; i++) {
+    const u = i / knots;
+    const mix = 0.45 * r() + 0.55 * Math.pow(u, p);
+    const y = finish * mix;
+    const prev = ys[ys.length - 1]!;
+    ys.push(Math.max(prev + finish * 0.012, Math.min(finish * 0.97, y)));
+  }
+  ys.push(finish);
+  const x = tt * knots;
+  const i = Math.min(knots - 1, Math.floor(x));
+  const local = x - i;
+  const s = local * local * (3 - 2 * local);
+  return ys[i]! + (ys[i + 1]! - ys[i]!) * s;
 }
 
 export function shortHash(hex: string, n = 10) {

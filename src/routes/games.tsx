@@ -45,7 +45,7 @@ function GamesPage() {
             <YieldNav on="track" />
           </div>
         </div>
-        <main className="mx-auto grid max-w-5xl gap-8 px-4 py-6 lg:grid-cols-2">
+        <main className="mx-auto grid max-w-5xl gap-5 px-3 py-4 lg:grid-cols-2 sm:px-4">
           <Meet card={horse} now={now} />
           <Meet card={dog} now={now} />
         </main>
@@ -80,7 +80,7 @@ function Meet({ card, now }: { card: RaceCard; now: number }) {
   }
 
   return (
-    <section className="rounded-[var(--radius-xl)] border border-border bg-panel p-3 sm:p-4">
+    <section className="min-w-0 overflow-hidden rounded-[var(--radius-xl)] border border-border bg-panel p-2.5 sm:p-4">
       <div className="flex items-end justify-between gap-3">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-brass">

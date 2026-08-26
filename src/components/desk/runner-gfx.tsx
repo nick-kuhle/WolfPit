@@ -4,7 +4,7 @@ export function RunnerGfx({
   kind,
   coat,
   no,
-  size = 56,
+  size = 36,
 }: {
   kind: "horse" | "dog";
   coat: Coat;
@@ -13,16 +13,22 @@ export function RunnerGfx({
 }) {
   const id = `${kind}-${coat}-${no}`;
   return (
-    <svg viewBox="0 0 88 52" width={size * 1.7} height={size} aria-hidden className="drop-shadow">
+    <svg
+      viewBox="0 0 100 50"
+      width={size * 2}
+      height={size}
+      aria-hidden
+      className="overflow-visible drop-shadow-[0_2px_1px_rgba(0,0,0,0.5)]"
+    >
       <defs>
-        <pattern id={`zebra-${id}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(18)">
-          <rect width="6" height="6" fill="#f4f0e6" />
-          <rect width="3" height="6" fill="#1a1a1a" />
+        <pattern id={`zebra-${id}`} width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(22)">
+          <rect width="5" height="5" fill="#f4f0e6" />
+          <rect width="2.2" height="5" fill="#1a1a1a" />
         </pattern>
-        <pattern id={`leo-${id}`} width="10" height="10" patternUnits="userSpaceOnUse">
-          <rect width="10" height="10" fill="#d4a017" />
-          <circle cx="3" cy="3" r="1.6" fill="#5a3a12" />
-          <circle cx="8" cy="7" r="1.4" fill="#5a3a12" />
+        <pattern id={`leo-${id}`} width="9" height="9" patternUnits="userSpaceOnUse">
+          <rect width="9" height="9" fill="#d4a017" />
+          <circle cx="2.5" cy="2.5" r="1.3" fill="#5a3a12" />
+          <circle cx="7" cy="6" r="1.1" fill="#5a3a12" />
         </pattern>
         <linearGradient id={`rb-${id}`} x1="0" x2="1">
           <stop offset="0%" stopColor="#ef4444" />
@@ -33,11 +39,11 @@ export function RunnerGfx({
           <stop offset="100%" stopColor="#a855f7" />
         </linearGradient>
       </defs>
-      <g fill={fillFor(coat, id)}>
-        {kind === "horse" ? <HorsePath /> : <DogPath />}
+      <g fill={fillFor(coat, id)} stroke="#111" strokeWidth="0.8" strokeLinejoin="round" strokeLinecap="round">
+        {kind === "horse" ? <Horse /> : <Hound />}
       </g>
-      <circle cx="40" cy="18" r="9" fill="#0b0c0b" stroke="#f0c14b" strokeWidth="1.4" />
-      <text x="40" y="22" textAnchor="middle" fill="#f0c14b" fontSize="11" fontFamily="ui-monospace, monospace" fontWeight="700">
+      <circle cx="46" cy="22" r="6.4" fill="#0b0c0b" stroke="#f0c14b" strokeWidth="1.15" />
+      <text x="46" y="25.2" textAnchor="middle" fill="#f0c14b" fontSize="8.5" fontFamily="ui-monospace, monospace" fontWeight="700">
         {no}
       </text>
     </svg>
@@ -55,30 +61,34 @@ function fillFor(coat: Coat, id: string) {
   return "#7c3aed";
 }
 
-function HorsePath() {
+function Horse() {
   return (
     <>
-      <ellipse cx="42" cy="28" rx="22" ry="11" />
-      <path d="M62 26c8-2 12-10 16-14 1 6-1 12-6 16-2 8-1 14 2 18h-4c-2-6-3-12-1-16-6 1-10 2-14 1z" />
-      <path d="M22 26c-6 1-10 4-14 2 2 4 6 6 12 6z" />
-      <rect x="28" y="36" width="3.2" height="14" rx="1" />
-      <rect x="36" y="36" width="3.2" height="14" rx="1" />
-      <rect x="46" y="36" width="3.2" height="14" rx="1" />
-      <rect x="54" y="36" width="3.2" height="14" rx="1" />
+      <path d="M22 23c-9-5-16 0-18 7 6-1 12-1 18 0z" />
+      <ellipse cx="44" cy="26" rx="18" ry="8" transform="rotate(-8 44 26)" />
+      <path d="M58 21c8-4 12-13 18-17-1 7-3 13-8 17-4 2-7 3-10 3z" />
+      <ellipse cx="82" cy="8" rx="8.5" ry="4" transform="rotate(-26 82 8)" />
+      <path d="M76 5.5l2-7.5 3.2 7" />
+      <path d="M80.5 4.5l1.4-6.5 2.6 6.4" />
+      <path d="M32 32.5 23 48h2.6l7.8-15.2z" />
+      <path d="M40 33.5 38.6 48h2.4l1-14.5z" />
+      <path d="M50 32.5 53 48h2.4l-2.8-15.5z" />
+      <path d="M58 31.5 70 47.5h-2.8L56 32z" />
     </>
   );
 }
 
-function DogPath() {
+function Hound() {
   return (
     <>
-      <ellipse cx="44" cy="30" rx="20" ry="8" />
-      <path d="M64 28c10-1 16-6 20-4-2 5-8 8-16 8z" />
-      <path d="M24 28c-8 2-14 1-18-2 4 6 10 8 18 7z" />
-      <rect x="30" y="36" width="2.6" height="12" rx="1" />
-      <rect x="38" y="36" width="2.6" height="12" rx="1" />
-      <rect x="48" y="36" width="2.6" height="12" rx="1" />
-      <rect x="56" y="36" width="2.6" height="12" rx="1" />
+      <path d="M20 28c-8-1-14 4-16 10 5-2 10-3 16-3z" />
+      <ellipse cx="46" cy="29" rx="22" ry="5.4" transform="rotate(-3 46 29)" />
+      <path d="M66 26c12-2 22-1 32 4 1 2-3 4-10 4-8-1-16-2-22-4z" />
+      <path d="M94 26l7-4-1.5 5.5z" />
+      <path d="M36 33 27 48h2.3l7.6-14.6z" />
+      <path d="M44 34 43 48h2.2l.8-14z" />
+      <path d="M54 33 58 48h2.2l-3.4-15z" />
+      <path d="M62 32 78 46.5h-2.6L60.5 32.5z" />
     </>
   );
 }

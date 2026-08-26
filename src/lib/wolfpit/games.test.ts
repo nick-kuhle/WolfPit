@@ -128,4 +128,17 @@ describe("pit racetrack", () => {
     const first = field.reduce((a, b) => (a.x >= b.x ? a : b));
     assert.equal(first.no, card.winner);
   });
+
+  it("does not always leave the winner last at mid-race", () => {
+    let last = 0;
+    for (let k = 0; k < 20; k++) {
+      const now = 3_100_000_000_000 + k * 60_000 + 1_000;
+      const s = ensureRace(initialState(), "horse", now);
+      const card = cardFor("horse", now, s.games);
+      const mid = fieldAt(card, card.postAt + RUN_MS * 0.45);
+      const rank = [...mid].sort((a, b) => b.x - a.x).findIndex((r) => r.no === card.winner);
+      if (rank >= mid.length - 2) last += 1;
+    }
+    assert.ok(last < 16, `winner parked last ${last}/20`);
+  });
 });
