@@ -61,7 +61,6 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
           <Link
             to="/asset/$symbol"
             params={{ symbol: focus || "ETH" }}
-            search={{}}
             className={cn("pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg", pathname.startsWith("/asset") && "text-brass")}
           >
             Ticket
@@ -89,7 +88,6 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
           <Link
             to="/asset/$symbol"
             params={{ symbol: focus || "ETH" }}
-            search={{}}
             className={cn(
               "pressable flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
               pathname.startsWith("/asset") ? "text-brass" : "text-muted",

@@ -14,23 +14,14 @@ import type { Candle } from "@/lib/wolfpit/types";
 import { fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
 export const Route = createFileRoute("/asset/$symbol")({
-  validateSearch: (s: Record<string, unknown>) => {
-    const out: { name?: string; chain?: string; contract?: string; network?: string } = {};
-    if (typeof s.name === "string" && s.name) out.name = s.name;
-    if (typeof s.chain === "string" && s.chain) out.chain = s.chain;
-    if (typeof s.contract === "string" && s.contract) out.contract = s.contract;
-    if (typeof s.network === "string" && s.network) out.network = s.network;
-    return out;
-  },
   component: AssetPage,
 });
 
 function AssetPage() {
   const { symbol } = Route.useParams();
-  const q = Route.useSearch();
   const wpitPx = useWolf((s) => s.wpit);
   const [listing, setListing] = useState<Listing>(() =>
-    seed(symbol, q, useDesk.getState().universe, wpitPx),
+    seed(symbol, useDesk.getState().universe, wpitPx),
   );
   const [interval, setIv] = useState<ChartInterval>("1h");
   const [bars, setBars] = useState<Candle[]>([]);
@@ -38,15 +29,13 @@ function AssetPage() {
   const [wide, setWide] = useState(false);
 
   useEffect(() => {
-    const local = seed(symbol, q, useDesk.getState().universe, useWolf.getState().wpit);
+    const local = seed(symbol, useDesk.getState().universe, useWolf.getState().wpit);
     setListing(local);
     useWolf.getState().listToken(local.symbol, local.price || 1);
     useDesk.getState().setFocus(local);
-    if (local.symbol === "WPIT" || local.price) {
-      return;
-    }
+    if (local.symbol === "WPIT" || local.price) return;
     let dead = false;
-    void lookupToken({ data: { q: q.contract || symbol } })
+    void lookupToken({ data: { q: symbol } })
       .then((hit) => {
         if (dead) return;
         const next = { ...local, ...hit, symbol: hit.symbol || local.symbol };
@@ -58,7 +47,7 @@ function AssetPage() {
     return () => {
       dead = true;
     };
-  }, [symbol, q.contract, q.chain, q.network]);
+  }, [symbol]);
 
   useEffect(() => {
     if (listing.symbol === "WPIT") {
@@ -75,7 +64,7 @@ function AssetPage() {
         interval,
         binance: listing.binance,
         geckoId: listing.geckoId,
-        network: listing.network || q.network || undefined,
+        network: listing.network,
         poolAddress: listing.poolAddress,
       },
     })
@@ -90,7 +79,7 @@ function AssetPage() {
     return () => {
       dead = true;
     };
-  }, [listing.symbol, listing.binance, listing.geckoId, listing.network, listing.poolAddress, interval, q.network]);
+  }, [listing.symbol, listing.binance, listing.geckoId, listing.network, listing.poolAddress, interval]);
 
   const px = listing.symbol === "WPIT" ? wpitPx : listing.price;
 
@@ -105,7 +94,7 @@ function AssetPage() {
                   Pit ticket · {listing.chain || "live"}
                 </p>
                 <h1 className="font-display text-3xl font-medium tracking-tight">{listing.symbol}</h1>
-                <p className="text-sm text-muted">{listing.name || q.name}</p>
+                <p className="text-sm text-muted">{listing.name}</p>
               </div>
               <div className="text-right">
                 <div className="font-mono text-2xl tabular-nums">{px ? fmtPx(px) : "—"}</div>
@@ -158,25 +147,19 @@ function AssetPage() {
   );
 }
 
-function seed(
-  symbol: string,
-  q: { name?: string; chain?: string; contract?: string; network?: string },
-  universe: Listing[],
-  wpitPx: number,
-): Listing {
+function seed(symbol: string, universe: Listing[], wpitPx: number): Listing {
   const sym = symbol.toUpperCase();
   if (sym === "WPIT") return wpitListing(wpitPx, 0.12);
   const hit = universe.find((u) => u.symbol === sym);
   if (hit) return hit;
+  const focus = useDesk.getState().focus;
+  if (focus.symbol === sym) return focus;
   return {
     symbol: sym,
-    name: q.name || sym,
+    name: sym,
     price: 0,
     change24: 0,
     volume24: 0,
-    chain: q.chain,
-    contract: q.contract || undefined,
-    network: q.network || undefined,
   };
 }
 

@@ -47,10 +47,9 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
   const s = useWolf();
   const send = useWolf((st) => st.sendOrder);
   const cancel = useWolf((st) => st.cancelOrder);
-  const listToken = useWolf((st) => st.listToken);
-  const focusSym = useDesk((d) => d.focus.symbol);
-  const under = (underProp || focusSym || "ETH").toUpperCase() === "USDC" ? "ETH" : (underProp || focusSym || "ETH").toUpperCase();
-  const spot = markOf(s, under) || (under === "ETH" ? s.eth : useDesk.getState().focus.price) || 1;
+  const raw = (underProp || "ETH").toUpperCase();
+  const under = raw === "USDC" ? "ETH" : raw;
+  const spot = markOf(s, under) || (under === "ETH" ? s.eth : 1);
 
   useEffect(() => {
     if (prefer) setSide(prefer);
@@ -60,9 +59,11 @@ export function OrderTicket({ prefer, under: underProp }: { prefer?: "buy" | "se
     const id = under === "ETH" ? "ETH-USDC" : under === "WPIT" ? "WPIT-USDC-TEST" : `${under}-USDC`;
     setPoolId(id);
     const st = useWolf.getState();
-    if (!st.pools[id]) listToken(under, markOf(st, under) || useDesk.getState().focus.price || 1);
-    setStrike(0);
-  }, [under, listToken]);
+    if (!st.pools[id]) {
+      const px = markOf(st, under) || useDesk.getState().focus.price || 1;
+      useWolf.getState().listToken(under, px);
+    }
+  }, [under]);
 
   const clock = s.clock;
   const exps = useMemo(() => expiries(clock), [clock]);
