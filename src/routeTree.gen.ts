@@ -16,6 +16,7 @@ import { Route as LearnRouteImport } from './routes/learn'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as PlanRouteImport } from './routes/plan'
 import { Route as PoolsRouteImport } from './routes/pools'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as StakeRouteImport } from './routes/stake'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TradeRouteImport } from './routes/trade'
@@ -58,6 +59,11 @@ const PoolsRoute = PoolsRouteImport.update({
   path: '/pools',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StakeRoute = StakeRouteImport.update({
   id: '/stake',
   path: '/stake',
@@ -97,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
+  '/profile': typeof ProfileRoute
   '/stake': typeof StakeRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
@@ -112,6 +119,7 @@ export interface FileRoutesByTo {
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
+  '/profile': typeof ProfileRoute
   '/stake': typeof StakeRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
@@ -128,6 +136,7 @@ export interface FileRoutesById {
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
+  '/profile': typeof ProfileRoute
   '/stake': typeof StakeRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
@@ -145,6 +154,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/plan'
     | '/pools'
+    | '/profile'
     | '/stake'
     | '/terms'
     | '/trade'
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/plan'
     | '/pools'
+    | '/profile'
     | '/stake'
     | '/terms'
     | '/trade'
@@ -175,6 +186,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/plan'
     | '/pools'
+    | '/profile'
     | '/stake'
     | '/terms'
     | '/trade'
@@ -191,6 +203,7 @@ export interface RootRouteChildren {
   OrdersRoute: typeof OrdersRoute
   PlanRoute: typeof PlanRoute
   PoolsRoute: typeof PoolsRoute
+  ProfileRoute: typeof ProfileRoute
   StakeRoute: typeof StakeRoute
   TermsRoute: typeof TermsRoute
   TradeRoute: typeof TradeRoute
@@ -247,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/pools'
       fullPath: '/pools'
       preLoaderRoute: typeof PoolsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/stake': {
@@ -312,6 +332,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrdersRoute: OrdersRoute,
   PlanRoute: PlanRoute,
   PoolsRoute: PoolsRoute,
+  ProfileRoute: ProfileRoute,
   StakeRoute: StakeRoute,
   TermsRoute: TermsRoute,
   TradeRoute: TradeRoute,

@@ -3,6 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { PitAlerts } from "@/components/pit-alerts";
 import { SimLoop } from "@/components/sim-loop";
+import { WalletHydrate } from "@/components/wallet-hydrate";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "WolfPit";
@@ -41,6 +42,7 @@ export const Route = createRootRoute({
       <body className="bg-bg text-fg">
         <PreviewHostBridge />
         <AuthProvider>
+          <WalletHydrate />
           <SimLoop />
           <PitAlerts />
           <Outlet />

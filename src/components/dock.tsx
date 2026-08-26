@@ -6,6 +6,7 @@ import { useWolf, useEquity } from "@/lib/wolfpit/store";
 import { useAlerts } from "@/lib/wolfpit/alerts";
 import { fmtUsd } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { useWallet, truncAddr } from "@/lib/wallet/session";
 
 const TABS = [
   { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
@@ -77,8 +78,9 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   const s = useWolf();
   const reset = useWolf((st) => st.reset);
   const setSpeed = useWolf((st) => st.setSpeed);
+  const wallet = useWallet();
 
-  function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch") {
+  function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch" | "/profile") {
     onClose();
     void nav({ to });
   }
@@ -91,11 +93,15 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
           <span className="h-1 w-10 rounded-full bg-border-strong" />
           <span className="mt-1 font-mono text-[11px] uppercase tracking-wider text-brass">Done · fold down</span>
         </button>
-        <div className="flex items-center gap-3 px-4 py-3">
-          <div className="grid size-12 place-items-center rounded-full bg-brass font-display text-lg text-bg">N</div>
+        <button type="button" onClick={() => go("/profile")} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+          <div className="grid size-12 place-items-center rounded-full bg-brass font-display text-lg text-bg">
+            {wallet.address ? wallet.address.slice(2, 4).toUpperCase() : "?"}
+          </div>
           <div className="min-w-0 flex-1">
-            <div className="font-medium">You · paper</div>
-            <div className="font-mono text-[12px] text-muted">Net liq {fmtUsd(eq)}</div>
+            <div className="font-medium">{wallet.address ? truncAddr(wallet.address) : "Profile · connect"}</div>
+            <div className="font-mono text-[12px] text-muted">
+              {wallet.address ? `Net liq ${fmtUsd(eq)}` : "Wallet required to trade"}
+            </div>
           </div>
           <span
             className={cn(
@@ -105,10 +111,11 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
           >
             {chainLabel()}
           </span>
-        </div>
+        </button>
 
         <div className="px-3 pb-3">
           <p className="px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-subtle">Pit</p>
+          <Row icon="☻" label="Profile" hint={wallet.address ? truncAddr(wallet.address) : "Connect wallet to trade"} onClick={() => go("/profile")} />
           <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} />
           <Row icon="◎" label="Stake" hint="12% APR junior" onClick={() => go("/stake")} />
           <Row icon="☰" label="Fills" hint={`${s.fills.length} on the tape`} onClick={() => go("/orders")} />
@@ -233,6 +240,7 @@ export function DesktopNav({ pathname }: { pathname: string }) {
           <div className="absolute right-0 top-11 z-40 w-52 overflow-hidden rounded-md border border-border bg-panel py-1 shadow-xl">
             {(
               [
+                ["/profile", "Profile"],
                 ["/watch", "Watch"],
                 ["/stake", "Stake"],
                 ["/orders", "Fills"],
