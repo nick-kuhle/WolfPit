@@ -216,7 +216,7 @@ export function applyLive(
   const rv = ewmaRv(feed.candles);
   const pools = { ...s.pools };
   const ethPool = pools["ETH-USDC"];
-  if (ethPool && s.liveAt === 0 && s.lp.every((p) => p.poolId !== "ETH-USDC")) {
+  if (ethPool) {
     pools["ETH-USDC"] = { ...ethPool, quoteReserve: ethPool.baseReserve * feed.eth };
   }
   const next: EngineState = {
@@ -773,15 +773,32 @@ export function exportTape(s: EngineState) {
   };
 }
 
+export function poolMark(s: EngineState, pool: EngineState["pools"][string]) {
+  if (pool.base === "ETH" && pool.quote === "USDC") return Math.max(s.eth, 1e-9);
+  if (pool.quote === "ETH" && pool.base === "WPIT") return Math.max(s.wpit / Math.max(s.eth, 1e-9), 1e-12);
+  if (pool.quote === "USDC") {
+    const px = tokenPx(s, pool.base);
+    if (px > 0) return px;
+  }
+  return pool.baseReserve > 0 ? pool.quoteReserve / pool.baseReserve : 0;
+}
+
 export function addLiquidity(s: EngineState, poolId: PoolId, quoteAmt: number): EngineState | string {
   if (quoteAmt <= 0) return "Size must be positive.";
   const pool = s.pools[poolId];
   if (!pool) return "Unknown pool.";
   const copy = { ...pool };
+  if (copy.base === "ETH" && copy.quote === "USDC") {
+    copy.quoteReserve = copy.baseReserve * s.eth;
+  } else if (copy.base === "WPIT" && copy.quote === "USDC") {
+    copy.quoteReserve = copy.baseReserve * s.wpit;
+  } else if (copy.base === "WPIT" && copy.quote === "ETH") {
+    copy.quoteReserve = (copy.baseReserve * s.wpit) / Math.max(s.eth, 1e-9);
+  }
   const px = copy.quoteReserve / copy.baseReserve;
   const baseIn = quoteAmt / px;
   if (tokenBal(s.account, copy.quote) < quoteAmt || tokenBal(s.account, copy.base) < baseIn) {
-    return `Need both ${copy.base} and ${copy.quote}.`;
+    return `Need ${baseIn.toPrecision(6)} ${copy.base} and ${quoteAmt.toPrecision(6)} ${copy.quote} at the live mark.`;
   }
   const shares = copy.lpSupply > 0 ? (quoteAmt / copy.quoteReserve) * copy.lpSupply : Math.sqrt(baseIn * quoteAmt);
   let acc = creditToken(s.account, copy.quote, -quoteAmt);
@@ -839,7 +856,7 @@ export function createPool(
   if (!b || !q || b === q) return "Pick two different tokens.";
   if (baseAmt <= 0 || quoteAmt <= 0) return "Both legs must be positive.";
   const id = `${b}-${q}`;
-  if (s.pools[id]) return "Pool exists. Add liquidity instead.";
+  if (s.pools[id] || s.pools[`${id}-TEST`]) return "Pool exists. Add liquidity instead.";
   if (tokenBal(s.account, b) < baseAmt) return `Need ${b}.`;
   if (tokenBal(s.account, q) < quoteAmt) return `Need ${q}.`;
   let acc = creditToken(s.account, b, -baseAmt);

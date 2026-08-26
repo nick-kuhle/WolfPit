@@ -37,6 +37,7 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
   const [exi, setExi] = useState(0);
   const [optType, setOptType] = useState<OptType>("call");
   const [kIdx, setKIdx] = useState(2);
+  const [confirm, setConfirm] = useState(false);
 
   const s = useWolf();
   const send = useWolf((st) => st.sendOrder);
@@ -273,24 +274,49 @@ export function OrderTicket({ prefer }: { prefer?: "buy" | "sell" | null }) {
           className="mt-4 w-full"
           variant={side === "buy" ? "up" : "down"}
           disabled={blocked}
-          onClick={() => {
-            send({
-              product,
-              side,
-              kind,
-              tif,
-              qty: n,
-              limit: limit ? Number(limit) : undefined,
-              stop: stop ? Number(stop) : undefined,
-              poolId,
-              expiry: exps[exi]?.at,
-              strike,
-              optType,
-            });
-          }}
+          onClick={() => setConfirm(true)}
         >
-          {kind === "mkt" ? `Send ${side.toUpperCase()} ${product}` : `Queue ${kind.toUpperCase()} ${side}`}
+          Review {side.toUpperCase()} {product}
         </Button>
+
+        {confirm ? (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
+            <div className="sheet-in w-full max-w-sm rounded-[var(--radius-xl)] border border-border bg-panel p-5">
+              <p className="font-mono text-[11px] uppercase tracking-wider text-brass">Confirm ticket</p>
+              <h3 className="mt-2 font-display text-2xl font-medium">
+                {side.toUpperCase()} {n} {product === "spot" ? poolId : product}
+              </h3>
+              <p className="mt-2 text-sm text-muted">{est.label} · {kind.toUpperCase()} · {tif.toUpperCase()}</p>
+              <p className="mt-1 text-xs text-subtle">Paper funds. You must confirm before the order is sent.</p>
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setConfirm(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant={side === "buy" ? "up" : "down"}
+                  onClick={() => {
+                    send({
+                      product,
+                      side,
+                      kind,
+                      tif,
+                      qty: n,
+                      limit: limit ? Number(limit) : undefined,
+                      stop: stop ? Number(stop) : undefined,
+                      poolId,
+                      expiry: exps[exi]?.at,
+                      strike,
+                      optType,
+                    });
+                    setConfirm(false);
+                  }}
+                >
+                  Confirm
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {(s.working ?? []).length > 0 && (
           <section className="mt-4">

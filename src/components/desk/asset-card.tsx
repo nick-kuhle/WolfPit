@@ -22,10 +22,12 @@ export function AssetCard() {
   const [interval, setIv] = useState<ChartInterval>("1m");
   const [bars, setBars] = useState<Candle[]>([]);
   const [status, setStatus] = useState<"load" | "ok" | "empty">("load");
-  const [ticket, setTicket] = useState<"buy" | "sell" | null>(null);
+  const [tab, setTab] = useState<"chart" | "trade">("chart");
+  const [side, setSide] = useState<"buy" | "sell">("buy");
 
   useEffect(() => {
     listToken(focus.symbol, focus.price || 1);
+    setTab("chart");
   }, [focus.symbol, focus.price, listToken]);
 
   useEffect(() => {
@@ -68,10 +70,10 @@ export function AssetCard() {
         "sheet-in z-30 flex min-h-0 flex-col overflow-hidden border-border bg-panel",
         expanded
           ? "fixed inset-0 border-0"
-          : "fixed inset-x-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] max-h-[min(70dvh,36rem)] rounded-[var(--radius-xl)] border landscape:inset-y-2 landscape:bottom-2 landscape:left-auto landscape:right-2 landscape:w-[min(28rem,52vw)] landscape:max-h-none lg:absolute lg:inset-y-3 lg:right-3 lg:left-auto lg:bottom-auto lg:w-[min(26rem,40%)] lg:max-h-none",
+          : "fixed inset-x-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] h-[min(78dvh,40rem)] rounded-[var(--radius-xl)] border landscape:inset-y-2 landscape:bottom-2 landscape:left-auto landscape:right-2 landscape:h-auto landscape:w-[min(28rem,52vw)] lg:absolute lg:inset-y-3 lg:right-3 lg:left-auto lg:bottom-auto lg:h-auto lg:w-[min(26rem,40%)]",
       )}
     >
-      <header className="flex items-start gap-2 border-b border-border px-3 py-2">
+      <header className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[11px] uppercase tracking-wider text-brass">
             {focus.symbol} · {focus.chain ?? "live"}
@@ -86,67 +88,92 @@ export function AssetCard() {
           </div>
         </div>
         <div className="flex shrink-0">
-          <button className="h-11 px-3 text-xs uppercase tracking-wider text-muted" onClick={() => setExpanded(!expanded)}>
+          <button className="pressable h-11 px-3 text-xs uppercase tracking-wider text-muted hover:text-fg" onClick={() => setExpanded(!expanded)}>
             {expanded ? "Shrink" : "Expand"}
           </button>
-          <button className="h-11 px-3 text-xs uppercase tracking-wider text-muted" onClick={closeCard}>
+          <button className="pressable h-11 px-3 text-xs uppercase tracking-wider text-muted hover:text-fg" onClick={closeCard}>
             Close
           </button>
         </div>
       </header>
 
-      <div className="flex gap-1 border-b border-border px-2">
-        {(["1m", "5m", "15m", "1h", "1d"] as const).map((k) => (
+      <div className="flex shrink-0 border-b border-border">
+        {(["chart", "trade"] as const).map((k) => (
           <button
             key={k}
-            onClick={() => setIv(k)}
-            className={cn("h-10 px-2.5 font-mono text-xs", interval === k ? "text-fg" : "text-muted")}
+            onClick={() => setTab(k)}
+            className={cn(
+              "pressable h-11 flex-1 text-xs uppercase tracking-wider",
+              tab === k ? "border-b-2 border-brass text-fg" : "text-muted hover:text-fg",
+            )}
           >
-            {k}
+            {k === "chart" ? "Chart" : "Ticket"}
           </button>
         ))}
       </div>
 
-      <div className="relative h-44 shrink-0 bg-chart landscape:h-36 lg:h-52">
-        {status === "load" ? <p className="p-4 text-sm text-muted">Loading {interval}…</p> : null}
-        {status === "empty" ? <p className="p-4 text-sm text-muted">No candles. Try 1h.</p> : null}
-        {status === "ok" ? <PitChart candles={bars} height={160} interval={interval} /> : null}
-      </div>
-
-      <div className="flex items-center gap-2 px-3 pt-3 text-xs">
-        <Link
-          to="/asset/$symbol"
-          params={{ symbol: focus.symbol }}
-          search={{
-            name: focus.name,
-            chain: focus.chain ?? "",
-            contract: focus.contract ?? "",
-            network: focus.network ?? "",
-          }}
-          className="text-brass underline-offset-2 hover:underline"
-        >
-          Open details
-        </Link>
-        <span className="text-subtle">·</span>
-        <button className="text-muted hover:text-fg" onClick={() => void shareAsset(focus)}>
-          Share
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 p-3">
-        <Button variant="up" onClick={() => setTicket("buy")}>
-          Buy
-        </Button>
-        <Button variant="down" onClick={() => setTicket("sell")}>
-          Sell
-        </Button>
-      </div>
-
-      {ticket ? (
-        <div className="min-h-0 flex-1 overflow-auto border-t border-border">
-          <OrderTicket prefer={ticket} />
+      {tab === "chart" ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 gap-1 border-b border-border px-2">
+            {(["1m", "5m", "15m", "1h", "1d"] as const).map((k) => (
+              <button
+                key={k}
+                onClick={() => setIv(k)}
+                className={cn("pressable h-10 px-2.5 font-mono text-xs", interval === k ? "text-fg" : "text-muted hover:text-fg")}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+          <div className="relative min-h-0 flex-1 bg-chart">
+            {status === "load" ? <p className="p-4 text-sm text-muted">Loading {interval}…</p> : null}
+            {status === "empty" ? <p className="p-4 text-sm text-muted">No candles. Try 1h.</p> : null}
+            {status === "ok" ? <PitChart candles={bars} height={220} interval={interval} /> : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-2 text-xs">
+            <Link
+              to="/asset/$symbol"
+              params={{ symbol: focus.symbol }}
+              search={{
+                name: focus.name,
+                chain: focus.chain ?? "",
+                contract: focus.contract ?? "",
+                network: focus.network ?? "",
+              }}
+              className="pressable text-brass hover:underline"
+            >
+              Details
+            </Link>
+            <button className="pressable text-muted hover:text-fg" onClick={() => void shareAsset(focus)}>
+              Share
+            </button>
+          </div>
+          <div className="grid shrink-0 grid-cols-2 gap-2 p-3">
+            <Button
+              variant="up"
+              onClick={() => {
+                setSide("buy");
+                setTab("trade");
+              }}
+            >
+              Buy
+            </Button>
+            <Button
+              variant="down"
+              onClick={() => {
+                setSide("sell");
+                setTab("trade");
+              }}
+            >
+              Sell
+            </Button>
+          </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <OrderTicket prefer={side} />
+        </div>
+      )}
     </div>
   );
 }

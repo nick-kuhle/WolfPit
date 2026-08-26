@@ -10,6 +10,7 @@ import {
   createPool,
   farmApy,
   poolTvl,
+  poolMark,
   expiries,
   harvestFarm,
   initialState,
@@ -218,6 +219,22 @@ describe("LP and option close", () => {
     s = r as typeof s;
     assert.equal(s.lp.length, 0);
     assert.ok(s.account.eth > 9);
+  });
+
+  it("ETH-USDC add uses live mark, not a custom print", () => {
+    const s = initialState();
+    s.eth = 3500;
+    s.account.eth = 10;
+    s.account.usdc = 100_000;
+    const before = s.eth;
+    const added = addLiquidity(s, "ETH-USDC", 3500);
+    assert.equal(typeof added, "object", String(added));
+    const next = added as typeof s;
+    const p = next.pools["ETH-USDC"]!;
+    const mid = p.quoteReserve / p.baseReserve;
+    assert.ok(Math.abs(mid - before) / before < 1e-9);
+    assert.ok(Math.abs(poolMark(next, p) - 3500) < 1e-6);
+    assert.ok(Math.abs(s.account.eth - next.account.eth - 1) < 1e-8);
   });
 
   it("close option releases cover", () => {

@@ -25,8 +25,8 @@ export function Desk() {
             key={k}
             onClick={() => setPane(k)}
             className={cn(
-              "h-11 text-xs uppercase tracking-wider",
-              pane === k ? "text-fg" : "text-muted",
+              "pressable h-11 text-xs uppercase tracking-wider hover:text-fg",
+              pane === k ? "border-b-2 border-brass text-fg" : "text-muted",
             )}
           >
             {k === "watch" ? "Board" : k === "port" ? "Wallet" : "History"}

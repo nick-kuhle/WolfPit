@@ -4,7 +4,7 @@ import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
-import { farmApy, lpValue, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
+import { farmApy, lpValue, poolMark, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { cn, fmtPct, fmtUsd } from "@/lib/utils";
 
@@ -24,9 +24,11 @@ function PoolsPage() {
   const [baseAmt, setBaseAmt] = useState("1");
   const [quoteAmt, setQuoteAmt] = useState("4000");
   const [custom, setCustom] = useState("");
+  const [pending, setPending] = useState<null | { title: string; body: string; run: () => void }>(null);
   const ids = Object.keys(s.pools);
   const pair = `${base}-${quote}`;
-  const exists = Boolean(s.pools[pair]);
+  const pairId = s.pools[pair] ? pair : s.pools[`${pair}-TEST`] ? `${pair}-TEST` : pair;
+  const exists = Boolean(s.pools[pairId]);
   const tokens = useMemo(() => {
     const extra = Object.keys(s.account.tokens ?? {});
     return ["ETH", "USDC", "WPIT", ...extra];
@@ -75,7 +77,17 @@ function PoolsPage() {
               <div className="font-display text-4xl font-medium tabular-nums">{s.farmWpit.toFixed(2)}</div>
               <p className="text-xs text-muted">WPIT · 1% tax → insurance ({tax.toFixed(2)})</p>
             </div>
-            <Button disabled={!ripe} className="h-12 px-6" onClick={() => harvest()}>
+            <Button
+              disabled={!ripe}
+              className="h-12 px-6"
+              onClick={() =>
+                setPending({
+                  title: "Harvest WPIT",
+                  body: `Collect ${s.farmWpit.toFixed(2)} WPIT. 1% tax to insurance.`,
+                  run: () => harvest(),
+                })
+              }
+            >
               Harvest
             </Button>
           </div>
@@ -85,6 +97,8 @@ function PoolsPage() {
               const p = s.pools[id]!;
               const tvl = poolTvl(s, id);
               const apy = farmApy(s, id);
+              const mark = poolMark(s, p);
+              const needQuote = (Number(baseAmt) || 0) * mark;
               const mine = s.lp.find((x) => x.poolId === id);
               const open = openId === id;
               return (
@@ -110,13 +124,34 @@ function PoolsPage() {
                   </button>
                   {open ? (
                     <div className="sheet-in border-t border-border bg-surface px-4 py-4">
-                      <p className="text-xs text-muted">Existing stall. Deposit both legs at the current curve.</p>
+                      <p className="text-xs text-muted">
+                        Existing pool. Both legs lock to the live mark ({p.base} {fmtUsd(mark, 4)}). You cannot set a
+                        custom print here.
+                      </p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <Amt label={p.base} value={baseAmt} wallet={tokenBal(s.account, p.base)} onChange={setBaseAmt} />
-                        <Amt label={p.quote} value={quoteAmt} wallet={tokenBal(s.account, p.quote)} onChange={setQuoteAmt} />
+                        <label className="text-xs">
+                          {p.quote} (required)
+                          <input
+                            readOnly
+                            className="mt-1 h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono text-muted"
+                            value={needQuote ? needQuote.toPrecision(6) : ""}
+                          />
+                          <span className="mt-1 block text-muted">Wallet {fmtAmt(tokenBal(s.account, p.quote))}</span>
+                        </label>
                       </div>
                       <div className="mt-3 flex gap-2">
-                        <Button onClick={() => add(id, Number(quoteAmt) || 0)}>Add liquidity</Button>
+                        <Button
+                          onClick={() =>
+                            setPending({
+                              title: `Add to ${prettyPool(id)}`,
+                              body: `Deposit ${baseAmt} ${p.base} and ${needQuote.toPrecision(6)} ${p.quote} at the live mark.`,
+                              run: () => add(id, needQuote),
+                            })
+                          }
+                        >
+                          Add liquidity
+                        </Button>
                         <Button variant="outline" disabled={!mine} onClick={() => mine && remove(id, mine.shares)}>
                           Remove
                         </Button>
@@ -131,26 +166,58 @@ function PoolsPage() {
           <section className="mt-10 rounded-[var(--radius-xl)] border border-border bg-surface p-5">
             <h2 className="font-display text-2xl font-medium">Open a new stall</h2>
             <p className={cn("mt-1 text-sm", exists ? "text-brass" : "text-muted")}>
-              {exists ? `${prettyPool(pair)} is already on the floor — you’ll join that farm.` : `${prettyPool(pair)} doesn’t exist yet. This creates it.`}
+              {exists
+                ? `${prettyPool(pairId)} already trades. Deposits lock to the live mark — you will not set a new print.`
+                : `${prettyPool(pair)} is new. Both legs set the opening print (e.g. WPIT / ETH).`}
             </p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <TokenPick label="Token A" value={base} tokens={tokens} onChange={setBase} />
               <TokenPick label="Token B" value={quote} tokens={tokens} onChange={setQuote} />
               <Amt label={base} value={baseAmt} wallet={tokenBal(s.account, base)} onChange={setBaseAmt} />
-              <Amt label={quote} value={quoteAmt} wallet={tokenBal(s.account, quote)} onChange={setQuoteAmt} />
+              {exists ? (
+                <label className="text-xs">
+                  {quote} (required)
+                  <input
+                    readOnly
+                    className="mt-1 h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono text-muted"
+                    value={(((Number(baseAmt) || 0) * poolMark(s, s.pools[pairId]!)) || 0).toPrecision(6)}
+                  />
+                </label>
+              ) : (
+                <Amt label={quote} value={quoteAmt} wallet={tokenBal(s.account, quote)} onChange={setQuoteAmt} />
+              )}
             </div>
+            {!exists && Number(baseAmt) > 0 && Number(quoteAmt) > 0 ? (
+              <p className="mt-2 text-xs text-brass">
+                Opening print: 1 {base} = {(Number(quoteAmt) / Number(baseAmt)).toPrecision(6)} {quote}
+              </p>
+            ) : null}
             <div className="mt-4">
               {exists ? (
                 <Button
                   onClick={() => {
-                    add(pair, Number(quoteAmt) || 0);
-                    setOpenId(pair);
+                    const mark = poolMark(s, s.pools[pairId]!);
+                    const qAmt = (Number(baseAmt) || 0) * mark;
+                    setPending({
+                      title: `Add to ${prettyPool(pairId)}`,
+                      body: `Deposit ${baseAmt} ${base} and ${qAmt.toPrecision(6)} ${quote} at the live mark.`,
+                      run: () => add(pairId, qAmt),
+                    });
+                    setOpenId(pairId);
                   }}
                 >
-                  Add to {prettyPool(pair)}
+                  Add to {prettyPool(pairId)}
                 </Button>
               ) : (
-                <Button onClick={() => create(base, quote, Number(baseAmt) || 0, Number(quoteAmt) || 0)}>
+                <Button
+                  onClick={() =>
+                    setPending({
+                      title: `Create ${prettyPool(pair)}`,
+                      body: `Seed ${baseAmt} ${base} and ${quoteAmt} ${quote}. Implied 1 ${base} = ${(Number(quoteAmt) / Math.max(Number(baseAmt), 1e-12)).toPrecision(6)} ${quote}.`,
+                      run: () => create(base, quote, Number(baseAmt) || 0, Number(quoteAmt) || 0),
+                    })
+                  }
+                >
                   Create {prettyPool(pair)}
                 </Button>
               )}
@@ -169,6 +236,28 @@ function PoolsPage() {
           </section>
           {err ? <p className="mt-4 text-sm text-down">{err}</p> : null}
         </main>
+        {pending ? (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
+            <div className="sheet-in w-full max-w-sm rounded-[var(--radius-xl)] border border-border bg-panel p-5">
+              <p className="font-mono text-[11px] uppercase tracking-wider text-brass">Confirm</p>
+              <h3 className="mt-2 font-display text-2xl font-medium">{pending.title}</h3>
+              <p className="mt-2 text-sm text-muted">{pending.body}</p>
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setPending(null)}>
+                  Back
+                </Button>
+                <Button
+                  onClick={() => {
+                    pending.run();
+                    setPending(null);
+                  }}
+                >
+                  Confirm
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <SiteFooter />
       </ProductGate>
     </Shell>
