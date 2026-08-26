@@ -113,6 +113,29 @@ describe("pit racetrack", () => {
     assert.ok(done.fills[0]?.fair?.seed);
   });
 
+  it("paces stay even — no surge then stall", () => {
+    for (let k = 0; k < 8; k++) {
+      const now = 3_500_000_000_000 + k * 120_000 + 1_000;
+      const s = ensureRace(initialState(), "horse", now);
+      const card = cardFor("horse", now, s.games);
+      const a = fieldAt(card, card.postAt + RUN_MS * 0.33);
+      const b = fieldAt(card, card.postAt + RUN_MS * 0.66);
+      const c = fieldAt(card, card.settleAt);
+      for (let i = 0; i < a.length; i++) {
+        const x1 = a[i]!.x;
+        const x2 = b[i]!.x;
+        const x3 = c[i]!.x;
+        assert.ok(x1 > 0.22 && x1 < 0.48, `early surge/lag ${a[i]!.no} ${x1}`);
+        assert.ok(x2 > 0.5 && x2 < 0.82, `mid surge/lag ${b[i]!.no} ${x2}`);
+        const d1 = x1;
+        const d2 = x2 - x1;
+        const d3 = x3 - x2;
+        assert.ok(d1 / d3 < 2.4 && d3 / d1 < 2.4, `uneven thirds ${a[i]!.no} ${d1} ${d2} ${d3}`);
+        assert.ok(d2 / d1 < 2.2 && d1 / d2 < 2.2, `mid lurch ${a[i]!.no}`);
+      }
+    }
+  });
+
   it("never moves a runner backward and winner is first at the wire", () => {
     const start = slotStart(2_300_000_000_000, "dog");
     const now = start + 1_000;

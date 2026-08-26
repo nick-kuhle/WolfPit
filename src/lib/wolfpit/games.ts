@@ -216,52 +216,18 @@ export function fieldAt(card: RaceCard, now: number) {
   });
 }
 
-/** Always moving on (0,1). Unique curve per runner; winner still first at the wire. */
+/** Even pace, small wobble. Winner has the highest mean speed; nobody surges then stalls. */
 export function raceX(t: number, place: number, no: number, seed: number) {
   const tt = Math.min(1, Math.max(0, t));
-  const finish = 1 - place * 0.038;
+  const finish = 1 - place * 0.015;
   const r = rng(seed ^ Math.imul(no + 13, 2654435761) ^ Math.imul(place + 7, 1597334677));
-  const n = 6;
-  const weights: number[] = [];
-  for (let i = 0; i < n; i++) weights.push(0.35 + r() * 1.6);
-  const wsum = weights.reduce((a, b) => a + b, 0);
-  const ts = [0];
-  let acc = 0;
-  for (let i = 0; i < n - 1; i++) {
-    acc += weights[i]! / wsum;
-    ts.push(acc);
-  }
-  ts.push(1);
-  const closer = r();
-  const MIN = 0.18;
-  const xs = [0];
-  let x = 0;
-  for (let i = 1; i < ts.length; i++) {
-    const dt = ts[i]! - ts[i - 1]!;
-    const leftT = Math.max(0, 1 - ts[i]!);
-    const remain = finish - x;
-    const mustLeave = MIN * leftT;
-    const minThis = MIN * dt;
-    const maxThis = Math.max(minThis, remain - mustLeave);
-    let u = r();
-    const late = ts[i]! > 0.58;
-    if (closer > 0.52) u = late ? Math.sqrt(Math.min(1, u + 0.12)) : u * u * u;
-    else if (closer < 0.32) u = late ? u * u : Math.sqrt(u);
-    else u = r() > 0.45 ? u * u : Math.sqrt(u);
-    const step = minThis + u * Math.max(0, maxThis - minThis);
-    x += step;
-    if (i === ts.length - 1) x = finish;
-    else x = Math.min(finish - mustLeave, Math.max(xs[i - 1]! + minThis, x));
-    xs.push(x);
-  }
-  xs[xs.length - 1] = finish;
-  for (let i = 1; i < ts.length; i++) {
-    if (tt <= ts[i]!) {
-      const u = (tt - ts[i - 1]!) / Math.max(1e-9, ts[i]! - ts[i - 1]!);
-      return xs[i - 1]! + u * (xs[i]! - xs[i - 1]!);
-    }
-  }
-  return finish;
+  const p1 = r() * Math.PI * 2;
+  const p2 = r() * Math.PI * 2;
+  const a1 = 0.07 + r() * 0.05;
+  const a2 = 0.03 + r() * 0.03;
+  const env = tt * (1 - tt);
+  const wobble = a1 * Math.sin(2 * Math.PI * tt + p1) * env + a2 * Math.sin(4 * Math.PI * tt + p2) * env;
+  return finish * Math.min(1, Math.max(0, tt + wobble));
 }
 
 export function shortHash(hex: string, n = 10) {
