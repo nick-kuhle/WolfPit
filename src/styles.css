@@ -281,6 +281,24 @@
   }
 }
 
+.track-world {
+  overflow: hidden;
+}
+
+.track-loop {
+  display: flex;
+  height: 100%;
+  width: 200%;
+  will-change: transform;
+}
+
+.track-loop img {
+  height: 100%;
+  width: 50%;
+  object-fit: cover;
+  object-position: center 70%;
+}
+
 .pit-hero {
   position: relative;
   isolation: isolate;

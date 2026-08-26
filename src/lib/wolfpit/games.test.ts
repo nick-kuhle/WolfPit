@@ -135,6 +135,19 @@ describe("pit racetrack", () => {
     assert.ok(first.x >= 0.99, `winner short of the wire ${first.x}`);
   });
 
+  it("changes the lead during the race", () => {
+    let swaps = 0;
+    for (let k = 0; k < 12; k++) {
+      const now = 3_400_000_000_000 + k * 120_000 + 1_000;
+      const s = ensureRace(initialState(), "horse", now);
+      const card = cardFor("horse", now, s.games);
+      const a = [...fieldAt(card, card.postAt + RUN_MS * 0.28)].sort((x, y) => y.x - x.x)[0]!;
+      const b = [...fieldAt(card, card.postAt + RUN_MS * 0.72)].sort((x, y) => y.x - x.x)[0]!;
+      if (a.no !== b.no) swaps += 1;
+    }
+    assert.ok(swaps >= 3, `lead never changed ${swaps}/12`);
+  });
+
   it("does not always leave the winner last at mid-race", () => {
     let last = 0;
     for (let k = 0; k < 20; k++) {

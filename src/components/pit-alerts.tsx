@@ -69,7 +69,9 @@ function FillBurst({ a, onDismiss }: { a: PitAlert; onDismiss: () => void }) {
           a.tone === "brass" && "border-brass",
         )}
       >
-        <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">Fill · pit ticket</div>
+        <div className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">
+          {a.msg.startsWith("Won") ? "Winner · pit ticket" : "Fill · pit ticket"}
+        </div>
         <div className="mt-2 font-display text-[1.85rem] leading-tight sm:text-[2.15rem]">{a.msg}</div>
         <div className="mt-3 font-mono text-[10px] uppercase tracking-wider text-subtle">Tap to clear</div>
       </button>

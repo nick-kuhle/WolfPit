@@ -53,6 +53,7 @@ export type OrderFill = {
   price: number;
   fee: number;
   note?: string;
+  pnl?: number;
   before?: CashShot;
   after?: CashShot;
   fair?: { raceId: string; commit: string; seed?: string; winner?: number };

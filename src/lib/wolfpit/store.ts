@@ -117,8 +117,10 @@ export const useWolf = create<WolfStore>()(
             fresh.push(f);
           }
           for (const f of fresh.slice(0, 8)) {
-            if (f.side === "win") ping(`Paid ${f.size.toFixed(2)} WPIT · ${f.symbol}`, "up", true);
-            else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down", true);
+            if (f.side === "win") {
+              const profit = typeof f.pnl === "number" ? f.pnl : f.size;
+              ping(`Won +${profit.toFixed(2)} WPIT · ${f.symbol}`, "up", true);
+            } else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down");
             else ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up", true);
           }
           if (next.games?.meets[0]?.raceId && next.games.meets[0].raceId !== prevMeets) {
