@@ -142,6 +142,14 @@ function Home() {
 
       <section className="mx-auto grid max-w-5xl gap-4 px-4 py-10 sm:grid-cols-2 lg:grid-cols-4 sm:py-14">
         <Wow
+          img="/brand/races/track-horse.jpg"
+          kicker="Racetrack"
+          title="Horses and dogs. A finish every minute."
+          body="Two-minute cards, staggered. Classic book. Tickets in WPIT. The games vault pays the winners."
+          to="/games"
+          cta="Walk the paddock"
+        />
+        <Wow
           img="/brand/card-farm.jpg"
           kicker="Farms"
           title={`Stake ${(STAKE_APR * 100).toFixed(0)}%. Farm more.`}
@@ -150,12 +158,12 @@ function Home() {
           cta="Open the farms"
         />
         <Wow
-          img="/brand/card-paper.jpg"
-          kicker="Track"
-          title="Horses and dogs. Every five minutes."
-          body="Classic book. Tickets in WPIT. The games vault pays the winners. The pit shouts either way."
-          to="/games"
-          cta="Walk the paddock"
+          img="/brand/lockup-dark.jpg"
+          kicker="Pools"
+          title="Park WPIT. Earn 12%."
+          body="Junior to insurance. First-loss if the pit has a bad day. Simulated."
+          to="/stake"
+          cta="Open the pools"
         />
         <Wow
           img="/brand/og-pit.jpg"
@@ -164,14 +172,6 @@ function Home() {
           body="Spot, dated minis, vanillas. Simulated funds. Live marks."
           to="/trade"
           cta="Open the desk"
-        />
-        <Wow
-          img="/brand/card-options.jpg"
-          kicker="Vanillas"
-          title="Calls and puts. With an expiry."
-          body="Covered, cash-settled, weekly and monthly. If you’ve only ever touched perps, this is a different sport."
-          to="/learn"
-          cta="How a call works"
         />
       </section>
       <SiteFooter />
@@ -191,7 +191,7 @@ function Wow({
   kicker: string;
   title: string;
   body: string;
-  to: "/trade" | "/pools" | "/learn" | "/games";
+  to: "/trade" | "/pools" | "/learn" | "/games" | "/stake";
   cta: string;
 }) {
   return (

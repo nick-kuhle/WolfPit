@@ -9,11 +9,14 @@ export function SiteFooter() {
           <Link to="/trade" className="hover:text-fg">
             Desk
           </Link>
+          <Link to="/games" className="hover:text-fg">
+            Racetrack
+          </Link>
           <Link to="/pools" className="hover:text-fg">
             Farms
           </Link>
           <Link to="/stake" className="hover:text-fg">
-            Stake
+            Pools
           </Link>
           <Link to="/learn" className="hover:text-fg">
             Learn

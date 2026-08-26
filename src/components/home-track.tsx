@@ -27,7 +27,7 @@ export function HomeTrack() {
       <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-12">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-brass">Farm / Racetrack · prizes</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-brass">The Ranch · a race every minute</p>
             <h2 className="mt-1 font-display text-4xl font-medium sm:text-5xl">
               A race every minute. <span className="italic text-brass">Walk the paddock.</span>
             </h2>

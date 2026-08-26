@@ -4,7 +4,7 @@ import { EntryBoard, FairProof, OddsTape, RaceTrack } from "@/components/desk/ra
 import { RunnerGfx } from "@/components/desk/runner-gfx";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
-import { YieldNav } from "@/components/yield-nav";
+import { RanchHero } from "@/components/yield-nav";
 import { Button } from "@/components/ui/button";
 import {
   MARKET_HINT,
@@ -44,19 +44,17 @@ function GamesPage() {
   return (
     <Shell>
       <ProductGate product="track">
-        <div className="relative overflow-hidden border-b border-brass/40 bg-brass text-bg">
-          <img src="/brand/races/paddock-horse.jpg" alt="" className="absolute inset-0 size-full object-cover opacity-35" />
-          <div className="relative mx-auto max-w-3xl px-4 py-5 sm:py-10">
-            <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-bg/80">Farm / Racetrack</p>
-            <h1 className="mt-1 font-display text-3xl font-medium tracking-tight sm:text-5xl">
-              A card a minute. <span className="italic">Prizes in WPIT.</span>
-            </h1>
-            <p className="mt-2 max-w-md text-sm text-bg/85">
-              Tap a runner. Win, place, show, quinella, exacta. Vault {fmtQty(vault)} WPIT.
-            </p>
-            <YieldNav on="track" />
-          </div>
-        </div>
+        <RanchHero
+          on="track"
+          image="/brand/races/track-horse.jpg"
+          kicker="The Ranch · Racetrack"
+          title={
+            <>
+              A race every minute. <span className="italic text-brass">Walk the paddock.</span>
+            </>
+          }
+          sub={`Tap a runner. Win, place, show, quinella, exacta. Vault ${fmtQty(vault)} WPIT. Horses and dogs, two minutes apart.`}
+        />
         <main className="mx-auto grid max-w-5xl gap-5 px-3 py-4 lg:grid-cols-2 sm:px-4">
           <Meet card={horse} now={now} />
           <Meet card={dog} now={now} />

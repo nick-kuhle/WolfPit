@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { YieldNav } from "@/components/yield-nav";
+import { RanchHero } from "@/components/yield-nav";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
@@ -20,20 +20,17 @@ function StakePage() {
   return (
     <Shell>
       <ProductGate product="stake">
-        <div className="pit-hero relative overflow-hidden border-b border-border">
-          <img src="/brand/lockup-dark.jpg" alt="" decoding="async" className="absolute inset-0 size-full object-cover opacity-35" />
-          <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/75 to-bg/40" />
-          <div className="relative mx-auto max-w-xl px-4 py-10 sm:py-14">
-            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">$WPIT · first-loss junior</p>
-            <h1 className="mt-2 font-display text-5xl font-medium tracking-tight">
-              Park it. <span className="apy-live italic text-brass">Earn 12%.</span>
-            </h1>
-            <p className="mt-3 text-sm leading-relaxed text-muted">
-              Junior to insurance. First-loss if the pit has a bad day. Simulated. Not a deposit.
-            </p>
-            <YieldNav on="stake" />
-          </div>
-        </div>
+        <RanchHero
+          on="pools"
+          image="/brand/lockup-dark.jpg"
+          kicker="The Ranch · Pools"
+          title={
+            <>
+              Park it. <span className="italic text-brass">Earn 12%.</span>
+            </>
+          }
+          sub="Junior to insurance. First-loss if the pit has a bad day. Simulated. Not a deposit."
+        />
         <main className="mx-auto max-w-xl px-4 py-8">
           <p className="text-sm text-muted">
             Need WPIT?{" "}

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { YieldNav } from "@/components/yield-nav";
+import { RanchHero } from "@/components/yield-nav";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
@@ -50,16 +50,17 @@ function PoolsPage() {
   return (
     <Shell>
       <ProductGate product="farms">
-        <div className="relative overflow-hidden border-b border-brass/40 bg-brass text-bg">
-          <div className="mx-auto max-w-3xl px-4 py-5 sm:py-10">
-            <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-bg/70">The yield pit</p>
-            <h1 className="mt-1 font-display text-3xl font-medium tracking-tight sm:text-5xl">
-              Farms that <span className="italic">pay you to look.</span>
-            </h1>
-            <p className="mt-2 max-w-md text-sm text-bg/80">Tap a stall. Add both legs. APY moves with TVL, util, and vol.</p>
-            <YieldNav on="farms" />
-          </div>
-        </div>
+        <RanchHero
+          on="farms"
+          image="/brand/card-farm.jpg"
+          kicker="The Ranch · Farms"
+          title={
+            <>
+              Farms that <span className="italic text-brass">pay you to look.</span>
+            </>
+          }
+          sub="Tap a stall. Add both legs. APY moves with TVL, util, and vol."
+        />
 
         <main className="mx-auto max-w-3xl px-4 py-5 sm:py-8">
           <div

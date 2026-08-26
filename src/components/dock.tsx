@@ -9,10 +9,10 @@ import { cn } from "@/lib/utils";
 import { useWallet, truncAddr } from "@/lib/wallet/session";
 
 const TABS = [
-  { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
-  { to: "/pools" as const, label: "Farm/Racetrack", Icon: IconFarm, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games" },
-  { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset") },
-  { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book" },
+  { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/", catchy: false },
+  { to: "/games" as const, label: "The Ranch", Icon: IconRanch, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games", catchy: true },
+  { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset"), catchy: false },
+  { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book", catchy: false },
 ] as const;
 
 export function PitDock() {
@@ -36,27 +36,33 @@ export function PitDock() {
   return (
     <>
       <nav
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-[#0d0d0d] pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-[#0a0a0a] px-2 pt-1.5 pb-[calc(0.35rem+env(safe-area-inset-bottom))] lg:hidden"
         aria-label="Pit"
       >
-        <div className="grid h-[3.35rem] grid-cols-5">
+        <div className="flex items-stretch gap-1.5">
           {TABS.map((t) => {
             const on = t.match(pathname);
-            const farmBadge = t.to === "/pools" && ripe > 0;
+            const farmBadge = t.to === "/games" && ripe > 0;
             return (
               <Link
                 key={t.to}
                 to={t.to}
                 onClick={() => requestClose()}
                 className={cn(
-                  "relative flex flex-col items-center justify-center gap-0.5 pt-1",
-                  on ? "text-brass" : "text-[#8e8e8e]",
+                  "relative flex min-h-[3.2rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl border px-1 pt-1",
+                  on ? "border-brass bg-brass/15 text-brass" : "border-[#2a2a2a] bg-[#141414] text-[#8e8e8e]",
+                  t.catchy && !on && "border-brass/50 text-brass/80",
                 )}
               >
-                <t.Icon className="size-[22px]" />
-                <span className="px-0.5 text-center text-[8px] leading-[1.05] tracking-tight">{t.label}</span>
+                <t.Icon className="size-[20px]" />
+                <span className="px-0.5 text-center text-[9px] font-medium leading-[1.05] tracking-tight">{t.label}</span>
+                {t.catchy ? (
+                  <span className="absolute -top-1 right-1 rounded-full bg-brass px-1 font-mono text-[7px] font-bold uppercase leading-4 text-bg">
+                    Live
+                  </span>
+                ) : null}
                 {farmBadge ? (
-                  <span className="absolute right-[18%] top-0.5 h-1.5 w-1.5 rounded-full bg-brass" />
+                  <span className="absolute left-1.5 top-1 h-1.5 w-1.5 rounded-full bg-brass" />
                 ) : null}
               </Link>
             );
@@ -64,12 +70,15 @@ export function PitDock() {
           <button
             type="button"
             onClick={() => setMore((v) => !v)}
-            className={cn("relative flex flex-col items-center justify-center gap-0.5 pt-1", moreActive ? "text-brass" : "text-[#8e8e8e]")}
+            className={cn(
+              "relative flex min-h-[3.2rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl border px-1 pt-1",
+              moreActive ? "border-brass bg-brass/15 text-brass" : "border-[#2a2a2a] bg-[#141414] text-[#8e8e8e]",
+            )}
           >
-            <IconMore className="size-[22px]" />
-            <span className="text-[10px] leading-none tracking-tight">More</span>
+            <IconMore className="size-[20px]" />
+            <span className="text-[9px] font-medium leading-none tracking-tight">More</span>
             {badge > 0 ? (
-              <span className="absolute right-[18%] top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-[#3b82f6] px-0.5 text-[9px] font-medium text-white">
+              <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#3b82f6] px-0.5 text-[9px] font-medium text-white">
                 {badge > 9 ? "9+" : badge}
               </span>
             ) : null}
@@ -110,7 +119,7 @@ function MoreSheet({ open, onClose, onExited }: { open: boolean; onClose: () => 
   }
 
   return (
-    <div className="fixed inset-x-0 top-0 z-40 lg:hidden" style={{ bottom: "calc(3.4rem + env(safe-area-inset-bottom))" }}>
+    <div className="fixed inset-x-0 top-0 z-40 lg:hidden" style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}>
       <button
         type="button"
         className={cn("absolute inset-0 bg-bg/75 dock-dim", closing && "is-closing")}
@@ -153,9 +162,10 @@ function MoreSheet({ open, onClose, onExited }: { open: boolean; onClose: () => 
             Pit
           </p>
           <Row icon="☻" label="Profile" hint={wallet.address ? truncAddr(wallet.address) : "Connect wallet to trade"} onClick={() => go("/profile")} delay={90} />
-          <Row icon="♞" label="Track" hint="Horses · dogs · every minute" onClick={() => go("/games")} delay={120} />
+          <Row icon="♞" label="Racetrack" hint="Horses · dogs · every 2 minutes" onClick={() => go("/games")} delay={120} />
           <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} delay={150} />
-          <Row icon="◎" label="Stake" hint="12% APR junior" onClick={() => go("/stake")} delay={180} />
+          <Row icon="◎" label="Pools" hint="12% APR junior" onClick={() => go("/stake")} delay={180} />
+          <Row icon="▣" label="Farms" hint="Cut the yield" onClick={() => go("/pools")} delay={200} />
           <Row icon="☰" label="Fills" hint={`${s.fills.length} on the tape`} onClick={() => go("/orders")} delay={210} />
           <Row icon="?" label="Learn" hint="Pit school" onClick={() => go("/learn")} delay={240} />
           <Row icon="⌘" label="Plan" hint="Roadmap" onClick={() => go("/plan")} delay={270} />
@@ -222,14 +232,12 @@ function IconFloor(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-function IconFarm(props: SVGProps<SVGSVGElement>) {
+function IconRanch(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
-      <path d="M12 21V9" />
-      <path d="M12 14c-3.2-1.2-5.2-3.6-6.4-7 2.8.4 5 1.8 6.4 4.2" />
-      <path d="M12 14c3.2-1.2 5.2-3.6 6.4-7-2.8.4-5 1.8-6.4 4.2" />
-      <path d="M12 10c-2-2.4-3-5-3.2-8 2 .8 3.4 2.6 3.2 5.4" />
-      <path d="M12 10c2-2.4 3-5 3.2-8-2 .8-3.4 2.6-3.2 5.4" />
+      <path d="M3 11.5 12 4l9 7.5" />
+      <path d="M5 11.5V20h14v-8.5" />
+      <path d="M10 20v-6h4v6" />
     </svg>
   );
 }
@@ -286,8 +294,10 @@ export function DesktopNav({ pathname }: { pathname: string }) {
             {(
               [
                 ["/profile", "Profile"],
+                ["/games", "The Ranch"],
+                ["/pools", "Farms"],
+                ["/stake", "Pools"],
                 ["/watch", "Watch"],
-                ["/stake", "Stake"],
                 ["/orders", "Fills"],
                 ["/learn", "Learn"],
                 ["/plan", "Plan"],

@@ -74,24 +74,31 @@
   }
 }
 
-@keyframes runner-gallop {
+@keyframes runner-body {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-0.6deg);
+  }
+  50% {
+    transform: translateY(-3%) rotate(0.7deg);
+  }
+}
+
+@keyframes runner-legs {
   0% {
-    transform: translateY(0) rotate(-7deg) scaleX(1.08) scaleY(0.92);
+    transform: translateY(0) skewX(0deg);
   }
-  18% {
-    transform: translateY(-26%) rotate(5deg) scaleX(0.9) scaleY(1.1);
+  25% {
+    transform: translateY(7%) skewX(-7deg);
   }
-  36% {
-    transform: translateY(-2%) rotate(-4deg) scaleX(1.1) scaleY(0.9);
+  50% {
+    transform: translateY(0) skewX(2deg);
   }
-  54% {
-    transform: translateY(-22%) rotate(6deg) scaleX(0.92) scaleY(1.08);
-  }
-  72% {
-    transform: translateY(-4%) rotate(-5deg) scaleX(1.06) scaleY(0.94);
+  75% {
+    transform: translateY(8%) skewX(7deg);
   }
   100% {
-    transform: translateY(0) rotate(-7deg) scaleX(1.08) scaleY(0.92);
+    transform: translateY(0) skewX(0deg);
   }
 }
 
@@ -105,12 +112,16 @@
   }
 }
 
-.runner-gallop {
-  transform-origin: 50% 90%;
-  animation: runner-gallop 0.4s linear infinite;
+.runner-body {
+  transform-origin: 50% 80%;
+  animation: runner-body 0.6s ease-in-out infinite;
 }
-.runner-gallop.is-dog {
-  animation-duration: 0.28s;
+.runner-legs {
+  transform-origin: 50% 10%;
+  animation: runner-legs 0.2s linear infinite;
+}
+.runner-legs.is-dog {
+  animation-duration: 0.14s;
 }
 .runner-idle {
   transform-origin: 50% 90%;
@@ -284,7 +295,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .runner-gallop,
+  .runner-body,
+  .runner-legs,
   .runner-idle,
   .sheet-in,
   .apy-live,

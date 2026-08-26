@@ -4,9 +4,9 @@ import { randomHex, sha256Hex } from "./sha256";
 import type { BetMarket, EngineState, FairRace } from "./types";
 import type { GameBet, GameMeet, GamesState, RaceKind } from "./types";
 
-export const RACE_MS = 60_000;
-export const POST_AT = 38_000;
-export const RUN_MS = 18_000;
+export const RACE_MS = 120_000;
+export const POST_AT = 88_000;
+export const RUN_MS = 22_000;
 export const GAMES_VAULT_SEED = 200_000;
 export const MIN_BET = 10;
 export const MAX_BET = 5_000;

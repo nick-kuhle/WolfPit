@@ -20,28 +20,31 @@ export function RunnerGfx({
   gait?: "run" | "idle" | "off";
 }) {
   const w = Math.round(size * 1.7);
+  const mask = {
+    background: coatBg(coat),
+    WebkitMaskImage: `url(${SRC[kind]})`,
+    WebkitMaskRepeat: "no-repeat",
+    WebkitMaskPosition: "center",
+    WebkitMaskSize: "contain",
+    maskImage: `url(${SRC[kind]})`,
+    maskRepeat: "no-repeat",
+    maskPosition: "center",
+    maskSize: "contain",
+    animationDelay: `-${(no % 8) * 0.04}s`,
+  } as const;
   return (
-    <div className="relative shrink-0" style={{ width: w, height: size }}>
-      <div
-        className={cn(
-          "absolute inset-0",
-          gait === "run" && "runner-gallop",
-          gait === "run" && kind === "dog" && "is-dog",
-          gait === "idle" && "runner-idle",
-        )}
-        style={{
-          background: coatBg(coat),
-          WebkitMaskImage: `url(${SRC[kind]})`,
-          WebkitMaskRepeat: "no-repeat",
-          WebkitMaskPosition: "center",
-          WebkitMaskSize: "contain",
-          maskImage: `url(${SRC[kind]})`,
-          maskRepeat: "no-repeat",
-          maskPosition: "center",
-          maskSize: "contain",
-          animationDelay: `-${(no % 8) * 0.05}s`,
-        }}
-      />
+    <div className="relative shrink-0 overflow-hidden" style={{ width: w, height: size }}>
+      {gait === "run" ? (
+        <>
+          <div className="absolute inset-0 runner-body" style={{ ...mask, clipPath: "inset(0 0 38% 0)" }} />
+          <div
+            className={cn("absolute inset-0 runner-legs", kind === "dog" && "is-dog")}
+            style={{ ...mask, clipPath: "inset(55% 0 0 0)" }}
+          />
+        </>
+      ) : (
+        <div className={cn("absolute inset-0", gait === "idle" && "runner-idle")} style={mask} />
+      )}
       <span className="absolute left-1/2 top-[38%] grid size-[1.15em] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-bg font-mono text-[0.55em] font-bold leading-none text-brass ring-1 ring-brass">
         {no}
       </span>

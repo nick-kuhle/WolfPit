@@ -4,6 +4,7 @@ import { initialState } from "./engine.ts";
 import {
   GAMES_VAULT_SEED,
   OVERROUND_HORSE,
+  RACE_MS,
   RUN_MS,
   cardFor,
   ensureRace,
@@ -40,7 +41,7 @@ describe("pit racetrack", () => {
     const h = makeCard("horse", t);
     const d = makeCard("dog", t);
     assert.notEqual(h.start, d.start);
-    assert.equal(Math.abs(h.start - d.start), 30_000);
+    assert.equal(Math.abs(h.start - d.start), RACE_MS / 2);
   });
 
   it("seals a commit and reveals a matching seed", () => {

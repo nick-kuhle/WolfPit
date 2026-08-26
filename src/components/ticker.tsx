@@ -15,8 +15,8 @@ export function LiveTicker() {
   const coins = universe.slice(0, 16);
   const extras: TapeItem[] = [
     { kind: "route", k: "ETH-USDC", v: `${fmtPx(s.eth)} pool`, to: "/pools" },
-    { kind: "route", k: "STAKE", v: `${(STAKE_APR * 100).toFixed(0)}% APR`, to: "/stake" },
-    { kind: "route", k: "TRACK", v: "horses · dogs · 5m", to: "/games" },
+    { kind: "route", k: "POOLS", v: `${(STAKE_APR * 100).toFixed(0)}% APR`, to: "/stake" },
+    { kind: "route", k: "TRACK", v: "horses · dogs · 2m", to: "/games" },
   ];
   const items: TapeItem[] = [...coins.map((c) => ({ kind: "asset" as const, listing: c })), ...extras];
   const loop = [...items, ...items];
