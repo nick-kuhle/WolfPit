@@ -61,6 +61,7 @@ import {
   requireMoney,
 } from "./limits";
 import { ETH_MAX, ETH_MIN, ORACLE_JUMP } from "./sanitize";
+import { emptyGames, refundOpenBets, settleGames } from "./games";
 
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -154,6 +155,7 @@ export function initialState(now = T0): EngineState {
     equityTape: [{ t: now, o: START_USDC + START_ETH * eth + START_WPIT * wpit, h: START_USDC + START_ETH * eth + START_WPIT * wpit, l: START_USDC + START_ETH * eth + START_WPIT * wpit, c: START_USDC + START_ETH * eth + START_WPIT * wpit, v: 1 }],
     compJoined: false,
     compPaid: false,
+    games: emptyGames(),
   };
 }
 
@@ -222,7 +224,7 @@ export function tick(s: EngineState, dtSec: number): EngineState {
       wpit: next.account.wpit + (s.stake.amount * STAKE_APR * dt) / (365.25 * 24 * 3600),
     };
   }
-  return matchWorking(pushEquity(arbToSpot(hedgeDelta(settleAndLiq(maybeCircuit(next))))));
+  return matchWorking(pushEquity(arbToSpot(hedgeDelta(settleAndLiq(maybeCircuit(settleGames(next)))))));
 }
 
 export function applyLive(
@@ -370,7 +372,7 @@ export function liqHealth(s: EngineState) {
 }
 
 export function joinCompetition(s: EngineState, now = Date.now()): EngineState {
-  let cur = s;
+  let cur = refundOpenBets(s);
   for (const p of [...s.lp]) {
     const r = removeLiquidity(cur, p.poolId, p.shares);
     if (typeof r !== "string") cur = r;

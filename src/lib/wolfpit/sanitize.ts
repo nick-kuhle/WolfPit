@@ -160,5 +160,35 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     wpitCandles: Array.isArray(raw.wpitCandles) && raw.wpitCandles.length > 8 ? raw.wpitCandles.slice(-240) : base.wpitCandles,
     compJoined: Boolean(raw.compJoined),
     compPaid: Boolean(raw.compPaid),
+    games: {
+      vaultWpit: nn(raw.games?.vaultWpit, 200_000),
+      bets: Array.isArray(raw.games?.bets)
+        ? raw.games!.bets
+            .filter((b) => b && typeof b.id === "string")
+            .slice(0, 80)
+            .map((b) => ({
+              id: String(b.id),
+              raceId: String(b.raceId ?? ""),
+              kind: b.kind === "dog" ? "dog" as const : "horse" as const,
+              runner: Math.max(1, Math.round(nn(b.runner, 1))),
+              name: String(b.name ?? "").slice(0, 32),
+              stake: nn(b.stake),
+              odds: Math.min(50, Math.max(1.1, nn(b.odds, 2))),
+              placedAt: nn(b.placedAt),
+              status: b.status === "won" || b.status === "lost" ? b.status : "open",
+              payout: nn(b.payout),
+            }))
+        : [],
+      meets: Array.isArray(raw.games?.meets)
+        ? raw.games!.meets.slice(0, 24).map((m) => ({
+            raceId: String(m.raceId ?? ""),
+            kind: m.kind === "dog" ? "dog" as const : "horse" as const,
+            winner: Math.max(1, Math.round(nn(m.winner, 1))),
+            winnerName: String(m.winnerName ?? "").slice(0, 32),
+            paid: nn(m.paid),
+            at: nn(m.at),
+          }))
+        : [],
+    },
   };
 }

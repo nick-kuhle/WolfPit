@@ -10,7 +10,7 @@ import { useWallet, truncAddr } from "@/lib/wallet/session";
 
 const TABS = [
   { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
-  { to: "/pools" as const, label: "Farms", Icon: IconFarm, match: (p: string) => p === "/pools" || p === "/stake" },
+  { to: "/pools" as const, label: "Farms", Icon: IconFarm, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games" },
   { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset") },
   { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book" },
 ] as const;
@@ -80,7 +80,7 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   const setSpeed = useWolf((st) => st.setSpeed);
   const wallet = useWallet();
 
-  function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch" | "/profile") {
+  function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch" | "/profile" | "/games") {
     onClose();
     void nav({ to });
   }
@@ -116,6 +116,7 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
         <div className="px-3 pb-3">
           <p className="px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-subtle">Pit</p>
           <Row icon="☻" label="Profile" hint={wallet.address ? truncAddr(wallet.address) : "Connect wallet to trade"} onClick={() => go("/profile")} />
+          <Row icon="♞" label="Track" hint="Horses · dogs · 5 minutes" onClick={() => go("/games")} />
           <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} />
           <Row icon="◎" label="Stake" hint="12% APR junior" onClick={() => go("/stake")} />
           <Row icon="☰" label="Fills" hint={`${s.fills.length} on the tape`} onClick={() => go("/orders")} />

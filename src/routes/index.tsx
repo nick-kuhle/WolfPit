@@ -138,7 +138,7 @@ function Home() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-5xl gap-4 px-4 py-10 sm:grid-cols-3 sm:py-14">
+      <section className="mx-auto grid max-w-5xl gap-4 px-4 py-10 sm:grid-cols-2 lg:grid-cols-4 sm:py-14">
         <Wow
           img="/brand/card-farm.jpg"
           kicker="Farms"
@@ -149,11 +149,19 @@ function Home() {
         />
         <Wow
           img="/brand/card-paper.jpg"
-          kicker="Free paper"
-          title="No wallet. Press buy."
-          body={`${fmtUsd(equity(s))} on the book. Live ETH at ${fmtPx(s.eth)}. The bruise is real. The money isn’t.`}
+          kicker="Track"
+          title="Horses and dogs. Every five minutes."
+          body="Classic book. Tickets in WPIT. The games vault pays the winners. The pit shouts either way."
+          to="/games"
+          cta="Walk the paddock"
+        />
+        <Wow
+          img="/brand/og-pit.jpg"
+          kicker="Paper"
+          title="Take a seat. Shout."
+          body="Spot, dated minis, vanillas. Simulated funds. Live marks."
           to="/trade"
-          cta="Take a seat"
+          cta="Open the desk"
         />
         <Wow
           img="/brand/card-options.jpg"
@@ -181,7 +189,7 @@ function Wow({
   kicker: string;
   title: string;
   body: string;
-  to: "/trade" | "/pools" | "/learn";
+  to: "/trade" | "/pools" | "/learn" | "/games";
   cta: string;
 }) {
   return (

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BookRouteImport } from './routes/book'
+import { Route as GamesRouteImport } from './routes/games'
 import { Route as LearnRouteImport } from './routes/learn'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as PlanRouteImport } from './routes/plan'
@@ -37,6 +38,11 @@ const AdminRoute = AdminRouteImport.update({
 const BookRoute = BookRouteImport.update({
   id: '/book',
   path: '/book',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GamesRoute = GamesRouteImport.update({
+  id: '/games',
+  path: '/games',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LearnRoute = LearnRouteImport.update({
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/book': typeof BookRoute
+  '/games': typeof GamesRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
@@ -115,6 +122,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/book': typeof BookRoute
+  '/games': typeof GamesRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
@@ -132,6 +140,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/book': typeof BookRoute
+  '/games': typeof GamesRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
@@ -150,6 +159,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/book'
+    | '/games'
     | '/learn'
     | '/orders'
     | '/plan'
@@ -166,6 +176,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/book'
+    | '/games'
     | '/learn'
     | '/orders'
     | '/plan'
@@ -182,6 +193,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/book'
+    | '/games'
     | '/learn'
     | '/orders'
     | '/plan'
@@ -199,6 +211,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   BookRoute: typeof BookRoute
+  GamesRoute: typeof GamesRoute
   LearnRoute: typeof LearnRoute
   OrdersRoute: typeof OrdersRoute
   PlanRoute: typeof PlanRoute
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       path: '/book'
       fullPath: '/book'
       preLoaderRoute: typeof BookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/games': {
+      id: '/games'
+      path: '/games'
+      fullPath: '/games'
+      preLoaderRoute: typeof GamesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/learn': {
@@ -328,6 +348,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   BookRoute: BookRoute,
+  GamesRoute: GamesRoute,
   LearnRoute: LearnRoute,
   OrdersRoute: OrdersRoute,
   PlanRoute: PlanRoute,

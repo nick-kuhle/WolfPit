@@ -23,7 +23,8 @@ import {
   tradeSpot,
   unstakeWpit,
 } from "./engine";
-import type { EngineState, FutSide, OptType, PoolId, WorkingOrder } from "./types";
+import { placeBet, settleGames } from "./games";
+import type { EngineState, FutSide, OptType, PoolId, RaceKind, WorkingOrder } from "./types";
 import { useAdmin } from "@/lib/admin/config";
 import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
@@ -63,6 +64,7 @@ type Actions = {
   cancelOrder: (id: string) => void;
   listToken: (symbol: string, mark: number) => void;
   joinComp: () => void;
+  placeRaceBet: (kind: RaceKind, runner: number, stake: number) => void;
 };
 
 type WolfStore = EngineState & Actions;
@@ -98,7 +100,9 @@ export const useWolf = create<WolfStore>()(
       },
       step: (dtSec) => {
         const prevFill = get().fills[0]?.id;
+        const prevMeets = get().games?.meets[0]?.raceId;
         let next = tick(get(), dtSec);
+        next = settleGames(next, Date.now());
         if (next.compJoined && !next.compPaid && Date.now() >= PIT_OPEN.end) {
           const board = compBoard(Date.now(), { name: "You", equity: equity(next), joined: true });
           const you = board.find((r) => r.you);
@@ -108,6 +112,10 @@ export const useWolf = create<WolfStore>()(
         if (next.fills[0]?.id && next.fills[0].id !== prevFill) {
           const f = next.fills[0];
           ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up");
+        }
+        if (next.games?.meets[0]?.raceId && next.games.meets[0].raceId !== prevMeets) {
+          const m = next.games.meets[0];
+          ping(`Official · ${m.kind} ${m.winnerName} (${m.winner})`, "brass");
         }
         set(next);
       },
@@ -200,6 +208,17 @@ export const useWolf = create<WolfStore>()(
         ping("You're in the Pit Open. $100k paper. Go shout.", "brass");
         set({ ...joinCompEngine(get()), lastError: null });
       },
+      placeRaceBet: (kind, runner, stake) => {
+        const r = placeBet(get(), kind, runner, stake);
+        if (typeof r === "string") {
+          ping(r, "down");
+          set({ lastError: r });
+          return;
+        }
+        const b = r.games?.bets[0];
+        ping(`Ticket · ${b?.name ?? "runner"} @ ${b?.odds ?? "?"} · ${stake} WPIT`, "brass");
+        set({ ...r, lastError: null });
+      },
       reset: () => {
         ping("Paper reset", "brass");
         set({ ...initialState(), lastError: null });
@@ -207,7 +226,7 @@ export const useWolf = create<WolfStore>()(
       clearError: () => set({ lastError: null }),
     }),
     {
-      name: "wolfpit-sim-v10",
+      name: "wolfpit-sim-v11",
       skipHydration: true,
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<EngineState>;
@@ -244,6 +263,7 @@ export const useWolf = create<WolfStore>()(
         equityTape: s.equityTape,
         compJoined: s.compJoined,
         compPaid: s.compPaid,
+        games: s.games,
       }),
     },
   ),

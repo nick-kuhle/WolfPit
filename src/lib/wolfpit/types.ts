@@ -115,6 +115,36 @@ export type WorkingOrder = {
   created: number;
 };
 
+export type RaceKind = "horse" | "dog";
+
+export type GameBet = {
+  id: string;
+  raceId: string;
+  kind: RaceKind;
+  runner: number;
+  name: string;
+  stake: number;
+  odds: number;
+  placedAt: number;
+  status: "open" | "won" | "lost";
+  payout: number;
+};
+
+export type GameMeet = {
+  raceId: string;
+  kind: RaceKind;
+  winner: number;
+  winnerName: string;
+  paid: number;
+  at: number;
+};
+
+export type GamesState = {
+  vaultWpit: number;
+  bets: GameBet[];
+  meets: GameMeet[];
+};
+
 export type EngineState = {
   clock: number;
   eth: number;
@@ -146,6 +176,7 @@ export type EngineState = {
   equityTape: Candle[];
   compJoined: boolean;
   compPaid: boolean;
+  games?: GamesState;
 };
 
 export const START_ETH = 1000;

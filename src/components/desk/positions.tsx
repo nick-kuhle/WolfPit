@@ -26,6 +26,7 @@ import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
 import type { Candle, PoolId } from "@/lib/wolfpit/types";
 import { cn, fmtPct, fmtPx, fmtQty, fmtUsd } from "@/lib/utils";
+import { fracOdds, openTickets } from "@/lib/wolfpit/games";
 
 const COLS = "grid grid-cols-[minmax(0,1fr)_5.1rem_4.6rem_5.4rem] items-baseline gap-x-2 px-3";
 
@@ -334,6 +335,26 @@ export function Positions({ flush }: { flush?: boolean }) {
               }
               closeLabel="Unstake"
             />
+          </Sec>
+        ) : null}
+
+        {openTickets(s).length > 0 ? (
+          <Sec title="Track" count={openTickets(s).length}>
+            {openTickets(s).map((b) => (
+              <div key={b.id} className="border-t border-border/50 px-3 py-2">
+                <div className={cn(COLS, "font-mono text-[12px]")}>
+                  <span className="truncate font-medium">
+                    #{b.runner} {b.name}
+                  </span>
+                  <span className="text-right tabular-nums">{fmtQty(b.stake)}</span>
+                  <span className="text-right tabular-nums text-muted">{fracOdds(b.odds)}</span>
+                  <span className="text-right tabular-nums text-brass">{fmtQty(b.stake * b.odds)}</span>
+                </div>
+                <p className="mt-0.5 font-mono text-[10px] text-subtle">
+                  {b.kind} · WPIT ticket · pays if it hits
+                </p>
+              </div>
+            ))}
           </Sec>
         ) : null}
       </div>

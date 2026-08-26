@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { YieldNav } from "@/components/yield-nav";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
@@ -56,6 +57,7 @@ function PoolsPage() {
               Farms that <span className="italic">pay you to look.</span>
             </h1>
             <p className="mt-2 max-w-md text-sm text-bg/80">Tap a stall. Add both legs. APY moves with TVL, util, and vol.</p>
+            <YieldNav on="farms" />
           </div>
         </div>
 

@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { YieldNav } from "@/components/yield-nav";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
@@ -30,6 +31,7 @@ function StakePage() {
             <p className="mt-3 text-sm leading-relaxed text-muted">
               Junior to insurance. First-loss if the pit has a bad day. Simulated. Not a deposit.
             </p>
+            <YieldNav on="stake" />
           </div>
         </div>
         <main className="mx-auto max-w-xl px-4 py-8">

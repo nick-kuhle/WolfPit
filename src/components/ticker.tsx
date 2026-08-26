@@ -6,7 +6,7 @@ import { fmtPct, fmtPx } from "@/lib/utils";
 
 type TapeItem =
   | { kind: "asset"; listing: Listing }
-  | { kind: "route"; k: string; v: string; to: "/trade" | "/pools" | "/stake" };
+  | { kind: "route"; k: string; v: string; to: "/trade" | "/pools" | "/stake" | "/games" };
 
 export function LiveTicker() {
   const universe = useDesk((s) => s.universe);
@@ -16,7 +16,7 @@ export function LiveTicker() {
   const extras: TapeItem[] = [
     { kind: "route", k: "ETH-USDC", v: `${fmtPx(s.eth)} pool`, to: "/pools" },
     { kind: "route", k: "STAKE", v: `${(STAKE_APR * 100).toFixed(0)}% APR`, to: "/stake" },
-    { kind: "route", k: "FARMS", v: "open the pit", to: "/pools" },
+    { kind: "route", k: "TRACK", v: "horses · dogs · 5m", to: "/games" },
   ];
   const items: TapeItem[] = [...coins.map((c) => ({ kind: "asset" as const, listing: c })), ...extras];
   const loop = [...items, ...items];
