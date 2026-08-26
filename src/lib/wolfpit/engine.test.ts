@@ -29,6 +29,9 @@ import {
   optionQuote,
   strikeGrid,
   markOf,
+  applyLive,
+  arbToSpot,
+  refreshQuotes,
 } from "./engine.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
 import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
@@ -388,5 +391,51 @@ describe("WPIT ladder", () => {
     const s = initialState();
     assert.notEqual(markOf(s, "WPIT"), markOf(s, "ETH"));
     assert.equal(markOf(s, "WPIT"), s.wpit);
+  });
+});
+
+describe("oracle arb", () => {
+  it("ETH bid/ask stay on the live mark even with WPIT inventory", () => {
+    let s = initialState();
+    s = setMark(s, 2461);
+    const opened = tradeFuture(s, "long", 80, exp, "WPIT");
+    assert.equal(typeof opened, "object", String(opened));
+    s = opened as typeof s;
+    s = tick(s, 1);
+    s = refreshQuotes(s);
+    assert.ok(Math.abs(s.ethBid - 2461) / 2461 < 0.04, `bid ${s.ethBid}`);
+    assert.ok(Math.abs(s.ethAsk - 2461) / 2461 < 0.04, `ask ${s.ethAsk}`);
+    assert.ok(s.ethAsk >= s.ethBid);
+  });
+
+  it("ETH-USDC pool arbs back to the oracle", () => {
+    let s = initialState();
+    s = { ...s, eth: 2461 };
+    const pool = s.pools["ETH-USDC"]!;
+    s = {
+      ...s,
+      pools: {
+        ...s.pools,
+        "ETH-USDC": { ...pool, quoteReserve: pool.baseReserve * 5700 },
+      },
+    };
+    s = arbToSpot(s);
+    const mark = s.pools["ETH-USDC"]!.quoteReserve / s.pools["ETH-USDC"]!.baseReserve;
+    assert.ok(Math.abs(mark - 2461) / 2461 < 0.002, `pool ${mark}`);
+  });
+
+  it("applyLive writes Coinbase ETH into the book", () => {
+    const s = applyLive(initialState(), {
+      eth: 2461,
+      ethBid: 2460.8,
+      ethAsk: 2461.2,
+      candles: initialState().candles.map((c) => ({ ...c, c: 2461, o: 2461, h: 2462, l: 2460 })),
+      at: Date.now(),
+      source: "Coinbase",
+    });
+    assert.equal(s.eth, 2461);
+    assert.ok(Math.abs(s.ethBid - 2461) / 2461 < 0.04);
+    const mark = s.pools["ETH-USDC"]!.quoteReserve / s.pools["ETH-USDC"]!.baseReserve;
+    assert.ok(Math.abs(mark - 2461) / 2461 < 0.01, `pool ${mark}`);
   });
 });

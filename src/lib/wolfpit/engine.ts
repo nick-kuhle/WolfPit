@@ -206,7 +206,7 @@ export function tick(s: EngineState, dtSec: number): EngineState {
       wpit: next.account.wpit + (s.stake.amount * STAKE_APR * dtSec) / (365.25 * 24 * 3600),
     };
   }
-  return matchWorking(pushEquity(hedgeDelta(settleAndLiq(maybeCircuit(next)))));
+  return matchWorking(pushEquity(arbToSpot(hedgeDelta(settleAndLiq(maybeCircuit(next))))));
 }
 
 export function applyLive(
@@ -245,7 +245,7 @@ export function applyLive(
       startEquity: s.liveAt === 0 ? START_USDC + START_ETH * feed.eth : s.account.startEquity,
     },
   };
-  return matchWorking(pushEquity(settleAndLiq(maybeCircuit(next))));
+  return matchWorking(pushEquity(arbToSpot(refreshQuotes(settleAndLiq(maybeCircuit(next))))));
 }
 
 function pushCandle(candles: EngineState["candles"], t: number, px: number) {
@@ -501,11 +501,40 @@ export function spreadBps(s: EngineState) {
 }
 
 export function reservationPx(s: EngineState) {
-  const q = bookGreeks(s).delta / Math.max(s.vault.eth, 1);
+  const q = clamp(bookGreeks(s).delta / Math.max(s.vault.eth, 1), -2, 2);
   const gamma = 0.08;
   const tau = 1 / 24;
-  const shift = q * gamma * s.realizedVol * s.realizedVol * tau;
+  const shift = clamp(q * gamma * s.realizedVol * s.realizedVol * tau, -0.003, 0.003);
   return s.eth * (1 - shift);
+}
+
+export function refreshQuotes(s: EngineState): EngineState {
+  const mid = s.eth;
+  const skew = reservationPx(s) - mid;
+  const half = mid * (spreadBps(s) / 10_000);
+  return { ...s, ethBid: Math.max(0.01, mid + skew - half), ethAsk: mid + skew + half };
+}
+
+/** Keep the ETH/USDC pool on the live oracle (simulated CEX arb). */
+export function arbToSpot(s: EngineState): EngineState {
+  const pool0 = s.pools["ETH-USDC"];
+  if (!pool0 || pool0.baseReserve <= 1e-9 || pool0.quoteReserve <= 1e-9) return s;
+  const spot = Math.max(s.eth, 1e-9);
+  const mark = pool0.quoteReserve / pool0.baseReserve;
+  if (Math.abs(mark - spot) / spot < 0.0004) return s;
+  const k = pool0.baseReserve * pool0.quoteReserve;
+  const x = Math.sqrt(k / spot);
+  const y = k / x;
+  const vault = {
+    ...s.vault,
+    eth: s.vault.eth - (x - pool0.baseReserve),
+    usdc: s.vault.usdc - (y - pool0.quoteReserve),
+  };
+  const pools = { ...s.pools, "ETH-USDC": { ...pool0, baseReserve: x, quoteReserve: y } };
+  if (vault.eth < 0 || vault.usdc < 0) {
+    return { ...s, pools };
+  }
+  return { ...s, vault, pools };
 }
 
 export function quoteInForBaseOut(pool: EngineState["pools"][string], baseOut: number) {
@@ -615,11 +644,11 @@ export function bookGreeks(s: EngineState) {
   let gamma = 0;
   let vega = 0;
   for (const p of s.futures) {
+    if ((p.under ?? "ETH") !== "ETH") continue;
     delta += p.side === "long" ? -p.sizeEth : p.sizeEth;
   }
   for (const p of s.options) {
-    const under = p.under ?? "ETH";
-    if (under !== "ETH") continue;
+    if ((p.under ?? "ETH") !== "ETH") continue;
     const T = yearsTo(p.expiry, s.clock);
     const vol = ivSmile(s.iv, s.eth, p.strike, T);
     const d = bsDelta(s.eth, p.strike, T, 0.03, vol, p.type);
@@ -665,12 +694,6 @@ export function maxMiniContracts(s: EngineState, side: FutSide) {
   return Math.max(0, Math.min(byCash, byInv, byFill));
 }
 
-export function refreshQuotes(s: EngineState): EngineState {
-  const mid = reservationPx(s);
-  const bps = spreadBps(s);
-  return { ...s, ethBid: mid * (1 - bps / 10_000), ethAsk: mid * (1 + bps / 10_000) };
-}
-
 function takeFee(s: EngineState, fee: number): EngineState {
   if (fee <= 0) return s;
   return {
@@ -682,15 +705,15 @@ function takeFee(s: EngineState, fee: number): EngineState {
 
 export function hedgeDelta(s: EngineState): EngineState {
   const gap = residualDelta(s);
-  if (Math.abs(gap) < 0.005) return refreshQuotes(s);
+  if (Math.abs(gap) < 0.005) return arbToSpot(refreshQuotes(s));
   const pool0 = s.pools["ETH-USDC"];
-  if (!pool0) return refreshQuotes(s);
+  if (!pool0) return arbToSpot(refreshQuotes(s));
   const vault = { ...s.vault, hedgeEth: s.vault.hedgeEth ?? 0 };
   const pool = { ...pool0 };
   const band = pool.baseReserve * 0.08;
   if (gap > 0) {
     const sell = Math.min(gap, band, Math.max(0, vault.eth - vault.reservedEth));
-    if (sell < 0.005) return refreshQuotes({ ...s, vault });
+    if (sell < 0.005) return arbToSpot(refreshQuotes({ ...s, vault }));
     const out = ammOut(sell, pool.baseReserve, pool.quoteReserve, pool.feeBps);
     vault.eth -= sell;
     vault.usdc += out;
@@ -701,7 +724,7 @@ export function hedgeDelta(s: EngineState): EngineState {
     const want = Math.min(-gap, band);
     const cost = quoteInForBaseOut(pool, want);
     const freeUsdc = Math.max(0, vault.usdc - vault.reservedUsdc);
-    if (!Number.isFinite(cost) || cost > freeUsdc || want < 0.005) return refreshQuotes({ ...s, vault });
+    if (!Number.isFinite(cost) || cost > freeUsdc || want < 0.005) return arbToSpot(refreshQuotes({ ...s, vault }));
     const got = ammOut(cost, pool.quoteReserve, pool.baseReserve, pool.feeBps);
     vault.usdc -= cost;
     vault.eth += got;
@@ -709,7 +732,7 @@ export function hedgeDelta(s: EngineState): EngineState {
     pool.quoteReserve += cost;
     pool.baseReserve -= got;
   }
-  return refreshQuotes({ ...s, vault, pools: { ...s.pools, "ETH-USDC": pool } });
+  return arbToSpot(refreshQuotes({ ...s, vault, pools: { ...s.pools, "ETH-USDC": pool } }));
 }
 
 function pushFill(s: EngineState, fill: EngineState["fills"][number]): EngineState {
