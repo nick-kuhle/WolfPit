@@ -142,7 +142,7 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
             key={`${r.network ?? ""}-${r.symbol}-${r.contract ?? r.poolAddress ?? r.geckoId ?? r.name}`}
             onClick={() => pick(r)}
             className={cn(
-              "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left",
+              "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left transition-colors duration-150 hover:bg-elevated",
               focus.symbol === r.symbol && cardOpen && "bg-elevated",
             )}
           >

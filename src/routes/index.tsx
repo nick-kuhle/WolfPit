@@ -32,7 +32,7 @@ function Home() {
       <LiveTicker />
 
       <section className="relative overflow-hidden">
-        <img src="/brand/hero-pit.jpg" alt="" className="absolute inset-0 size-full object-cover object-center" />
+        <img src="/brand/hero-pit.jpg" alt="" decoding="async" className="absolute inset-0 size-full object-cover object-center" />
         <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/55 to-bg/25" />
         <div className="relative mx-auto max-w-5xl px-4 py-16 sm:py-24">
           <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-brass">Paper pit · live tape · zero deposit</p>
@@ -145,7 +145,7 @@ function Wow({
 }) {
   return (
     <Link to={to} className="group overflow-hidden rounded-[var(--radius-xl)] border border-border bg-panel">
-      <img src={img} alt="" className="aspect-[4/3] w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+      <img src={img} alt="" decoding="async" className="aspect-[4/3] w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
       <div className="p-5">
         <div className="font-mono text-[11px] uppercase tracking-wider text-brass">{kicker}</div>
         <h2 className="mt-2 font-display text-2xl font-medium leading-tight">{title}</h2>

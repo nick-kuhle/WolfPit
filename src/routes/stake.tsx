@@ -19,67 +19,70 @@ function StakePage() {
   return (
     <Shell>
       <ProductGate product="stake">
-      <main className="mx-auto max-w-xl px-4 py-8">
-        <p className="font-mono text-[11px] uppercase tracking-wider text-brass">$WPIT · first-loss junior</p>
-        <h1 className="mt-2 font-display text-4xl font-medium tracking-tight">Park it. Earn 12%.</h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          Staked WPIT is first-loss junior: insurance USDC → staked WPIT haircut → pause listings → LP NAV.
-          Simulated emission is a placeholder funded by emissions, not by selling naked vol. Not a deposit.
-        </p>
-        <p className="mt-2 text-sm text-muted">
-          Need WPIT?{" "}
-          <Link to="/trade" className="text-fg underline-offset-2 hover:underline">
-            Buy it on the desk
-          </Link>
-          .
-        </p>
-        <div className="mt-8 rounded-[var(--radius-lg)] border border-border bg-surface p-5">
-          <dl className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <dt className="text-[10px] uppercase tracking-wider text-subtle">Wallet WPIT</dt>
-              <dd className="font-mono tabular-nums">{s.account.wpit.toFixed(2)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wider text-subtle">Staked</dt>
-              <dd className="font-mono tabular-nums">{s.stake.amount.toFixed(2)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wider text-subtle">Mark</dt>
-              <dd className="font-mono tabular-nums">{fmtUsd(s.wpit, 4)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wider text-subtle">Insurance / NAV</dt>
-              <dd className="font-mono tabular-nums">{(insuranceRatio(s) * 100).toFixed(2)}%</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wider text-subtle">Insurance USDC</dt>
-              <dd className="font-mono tabular-nums">{fmtUsd(s.insuranceUsdc)}</dd>
-            </div>
-            <div>
-              <dt className="text-[10px] uppercase tracking-wider text-subtle">Sim emission</dt>
-              <dd className="font-mono tabular-nums">12%</dd>
-            </div>
-          </dl>
-          <label className="mt-6 block">
-            <span className="text-[10px] uppercase tracking-wider text-subtle">Amount</span>
-            <input
-              className="mt-1 h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono"
-              value={amt}
-              onChange={(e) => setAmt(e.target.value)}
-            />
-          </label>
-          <div className="mt-4 flex gap-2">
-            <Button className="flex-1" onClick={() => lockStake(Number(amt) || 0)}>
-              Stake
-            </Button>
-            <Button className="flex-1" variant="outline" disabled={s.stake.amount <= 0} onClick={unstake}>
-              Unstake all
-            </Button>
+        <div className="pit-hero relative overflow-hidden border-b border-border">
+          <img src="/brand/lockup-dark.jpg" alt="" decoding="async" className="absolute inset-0 size-full object-cover opacity-35" />
+          <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/75 to-bg/40" />
+          <div className="relative mx-auto max-w-xl px-4 py-10 sm:py-14">
+            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">$WPIT · first-loss junior</p>
+            <h1 className="mt-2 font-display text-5xl font-medium tracking-tight">
+              Park it. <span className="apy-live italic text-brass">Earn 12%.</span>
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-muted">
+              Junior to insurance. First-loss if the pit has a bad day. Simulated. Not a deposit.
+            </p>
           </div>
-          {err ? <p className="mt-3 text-sm text-down">{err}</p> : null}
         </div>
-      </main>
-      <SiteFooter />
+        <main className="mx-auto max-w-xl px-4 py-8">
+          <p className="text-sm text-muted">
+            Need WPIT?{" "}
+            <Link to="/asset/$symbol" params={{ symbol: "WPIT" }} search={{ name: "WolfPit", chain: "Base", contract: "", network: "" }} className="text-brass hover:underline">
+              Open the WPIT ticket
+            </Link>
+            {" · "}
+            <Link to="/trade" className="text-fg underline-offset-2 hover:underline">
+              trade it
+            </Link>
+            .
+          </p>
+          <div className="mt-8 rounded-[var(--radius-xl)] border border-border bg-panel p-5">
+            <dl className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <dt className="text-[10px] uppercase tracking-wider text-subtle">Wallet WPIT</dt>
+                <dd className="font-mono text-lg tabular-nums">{s.account.wpit.toFixed(2)}</dd>
+              </div>
+              <div>
+                <dt className="text-[10px] uppercase tracking-wider text-subtle">Staked</dt>
+                <dd className="font-mono text-lg tabular-nums">{s.stake.amount.toFixed(2)}</dd>
+              </div>
+              <div>
+                <dt className="text-[10px] uppercase tracking-wider text-subtle">Mark</dt>
+                <dd className="font-mono tabular-nums">{fmtUsd(s.wpit, 4)}</dd>
+              </div>
+              <div>
+                <dt className="text-[10px] uppercase tracking-wider text-subtle">Insurance / NAV</dt>
+                <dd className="font-mono tabular-nums">{(insuranceRatio(s) * 100).toFixed(2)}%</dd>
+              </div>
+            </dl>
+            <label className="mt-6 block">
+              <span className="text-[10px] uppercase tracking-wider text-subtle">Amount</span>
+              <input
+                className="mt-1 h-11 w-full rounded-[var(--radius-sm)] border border-border bg-elevated px-3 font-mono"
+                value={amt}
+                onChange={(e) => setAmt(e.target.value)}
+              />
+            </label>
+            <div className="mt-4 flex gap-2">
+              <Button className="flex-1" onClick={() => lockStake(Number(amt) || 0)}>
+                Stake
+              </Button>
+              <Button className="flex-1" variant="outline" disabled={s.stake.amount <= 0} onClick={unstake}>
+                Unstake all
+              </Button>
+            </div>
+            {err ? <p className="mt-3 text-sm text-down">{err}</p> : null}
+          </div>
+        </main>
+        <SiteFooter />
       </ProductGate>
     </Shell>
   );

@@ -10,7 +10,7 @@ export function SiteFooter() {
             Desk
           </Link>
           <Link to="/pools" className="hover:text-fg">
-            Pools
+            Farms
           </Link>
           <Link to="/stake" className="hover:text-fg">
             Stake

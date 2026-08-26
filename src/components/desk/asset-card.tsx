@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PitChart } from "@/components/desk/chart";
 import { OrderTicket } from "@/components/desk/order-ticket";
@@ -5,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useDesk } from "@/lib/wolfpit/desk";
 import { resampleCandles } from "@/lib/wolfpit/engine";
 import { getSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
+import { shareAsset } from "@/lib/wolfpit/share";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { Candle } from "@/lib/wolfpit/types";
 import { cn, fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
@@ -63,7 +65,7 @@ export function AssetCard() {
   return (
     <div
       className={cn(
-        "z-30 flex min-h-0 flex-col overflow-hidden border-border bg-panel",
+        "sheet-in z-30 flex min-h-0 flex-col overflow-hidden border-border bg-panel",
         expanded
           ? "fixed inset-0 border-0"
           : "fixed inset-x-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] max-h-[min(70dvh,36rem)] rounded-[var(--radius-xl)] border landscape:inset-y-2 landscape:bottom-2 landscape:left-auto landscape:right-2 landscape:w-[min(28rem,52vw)] landscape:max-h-none lg:absolute lg:inset-y-3 lg:right-3 lg:left-auto lg:bottom-auto lg:w-[min(26rem,40%)] lg:max-h-none",
@@ -109,6 +111,26 @@ export function AssetCard() {
         {status === "load" ? <p className="p-4 text-sm text-muted">Loading {interval}…</p> : null}
         {status === "empty" ? <p className="p-4 text-sm text-muted">No candles. Try 1h.</p> : null}
         {status === "ok" ? <PitChart candles={bars} height={160} interval={interval} /> : null}
+      </div>
+
+      <div className="flex items-center gap-2 px-3 pt-3 text-xs">
+        <Link
+          to="/asset/$symbol"
+          params={{ symbol: focus.symbol }}
+          search={{
+            name: focus.name,
+            chain: focus.chain ?? "",
+            contract: focus.contract ?? "",
+            network: focus.network ?? "",
+          }}
+          className="text-brass underline-offset-2 hover:underline"
+        >
+          Open details
+        </Link>
+        <span className="text-subtle">·</span>
+        <button className="text-muted hover:text-fg" onClick={() => void shareAsset(focus)}>
+          Share
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2 p-3">

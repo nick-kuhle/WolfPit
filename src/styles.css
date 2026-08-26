@@ -73,6 +73,79 @@
   }
 }
 
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes brass-pulse {
+  0%,
+  100% {
+    text-shadow: 0 0 0 transparent;
+  }
+  50% {
+    text-shadow: 0 0 18px color-mix(in oklab, var(--color-brass) 55%, transparent);
+  }
+}
+
+@keyframes harvest-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-brass) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 28px 0 color-mix(in oklab, var(--color-brass) 28%, transparent);
+  }
+}
+
+@keyframes pit-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-8%, -4%, 0);
+  }
+}
+
+.sheet-in {
+  animation: sheet-in 220ms ease-out both;
+}
+
+.apy-live {
+  animation: brass-pulse 3.2s ease-in-out infinite;
+}
+
+.ripe-glow {
+  animation: harvest-glow 2.8s ease-in-out infinite;
+}
+
+.pit-hero {
+  position: relative;
+  isolation: isolate;
+}
+
+.pit-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 80% at 50% 100%, var(--color-bg) 20%, transparent 70%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-in,
+  .apy-live,
+  .ripe-glow {
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
