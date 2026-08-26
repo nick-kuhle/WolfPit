@@ -145,40 +145,36 @@ export function Watchlist({ onPick }: { onPick?: (l: Listing) => void }) {
         {chainBusy && tab === "chains" && !q.trim() ? <p className="p-3 text-xs text-muted">Loading {chainId}…</p> : null}
         {!busy && rows.length === 0 ? <p className="p-3 text-xs text-muted">{q.trim() ? "No matches." : "No names on this tape."}</p> : null}
         {rows.map((r) => (
-          <button
+          <div
             key={`${r.network ?? ""}-${r.symbol}-${r.contract ?? r.poolAddress ?? r.geckoId ?? r.name}`}
-            onClick={() => pick(r)}
             className={cn(
-              "flex w-full items-center justify-between border-b border-border px-3 py-2.5 text-left transition-colors duration-150 hover:bg-elevated",
+              "grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center border-b border-border transition-colors duration-150 hover:bg-elevated",
               focus.symbol === r.symbol && "bg-elevated",
             )}
           >
-            <div className="min-w-0">
+            <button
+              type="button"
+              className={cn("grid h-12 place-items-center text-[14px]", saved.includes(r.symbol.toUpperCase()) ? "text-brass" : "text-subtle")}
+              onClick={() => toggleSave(r.symbol, r)}
+              aria-label="Save"
+            >
+              {saved.includes(r.symbol.toUpperCase()) ? "★" : "☆"}
+            </button>
+            <button type="button" onClick={() => pick(r)} className="min-w-0 py-2.5 text-left">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className={cn("pressable text-[12px]", saved.includes(r.symbol.toUpperCase()) ? "text-brass" : "text-subtle")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleSave(r.symbol);
-                  }}
-                  aria-label="Save"
-                >
-                  {saved.includes(r.symbol.toUpperCase()) ? "★" : "☆"}
-                </button>
                 <span className="font-mono text-xs">{r.symbol}</span>
                 <span className="truncate text-[10px] text-subtle">{r.chain}</span>
               </div>
               <div className="truncate text-[11px] text-muted">{r.name}</div>
-            </div>
-            <div className="shrink-0 text-right">
+            </button>
+            <button type="button" onClick={() => pick(r)} className="shrink-0 px-3 py-2.5 text-right">
               <div className="font-mono text-xs tabular-nums">{r.price ? fmtPx(r.price) : "—"}</div>
               <div className={`font-mono text-[10px] tabular-nums ${r.change24 >= 0 ? "text-up" : "text-down"}`}>
                 {fmtPct(r.change24)}
               </div>
               <div className="font-mono text-[10px] text-subtle">{fmtUsd(r.volume24)}</div>
-            </div>
-          </button>
+            </button>
+          </div>
         ))}
       </div>
     </div>

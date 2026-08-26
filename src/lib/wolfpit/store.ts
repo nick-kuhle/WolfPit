@@ -82,11 +82,11 @@ function apply(result: EngineState | string, set: (p: Partial<WolfStore>) => voi
     set({ lastError: result });
     return;
   }
-  if (sent) ping("Order sent", "brass");
+  if (sent) ping("Order sent", "brass", true);
   const fill = result.fills[0];
   const prev = useWolf.getState().fills[0]?.id;
   if (fill && fill.id !== prev) {
-    ping(`Order filled · ${fill.side} ${fill.symbol} ${fill.size.toPrecision(4)} @ ${fill.price.toPrecision(6)}`, "up");
+    ping(`Order filled · ${fill.side} ${fill.symbol} ${fill.size.toPrecision(4)} @ ${fill.price.toPrecision(6)}`, "up", true);
   }
   set({ ...result, lastError: null });
 }
@@ -117,9 +117,9 @@ export const useWolf = create<WolfStore>()(
             fresh.push(f);
           }
           for (const f of fresh.slice(0, 8)) {
-            if (f.side === "win") ping(`Paid ${f.size.toFixed(2)} WPIT · ${f.symbol}`, "up");
-            else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down");
-            else ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up");
+            if (f.side === "win") ping(`Paid ${f.size.toFixed(2)} WPIT · ${f.symbol}`, "up", true);
+            else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down", true);
+            else ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up", true);
           }
           if (next.games?.meets[0]?.raceId && next.games.meets[0].raceId !== prevMeets) {
             const m = next.games.meets[0];
@@ -226,7 +226,7 @@ export const useWolf = create<WolfStore>()(
             return { lastError: r };
           }
           const n = r.games?.bets.filter((b) => b.status === "open" && b.placedAt >= Date.now() - 2000).length ?? 1;
-          ping(`Ticket${n > 1 ? "s" : ""} · ${market.toUpperCase()} · ${stake} WPIT`, "brass");
+          ping(`Ticket${n > 1 ? "s" : ""} · ${market.toUpperCase()} · ${stake} WPIT`, "brass", true);
           return { ...r, lastError: null };
         });
       },

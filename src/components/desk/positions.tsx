@@ -26,7 +26,7 @@ import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
 import type { Candle, PoolId } from "@/lib/wolfpit/types";
 import { cn, fmtPct, fmtPx, fmtQty, fmtUsd } from "@/lib/utils";
-import { fracOdds, gamesPnl, openTickets } from "@/lib/wolfpit/games";
+import { fracOdds, gamesPnl, groupTickets, openTickets } from "@/lib/wolfpit/games";
 
 const COLS = "grid grid-cols-[minmax(0,1fr)_5.1rem_4.6rem_5.4rem] items-baseline gap-x-2 px-3";
 
@@ -61,10 +61,10 @@ export function Positions({ flush }: { flush?: boolean }) {
   const minis = groupedFutures(s);
   const vanillas = groupedOptions(s);
   const extras = Object.entries(s.account.tokens ?? {}).filter(([, q]) => Math.abs(q) > 1e-8);
-  const tickets = openTickets(s);
+  const tickets = groupTickets(openTickets(s));
   const inPlay = tickets.reduce((a, b) => a + b.stake, 0);
   const trackPnl = gamesPnl(s);
-  const settled = (s.games?.bets ?? []).filter((b) => b.status !== "open").slice(0, 8);
+  const settled = groupTickets((s.games?.bets ?? []).filter((b) => b.status !== "open")).slice(0, 8);
   const holdings = [
     { k: "USDC", qty: s.account.usdc, mark: 1 },
     { k: "ETH", qty: s.account.eth, mark: s.eth },
@@ -363,10 +363,10 @@ export function Positions({ flush }: { flush?: boolean }) {
                   </span>
                   <span className="text-right tabular-nums">{fmtQty(b.stake)}</span>
                   <span className="text-right tabular-nums text-muted">{fracOdds(b.odds)}</span>
-                  <span className="text-right tabular-nums text-brass">{fmtQty(b.stake * b.odds)}</span>
+                  <span className="text-right tabular-nums text-brass">{fmtQty(b.legs > 1 ? (b.stake / b.legs) * b.odds : b.stake * b.odds)}</span>
                 </div>
                 <p className="mt-0.5 font-mono text-[10px] text-subtle">
-                  {b.kind} · WPIT · max {fmtQty(b.stake * b.odds)}
+                  {b.kind} · WPIT{b.legs > 1 ? ` · box ${b.legs}` : ""} · max {fmtQty(b.legs > 1 ? (b.stake / b.legs) * b.odds : b.stake * b.odds)}
                 </p>
               </div>
             ))}

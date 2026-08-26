@@ -11,6 +11,7 @@ import {
   MIN_BET,
   cardFor,
   fracOdds,
+  groupTickets,
   marketOdds,
   openTickets,
   quinellaCombos,
@@ -375,8 +376,8 @@ function Clock({ card, now, left }: { card: RaceCard; now: number; left: number 
 
 function Tickets() {
   const s = useWolf();
-  const open = openTickets(s);
-  const recent = (s.games?.bets ?? []).filter((b) => b.status !== "open").slice(0, 8);
+  const open = groupTickets(openTickets(s));
+  const recent = groupTickets((s.games?.bets ?? []).filter((b) => b.status !== "open")).slice(0, 8);
   if (!open.length && !recent.length) return null;
   return (
     <section className="mx-auto max-w-5xl px-4 pb-10">
@@ -385,18 +386,20 @@ function Tickets() {
         {open.map((b) => (
           <article key={b.id} className="rounded-[var(--radius-lg)] border border-brass/40 bg-elevated p-3">
             <div className="font-mono text-[10px] uppercase tracking-wider text-brass">
-              Open · {b.market ?? "win"} · {b.kind}
+              Open · {b.market} · {b.kind}
+              {b.legs > 1 ? ` · box ${b.legs}` : ""}
             </div>
             <div className="font-display text-xl">{b.name}</div>
             <div className="font-mono text-[12px] text-muted">
-              {fmtQty(b.stake)} WPIT @ {fracOdds(b.odds)} · max {fmtQty(b.stake * b.odds)}
+              {fmtQty(b.stake)} WPIT @ {fracOdds(b.odds)} · max {fmtQty(b.legs > 1 ? (b.stake / b.legs) * b.odds : b.stake * b.odds)}
             </div>
           </article>
         ))}
         {recent.map((b) => (
           <article key={b.id} className={cn("rounded-[var(--radius-lg)] border p-3", b.status === "won" ? "border-up/40 bg-up/10" : "border-border bg-panel")}>
             <div className="font-mono text-[10px] uppercase tracking-wider text-subtle">
-              {b.status} · {b.market ?? "win"} · {b.kind}
+              {b.status} · {b.market} · {b.kind}
+              {b.legs > 1 ? ` · box ${b.legs}` : ""}
             </div>
             <div className="font-display text-xl">{b.name}</div>
             <div className="font-mono text-[12px] text-muted">

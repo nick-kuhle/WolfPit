@@ -192,6 +192,7 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
               placedAt: nn(b.placedAt),
               status: b.status === "won" || b.status === "lost" ? b.status : "open",
               payout: nn(b.payout),
+              groupId: typeof b.groupId === "string" ? b.groupId.slice(0, 40) : undefined,
             }))
         : [],
       meets: Array.isArray(raw.games?.meets)

@@ -22,6 +22,8 @@ function pxLabel(p: number) {
   return p.toFixed(6);
 }
 
+type Win = { i0: number; i1: number };
+
 export function PitChart({
   candles,
   height = 240,
@@ -32,12 +34,55 @@ export function PitChart({
   interval?: ChartInterval;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const win = useRef<Win>({ i0: 0, i1: 0 });
+  const lastN = useRef(0);
+  const follow = useRef(true);
+  const drag = useRef<{ x: number; i0: number; i1: number } | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; i0: number; i1: number } | null>(null);
+  const hover = useRef<{ x: number; y: number } | null>(null);
+  const candlesRef = useRef(candles);
+  candlesRef.current = candles;
+
+  useEffect(() => {
+    win.current = { i0: 0, i1: 0 };
+    follow.current = true;
+    lastN.current = 0;
+  }, [candles[0]?.t, interval]);
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
     const parent = canvas.parentElement;
     if (!parent) return;
+    const el = canvas;
+
+    function clampWin(n: number, w: Win): Win {
+      const span = Math.max(8, Math.min(n, w.i1 - w.i0));
+      let i0 = w.i0;
+      let i1 = i0 + span;
+      if (i1 > n) {
+        i1 = n;
+        i0 = Math.max(0, n - span);
+      }
+      if (i0 < 0) i0 = 0;
+      return { i0, i1: Math.max(i0 + 8, i1) };
+    }
+
+    function ensure() {
+      const n = candlesRef.current.length;
+      if (n < 2) return;
+      if (win.current.i1 === 0 || lastN.current === 0) {
+        const count = Math.min(90, n);
+        win.current = { i0: n - count, i1: n };
+        follow.current = true;
+      } else if (follow.current && n !== lastN.current) {
+        const span = win.current.i1 - win.current.i0;
+        win.current = { i0: Math.max(0, n - span), i1: n };
+      }
+      lastN.current = n;
+      win.current = clampWin(n, win.current);
+    }
 
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -55,9 +100,13 @@ export function PitChart({
       const muted = cssVar("--color-subtle", "#6b6b62");
       const up = cssVar("--color-up", "#3f9d6e");
       const down = cssVar("--color-down", "#c45c52");
+      const brass = cssVar("--color-brass", "#c4a35a");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
-      const slice = candles.length > 120 ? candles.slice(-120) : candles;
+      ensure();
+      const all = candlesRef.current;
+      const { i0, i1 } = win.current;
+      const slice = all.slice(i0, i1);
       if (slice.length < 2) {
         ctx.fillStyle = muted;
         ctx.font = "12px 'IBM Plex Sans', sans-serif";
@@ -80,7 +129,7 @@ export function PitChart({
       const plotW = Math.max(1, w - padL - padR);
       const plotH = Math.max(1, h - padT - padB);
       const gap = plotW / slice.length;
-      const cw = Math.min(7, Math.max(1.25, gap * 0.62));
+      const cw = Math.min(9, Math.max(1.1, gap * 0.62));
       const x = (i: number) => padL + gap * i + gap / 2;
       const y = (p: number) => padT + ((hi - p) / (hi - lo)) * plotH;
       ctx.strokeStyle = grid;
@@ -117,15 +166,133 @@ export function PitChart({
         const bot = y(Math.min(c.o, c.c));
         ctx.fillRect(xc - cw / 2, top, cw, Math.max(1, bot - top));
       });
+      const hv = hover.current;
+      if (hv && hv.x >= padL && hv.x <= w - padR) {
+        const idx = Math.max(0, Math.min(slice.length - 1, Math.floor(((hv.x - padL) / plotW) * slice.length)));
+        const c = slice[idx];
+        if (c) {
+          const xc = x(idx);
+          ctx.strokeStyle = brass;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(xc, padT);
+          ctx.lineTo(xc, padT + plotH);
+          ctx.moveTo(padL, y(c.c));
+          ctx.lineTo(w - padR, y(c.c));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          const label = `${axisLabel(c.t, interval)}  ${pxLabel(c.c)}`;
+          ctx.fillStyle = "rgba(16,18,16,0.86)";
+          ctx.fillRect(padL, padT, Math.min(plotW, 8 + label.length * 6.2), 18);
+          ctx.fillStyle = brass;
+          ctx.fillText(label, padL + 6, padT + 13);
+        }
+      }
     };
+
+    function zoomAt(clientX: number, factor: number) {
+      const n = candlesRef.current.length;
+      if (n < 10) return;
+      const rect = el.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+      const { i0, i1 } = win.current;
+      const span = i1 - i0;
+      const next = Math.round(Math.max(8, Math.min(n, span * factor)));
+      const center = i0 + span * frac;
+      win.current = { i0: Math.round(center - next * frac), i1: Math.round(center - next * frac) + next };
+      follow.current = win.current.i1 >= n - 1;
+      win.current = clampWin(n, win.current);
+      draw();
+    }
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      zoomAt(e.clientX, e.deltaY > 0 ? 1.14 : 0.86);
+    }
+
+    function onPointerDown(e: PointerEvent) {
+      el.setPointerCapture(e.pointerId);
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.current.size === 2) {
+        const [a, b] = [...pointers.current.values()];
+        const dist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+        pinch.current = { dist: Math.max(1, dist), i0: win.current.i0, i1: win.current.i1 };
+        drag.current = null;
+      } else {
+        drag.current = { x: e.clientX, i0: win.current.i0, i1: win.current.i1 };
+      }
+    }
+
+    function onPointerMove(e: PointerEvent) {
+      hover.current = { x: e.clientX - el.getBoundingClientRect().left, y: e.clientY };
+      if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const n = candlesRef.current.length;
+      if (pinch.current && pointers.current.size >= 2) {
+        const [a, b] = [...pointers.current.values()];
+        const dist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+        const factor = pinch.current.dist / Math.max(1, dist);
+        const span = pinch.current.i1 - pinch.current.i0;
+        const next = Math.round(Math.max(8, Math.min(n, span * factor)));
+        const mid = (pinch.current.i0 + pinch.current.i1) / 2;
+        win.current = { i0: Math.round(mid - next / 2), i1: Math.round(mid - next / 2) + next };
+        follow.current = win.current.i1 >= n - 1;
+        win.current = clampWin(n, win.current);
+        draw();
+        return;
+      }
+      if (drag.current) {
+        const rect = el.getBoundingClientRect();
+        const span = drag.current.i1 - drag.current.i0;
+        const bars = ((drag.current.x - e.clientX) / Math.max(1, rect.width)) * span;
+        const shift = Math.round(bars);
+        win.current = { i0: drag.current.i0 + shift, i1: drag.current.i1 + shift };
+        follow.current = win.current.i1 >= n - 1;
+        win.current = clampWin(n, win.current);
+        draw();
+        return;
+      }
+      draw();
+    }
+
+    function onPointerUp(e: PointerEvent) {
+      pointers.current.delete(e.pointerId);
+      if (pointers.current.size < 2) pinch.current = null;
+      if (pointers.current.size === 0) drag.current = null;
+    }
+
+    function onDbl() {
+      const n = candlesRef.current.length;
+      const count = Math.min(90, n);
+      win.current = { i0: Math.max(0, n - count), i1: n };
+      follow.current = true;
+      draw();
+    }
 
     draw();
     const ro = new ResizeObserver(draw);
     ro.observe(parent);
-    return () => ro.disconnect();
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointercancel", onPointerUp);
+    el.addEventListener("pointerleave", () => {
+      hover.current = null;
+      draw();
+    });
+    el.addEventListener("dblclick", onDbl);
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("pointercancel", onPointerUp);
+      el.removeEventListener("dblclick", onDbl);
+    };
   }, [candles, height, interval]);
 
-  return <canvas ref={ref} className="block h-full w-full" />;
+  return <canvas ref={ref} className="block h-full w-full cursor-crosshair touch-none" />;
 }
 
 export function ChartPane({
@@ -156,6 +323,7 @@ export function ChartPane({
               </button>
             ))
           : null}
+        <span className="ml-auto font-mono text-[9px] uppercase tracking-wider text-subtle">pinch · drag · wheel</span>
       </div>
       <div style={{ height: compact }}>
         {status === "load" ? (

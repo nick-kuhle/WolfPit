@@ -294,7 +294,44 @@
   background: radial-gradient(120% 80% at 50% 100%, var(--color-bg) 20%, transparent 70%);
 }
 
+@keyframes slip-fly {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(-6deg) scale(0.7);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--dx) * 0.35), calc(-50% + var(--dy) * 0.35)) rotate(var(--rot)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(calc(var(--rot) * 1.8)) scale(0.45);
+  }
+}
+
+.slip-fly {
+  animation: slip-fly 1.15s cubic-bezier(0.12, 0.7, 0.2, 1) forwards;
+}
+
+@keyframes alert-pop {
+  0% {
+    transform: scale(0.86) rotate(-2deg);
+  }
+  55% {
+    transform: scale(1.04) rotate(0.6deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+
+.alert-pop {
+  animation: alert-pop 0.38s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .slip-fly,
+  .alert-pop,
   .runner-body,
   .runner-legs,
   .runner-idle,

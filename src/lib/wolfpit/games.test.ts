@@ -10,6 +10,7 @@ import {
   ensureRace,
   fieldAt,
   fracOdds,
+  groupTickets,
   makeCard,
   placeBet,
   placeTickets,
@@ -195,6 +196,13 @@ describe("pit racetrack", () => {
     if (typeof r === "string") throw new Error(r);
     assert.ok(Math.abs(r.account.wpit - 4_900) < 1e-6);
     assert.equal(r.games?.bets.filter((x) => x.status === "open").length, 3);
+    const gids = new Set(r.games?.bets.map((x) => x.groupId));
+    assert.equal(gids.size, 1);
+    assert.equal(groupTickets(r.games?.bets ?? []).filter((t) => t.market === "quinella").length, 1);
+    const view = groupTickets(r.games?.bets ?? []).find((t) => t.market === "quinella");
+    assert.ok(view);
+    assert.ok(Math.abs((view?.stake ?? 0) - 100) < 1e-6);
+    assert.equal(view?.legs, 3);
     const legs = r.games?.bets.filter((x) => x.market === "quinella") ?? [];
     const spent = legs.reduce((a, b) => a + b.stake, 0);
     assert.ok(Math.abs(spent - 100) < 1e-6);

@@ -318,13 +318,14 @@ export function placeTickets(
     if (combos.length === 0) return "Pick two runners for the quinella.";
     if (stake < MIN_BET) return `Minimum ticket is ${MIN_BET} WPIT.`;
     if (stake > MAX_BET) return `House limit ${MAX_BET} WPIT a ticket.`;
+    const gid = uid("box");
     let cur: EngineState | string = s;
     let left = stake;
     for (let i = 0; i < combos.length; i++) {
       const [a, b] = combos[i]!;
       const per = i === combos.length - 1 ? left : Math.round((stake / combos.length) * 1e6) / 1e6;
       left = Math.round((left - per) * 1e6) / 1e6;
-      cur = placeBet(cur as EngineState, kind, a, per, now, "quinella", b);
+      cur = placeBet(cur as EngineState, kind, a, per, now, "quinella", b, gid);
       if (typeof cur === "string") return cur;
     }
     return cur;
@@ -354,6 +355,7 @@ export function placeBet(
   now = Date.now(),
   market: BetMarket = "win",
   runnerB?: number,
+  groupId?: string,
 ): EngineState | string {
   const bad = requireFinitePositive(stake, "Stake");
   if (bad) return bad;
@@ -391,6 +393,7 @@ export function placeBet(
     placedAt: now,
     status: "open",
     payout: 0,
+    groupId,
   };
   const before = { usdc: s.account.usdc, eth: s.account.eth, wpit: s.account.wpit };
   const after = { ...before, wpit: before.wpit - stake };
@@ -525,6 +528,58 @@ export function refundOpenBets(s: EngineState): EngineState {
 
 export function openTickets(s: EngineState) {
   return (s.games?.bets ?? []).filter((b) => b.status === "open");
+}
+
+export type TicketView = {
+  id: string;
+  market: BetMarket;
+  kind: RaceKind;
+  name: string;
+  stake: number;
+  odds: number;
+  status: "open" | "won" | "lost";
+  payout: number;
+  legs: number;
+};
+
+export function groupTickets(bets: GameBet[]): TicketView[] {
+  const map = new Map<string, GameBet[]>();
+  const order: string[] = [];
+  for (const b of bets) {
+    const key = b.groupId || b.id;
+    const row = map.get(key);
+    if (!row) {
+      map.set(key, [b]);
+      order.push(key);
+    } else row.push(b);
+  }
+  return order.map((key) => {
+    const legs = map.get(key)!;
+    const stake = legs.reduce((a, b) => a + b.stake, 0);
+    const won = legs.filter((b) => b.status === "won");
+    const open = legs.some((b) => b.status === "open");
+    const payout = won.reduce((a, b) => a + b.payout, 0);
+    const status: TicketView["status"] = open ? "open" : won.length ? "won" : "lost";
+    const names = new Set<string>();
+    for (const b of legs) {
+      for (const p of b.name.split(/\s*[/|>]\s*/)) {
+        const t = p.trim();
+        if (t) names.add(t);
+      }
+    }
+    const odds = won[0]?.odds ?? Math.max(...legs.map((b) => b.odds));
+    return {
+      id: key,
+      market: legs[0]!.market ?? "win",
+      kind: legs[0]!.kind,
+      name: [...names].join(" · ") || legs[0]!.name,
+      stake,
+      odds,
+      status,
+      payout,
+      legs: legs.length,
+    };
+  });
 }
 
 export function gamesPnl(s: EngineState) {

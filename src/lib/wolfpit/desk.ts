@@ -54,7 +54,7 @@ type DeskUi = {
   openCard: (l: Listing) => void;
   closeCard: () => void;
   setExpanded: (v: boolean) => void;
-  toggleSave: (sym: string) => void;
+  toggleSave: (sym: string, listing?: Listing) => void;
 };
 
 function loadSaved(): string[] {
@@ -85,11 +85,16 @@ export const useDesk = create<DeskUi>((set) => ({
   openCard: (l) => set({ focus: l, cardOpen: true, expanded: false }),
   closeCard: () => set({ cardOpen: false, expanded: false }),
   setExpanded: (expanded) => set({ expanded }),
-  toggleSave: (sym) =>
+  toggleSave: (sym, listing) =>
     set((s) => {
       const key = sym.toUpperCase();
-      const saved = s.saved.includes(key) ? s.saved.filter((x) => x !== key) : [...s.saved, key];
+      const on = s.saved.includes(key);
+      const saved = on ? s.saved.filter((x) => x !== key) : [...s.saved, key];
+      let universe = s.universe;
+      if (!on && listing && !universe.some((u) => u.symbol.toUpperCase() === key)) {
+        universe = [{ ...listing, symbol: key }, ...universe];
+      }
       if (typeof window !== "undefined") window.localStorage.setItem("wolfpit-saved", JSON.stringify(saved));
-      return { saved };
+      return { saved, universe };
     }),
 }));

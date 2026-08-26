@@ -140,6 +140,7 @@ export type GameBet = {
   placedAt: number;
   status: "open" | "won" | "lost";
   payout: number;
+  groupId?: string;
 };
 
 export type FairRace = {
