@@ -32,7 +32,11 @@ import {
   applyLive,
   arbToSpot,
   refreshQuotes,
+  maxSpotQty,
+  maxMiniContracts,
+  placeDeskOrder,
 } from "./engine.ts";
+import { MAX_FARM_APY, MAX_LOT } from "./limits.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
 import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
 
@@ -292,7 +296,8 @@ describe("WPIT moon", () => {
     let s = initialState();
     const start = s.wpit;
     for (let i = 0; i < 240; i++) s = tick(s, 1);
-    assert.ok(s.wpit > start * 0.9);
+    assert.ok(s.wpit > start * 0.5);
+    assert.ok(s.wpit <= 5);
     assert.ok(s.wpitCandles.length >= 2);
   });
 });
@@ -437,5 +442,70 @@ describe("oracle arb", () => {
     assert.ok(Math.abs(s.ethBid - 2461) / 2461 < 0.04);
     const mark = s.pools["ETH-USDC"]!.quoteReserve / s.pools["ETH-USDC"]!.baseReserve;
     assert.ok(Math.abs(mark - 2461) / 2461 < 0.01, `pool ${mark}`);
+  });
+});
+
+describe("house limits", () => {
+  it("rejects NaN, zero, and trillion-lot minis", () => {
+    const s = initialState();
+    assert.equal(typeof tradeFuture(s, "long", Number.NaN, exp), "string");
+    assert.equal(typeof tradeFuture(s, "long", 0, exp), "string");
+    assert.equal(typeof tradeFuture(s, "long", 1e14, exp), "string");
+    assert.equal(typeof tradeFuture(s, "long", 1e14, exp, "WPIT"), "string");
+    assert.equal(typeof placeDeskOrder(s, { product: "future", side: "buy", kind: "mkt", tif: "day", qty: 1e14, under: "ETH" }), "string");
+  });
+
+  it("IM scales with size and debit hits the wallet", () => {
+    const s = setMark(initialState(), 2461);
+    const a = tradeFuture(s, "long", 1, exp);
+    const b = tradeFuture(s, "long", 2, exp);
+    assert.equal(typeof a, "object", String(a));
+    assert.equal(typeof b, "object", String(b));
+    const A = a as typeof s;
+    const B = b as typeof s;
+    const im1 = A.futures[0]!.margin;
+    const im2 = B.futures[0]!.margin;
+    assert.ok(Math.abs(im2 / im1 - 2) < 0.05, `im ${im1} vs ${im2}`);
+    assert.ok(s.account.usdc - A.account.usdc > im1 * 0.99);
+    assert.ok(s.account.usdc - B.account.usdc > s.account.usdc - A.account.usdc);
+    assert.ok(B.account.usdc < A.account.usdc);
+  });
+
+  it("spot buy of a custom token credits that token, not WPIT, and cannot exceed cash", () => {
+    let s = initialState();
+    s = { ...s, account: { ...s.account, tokens: { PEPE: 1_000_000 } } };
+    const made = createPool(s, "PEPE", "USDC", 1000, 10);
+    assert.equal(typeof made, "object", String(made));
+    s = made as typeof s;
+    const wpit0 = s.account.wpit;
+    const pepe0 = s.account.tokens.PEPE ?? 0;
+    const cash0 = s.account.usdc;
+    const buy = tradeSpot(s, "PEPE-USDC", "buy", 2);
+    assert.equal(typeof buy, "object", String(buy));
+    const next = buy as typeof s;
+    assert.equal(next.account.wpit, wpit0);
+    assert.ok((next.account.tokens.PEPE ?? 0) > pepe0);
+    assert.ok(next.account.usdc < cash0 - 1.9);
+    const tooBig = tradeSpot(s, "PEPE-USDC", "buy", cash0 + 1);
+    assert.equal(typeof tooBig, "string");
+  });
+
+  it("farm APY stays capped when WPIT rips and TVL is thin", () => {
+    const s = initialState();
+    s.wpit = 5;
+    s.pools["ETH-USDC"]!.baseReserve = 0.01;
+    s.pools["ETH-USDC"]!.quoteReserve = 25;
+    const apy = farmApy(s, "ETH-USDC");
+    assert.ok(apy <= MAX_FARM_APY + 1e-12, String(apy));
+    assert.ok(apy >= 0);
+  });
+
+  it("max contracts is cash-and-inventory bound", () => {
+    const s = setMark(initialState(), 2461);
+    const n = maxMiniContracts(s, "long", "ETH");
+    assert.ok(n < 10_000);
+    assert.ok(n >= 1);
+    const poor = { ...s, account: { ...s.account, usdc: 1 } };
+    assert.equal(maxMiniContracts(poor, "long", "ETH"), 0);
   });
 });

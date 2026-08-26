@@ -46,6 +46,19 @@ import {
   gammaCash1h,
   vaultNav,
 } from "./risk";
+import {
+  APY_TVL_FLOOR,
+  EMIT_PX_CAP,
+  MAX_FARM_APY,
+  MAX_LOT,
+  MAX_NOTIONAL_USD,
+  MAX_POOL_FRAC,
+  MIN_IM_USD,
+  WPIT_PX_MAX,
+  WPIT_PX_MIN,
+  requireFinitePositive,
+  requireMoney,
+} from "./limits";
 
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -168,15 +181,13 @@ function seedCandles(now: number, px: number, kind: "eth" | "wpit") {
 }
 
 function moonWpit(px: number, clock: number, dtSec: number) {
-  const steps = Math.max(1, Math.round(dtSec));
-  let p = px;
-  for (let i = 0; i < steps; i++) {
-    const r = rng(0x51a7e ^ ((((clock / 1000) | 0) + i * 19) * 2654435761));
-    const dump = r() < 0.06;
-    const ret = dump ? -(0.004 + r() * 0.02) : 0.004 + r() * 0.012;
-    p = Math.max(0.01, p * (1 + ret));
-  }
-  return p;
+  const dt = Math.min(Math.max(dtSec, 0), 60);
+  const r = rng(0x51a7e ^ (((clock / 1000) | 0) * 2654435761));
+  const mu = 0.18 / 3600;
+  const sig = 0.12 / Math.sqrt(3600);
+  let ret = mu * dt + sig * Math.sqrt(dt) * (r() * 2 - 1);
+  if (r() < 0.012) ret -= 0.002;
+  return clamp(px * Math.exp(ret), WPIT_PX_MIN, WPIT_PX_MAX);
 }
 
 export function tick(s: EngineState, dtSec: number): EngineState {
@@ -222,17 +233,13 @@ export function applyLive(
     ethAsk?: number;
   },
 ): EngineState {
+  if (!(feed.eth > 0) || !Number.isFinite(feed.eth)) return s;
   const rv = ewmaRv(feed.candles);
-  const pools = { ...s.pools };
-  const ethPool = pools["ETH-USDC"];
-  if (ethPool) {
-    pools["ETH-USDC"] = { ...ethPool, quoteReserve: ethPool.baseReserve * feed.eth };
-  }
   const next: EngineState = {
     ...s,
     eth: feed.eth,
-    ethBid: feed.ethBid ?? feed.eth,
-    ethAsk: feed.ethAsk ?? feed.eth,
+    ethBid: feed.ethBid && feed.ethBid > 0 ? feed.ethBid : feed.eth,
+    ethAsk: feed.ethAsk && feed.ethAsk > 0 ? feed.ethAsk : feed.eth,
     btc: feed.btc ?? s.btc,
     candles: feed.candles,
     realizedVol: clamp(rv, 0.15, 2),
@@ -240,7 +247,6 @@ export function applyLive(
     clock: feed.at,
     liveAt: feed.at,
     liveSource: feed.source,
-    pools,
     account: {
       ...s.account,
       startEquity: s.liveAt === 0 ? START_USDC + START_ETH * feed.eth : s.account.startEquity,
@@ -430,12 +436,14 @@ export function farmShare(s: EngineState, id: PoolId) {
 }
 
 export function farmApy(s: EngineState, id: PoolId) {
-  const tvl = poolTvl(s, id);
-  if (tvl < 1) return 0;
-  const u = 0.3 + 0.7 * utilEth(s);
-  const usdYear = WPIT_EMIT_PER_SEC * 0.9 * u * 365.25 * 86400 * Math.max(s.wpit, 0.01);
-  const volAdj = 1 + Math.min(0.5, s.realizedVol);
-  return (usdYear * farmShare(s, id) * volAdj) / tvl;
+  const tvl = Math.max(poolTvl(s, id), APY_TVL_FLOOR);
+  const u = 0.3 + 0.7 * clamp(utilEth(s), 0, 1);
+  const emitPx = clamp(s.wpit, 0.01, EMIT_PX_CAP);
+  const usdYear = WPIT_EMIT_PER_SEC * 0.9 * u * 365.25 * 86400 * emitPx;
+  const volAdj = 1 + Math.min(0.4, s.realizedVol);
+  const raw = (usdYear * farmShare(s, id) * volAdj) / tvl;
+  if (!Number.isFinite(raw) || raw < 0) return 0;
+  return Math.min(raw, MAX_FARM_APY);
 }
 
 export function tokenPx(s: EngineState, sym: string) {
@@ -543,24 +551,47 @@ export function arbToSpot(s: EngineState): EngineState {
   };
   const pools = { ...s.pools, "ETH-USDC": { ...pool0, baseReserve: x, quoteReserve: y } };
   if (vault.eth < 0 || vault.usdc < 0) {
-    return { ...s, pools };
+    return {
+      ...s,
+      pools: { ...s.pools, "ETH-USDC": { ...pool0, quoteReserve: pool0.baseReserve * spot } },
+    };
   }
   return { ...s, vault, pools };
 }
 
 export function quoteInForBaseOut(pool: EngineState["pools"][string], baseOut: number) {
-  if (!pool || baseOut <= 0 || baseOut >= pool.baseReserve * 0.99) return Number.POSITIVE_INFINITY;
+  if (!pool || !(baseOut > 0) || !Number.isFinite(baseOut)) return Number.POSITIVE_INFINITY;
+  if (baseOut >= pool.baseReserve * MAX_POOL_FRAC) return Number.POSITIVE_INFINITY;
+  if (!(pool.baseReserve > 0) || !(pool.quoteReserve > 0)) return Number.POSITIVE_INFINITY;
   const fee = 1 - pool.feeBps / 10_000;
-  return (pool.quoteReserve * baseOut) / (fee * (pool.baseReserve - baseOut));
+  const need = (pool.quoteReserve * baseOut) / (fee * (pool.baseReserve - baseOut));
+  if (!Number.isFinite(need) || need <= 0) return Number.POSITIVE_INFINITY;
+  return need;
+}
+
+export function maxSpotQty(s: EngineState, poolId: PoolId, side: "buy" | "sell") {
+  const pool = s.pools[poolId];
+  if (!pool) return 0;
+  const cap = pool.baseReserve * MAX_POOL_FRAC;
+  if (side === "sell") return Math.max(0, Math.min(tokenBal(s.account, pool.base), cap));
+  const cash = tokenBal(s.account, pool.quote);
+  const px = pool.baseReserve > 0 ? pool.quoteReserve / pool.baseReserve : 0;
+  if (!(px > 0) || !(cash > 0)) return 0;
+  return Math.max(0, Math.min(cap, (cash / px) * 0.98));
 }
 
 export function placeDeskOrder(
   s: EngineState,
   o: Omit<WorkingOrder, "id" | "created">,
 ): EngineState | string {
-  if (o.qty <= 0) return "Quantity must be positive.";
-  if ((o.kind === "lmt" || o.kind === "stl") && !(o.limit && o.limit > 0)) return "Limit price required.";
-  if ((o.kind === "stp" || o.kind === "stl") && !(o.stop && o.stop > 0)) return "Stop price required.";
+  const bad = requireFinitePositive(o.qty, "Quantity");
+  if (bad) return bad;
+  if ((o.kind === "lmt" || o.kind === "stl") && !(o.limit && o.limit > 0 && Number.isFinite(o.limit))) {
+    return "Limit price required.";
+  }
+  if ((o.kind === "stp" || o.kind === "stl") && !(o.stop && o.stop > 0 && Number.isFinite(o.stop))) {
+    return "Stop price required.";
+  }
   const order: WorkingOrder = { ...o, id: uid("ord"), created: s.clock };
   if (order.kind === "mkt" || order.tif === "ioc") {
     const filled = tryFill(s, order);
@@ -695,14 +726,23 @@ export function buyingPower(s: EngineState) {
   return Math.max(0, s.account.usdc);
 }
 
-export function maxMiniContracts(s: EngineState, side: FutSide) {
-  const im = MINI_ETH * s.eth * FUT_IM;
-  const fee = MINI_ETH * s.eth * DERIV_FEE;
-  const byCash = Math.floor(buyingPower(s) / Math.max(im + fee, 1e-9));
+export function maxMiniContracts(s: EngineState, side: FutSide, under = "ETH") {
+  const mark = markOf(s, under);
+  const unit = miniQty(under);
+  if (!(mark > 0) || !(unit > 0)) return 0;
+  const im = unit * mark * FUT_IM;
+  const fee = unit * mark * DERIV_FEE;
+  const cost = im + fee;
+  if (!(cost > 0) || !Number.isFinite(cost)) return 0;
+  const byCash = Math.floor(buyingPower(s) / cost);
+  if (under !== "ETH") {
+    const byVault = Math.floor(freeUsdc(s) / Math.max(unit * mark, MIN_IM_USD));
+    return Math.max(0, Math.min(byCash, byVault, MAX_LOT));
+  }
   const cap = side === "long" ? maxNetLongEth(s) : maxNetShortEth(s);
-  const byInv = Math.floor(cap / MINI_ETH);
-  const byFill = Math.floor(maxFillEth(s, side) / MINI_ETH);
-  return Math.max(0, Math.min(byCash, byInv, byFill));
+  const byInv = Math.floor(cap / unit);
+  const byFill = Math.floor(maxFillEth(s, side) / unit);
+  return Math.max(0, Math.min(byCash, byInv, byFill, MAX_LOT));
 }
 
 function takeFee(s: EngineState, fee: number): EngineState {
@@ -750,45 +790,26 @@ function pushFill(s: EngineState, fill: EngineState["fills"][number]): EngineSta
   return { ...s, fills: [fill, ...s.fills].slice(0, 80) };
 }
 
-export function tradeSpot(s: EngineState, poolId: PoolId, side: "buy" | "sell", quoteAmt: number): EngineState | string {
-  if (quoteAmt <= 0) return "Size must be positive.";
-  const pool = { ...s.pools[poolId] };
-  const acc = { ...s.account };
+export function tradeSpot(s: EngineState, poolId: PoolId, side: "buy" | "sell", amt: number): EngineState | string {
+  const money = requireMoney(amt, "Size");
+  if (money) return money;
+  if (amt <= 0) return "Size must be positive.";
+  const pool0 = s.pools[poolId];
+  if (!pool0) return "Unknown pool.";
+  if (!(pool0.baseReserve > 0) || !(pool0.quoteReserve > 0)) return "Empty pool.";
+  const pool = { ...pool0 };
   if (side === "buy") {
-    if (acc.usdc < quoteAmt && poolId !== "WPIT-ETH-TEST") return "Insufficient USDC.";
-    if (poolId === "WPIT-ETH-TEST") {
-      if (acc.eth * s.eth < quoteAmt) return "Insufficient ETH.";
-      const ethIn = quoteAmt / s.eth;
-      const out = ammOut(ethIn, pool.quoteReserve, pool.baseReserve, pool.feeBps);
-      acc.eth -= ethIn;
-      acc.wpit += out;
-      pool.quoteReserve += ethIn;
-      pool.baseReserve -= out;
-      const next = {
-        ...s,
-        account: acc,
-        pools: { ...s.pools, [poolId]: pool },
-        wpit: pool.quoteReserve > 0 ? (pool.quoteReserve * s.eth) / pool.baseReserve : s.wpit,
-      };
-      return pushFill(next, {
-        id: uid("f"),
-        t: s.clock,
-        product: "spot",
-        symbol: poolId,
-        side: "buy",
-        size: out,
-        price: quoteAmt / Math.max(out, 1e-9),
-        fee: quoteAmt * (pool.feeBps / 10_000),
-      });
-    }
-    const out = ammOut(quoteAmt, pool.quoteReserve, pool.baseReserve, pool.feeBps);
-    acc.usdc -= quoteAmt;
-    if (poolId === "ETH-USDC") acc.eth += out;
-    else acc.wpit += out;
-    pool.quoteReserve += quoteAmt;
+    const quoteIn = amt;
+    if (tokenBal(s.account, pool.quote) + 1e-12 < quoteIn) return `Insufficient ${pool.quote}.`;
+    const out = ammOut(quoteIn, pool.quoteReserve, pool.baseReserve, pool.feeBps);
+    if (!(out > 0)) return "Size too small for the book.";
+    if (out > pool.baseReserve * MAX_POOL_FRAC) return "Size exceeds 25% of pool reserves.";
+    pool.quoteReserve += quoteIn;
     pool.baseReserve -= out;
-    const next = { ...s, account: acc, pools: { ...s.pools, [poolId]: pool } };
-    if (poolId === "WPIT-USDC-TEST") next.wpit = pool.quoteReserve / pool.baseReserve;
+    if (pool.baseReserve <= 0 || pool.quoteReserve <= 0) return "Trade would drain the pool.";
+    let acc = creditToken(s.account, pool.quote, -quoteIn);
+    acc = creditToken(acc, pool.base, out);
+    const next = syncPoolMark({ ...s, account: acc, pools: { ...s.pools, [poolId]: pool } }, poolId);
     return pushFill(next, {
       id: uid("f"),
       t: s.clock,
@@ -796,143 +817,130 @@ export function tradeSpot(s: EngineState, poolId: PoolId, side: "buy" | "sell", 
       symbol: poolId,
       side: "buy",
       size: out,
-      price: quoteAmt / Math.max(out, 1e-9),
-      fee: quoteAmt * (pool.feeBps / 10_000),
+      price: quoteIn / out,
+      fee: quoteIn * (pool.feeBps / 10_000),
     });
   }
-  if (poolId === "ETH-USDC") {
-    if (acc.eth < quoteAmt) return "Insufficient ETH.";
-    const out = ammOut(quoteAmt, pool.baseReserve, pool.quoteReserve, pool.feeBps);
-    acc.eth -= quoteAmt;
-    acc.usdc += out;
-    pool.baseReserve += quoteAmt;
-    pool.quoteReserve -= out;
-    const next = { ...s, account: acc, pools: { ...s.pools, [poolId]: pool } };
-    return pushFill(next, {
-      id: uid("f"),
-      t: s.clock,
-      product: "spot",
-      symbol: poolId,
-      side: "sell",
-      size: quoteAmt,
-      price: out / quoteAmt,
-      fee: out * (pool.feeBps / 10_000),
-    });
-  }
-  if (acc.wpit < quoteAmt) return "Insufficient WPIT.";
-  const out = ammOut(quoteAmt, pool.baseReserve, pool.quoteReserve, pool.feeBps);
-  acc.wpit -= quoteAmt;
-  if (poolId === "WPIT-ETH-TEST") acc.eth += out;
-  else acc.usdc += out;
-  pool.baseReserve += quoteAmt;
+  const baseIn = amt;
+  if (tokenBal(s.account, pool.base) + 1e-12 < baseIn) return `Insufficient ${pool.base}.`;
+  if (baseIn > pool.baseReserve * MAX_POOL_FRAC) return "Size exceeds 25% of pool reserves.";
+  const out = ammOut(baseIn, pool.baseReserve, pool.quoteReserve, pool.feeBps);
+  if (!(out > 0)) return "Size too small for the book.";
+  pool.baseReserve += baseIn;
   pool.quoteReserve -= out;
-  const next = { ...s, account: acc, pools: { ...s.pools, [poolId]: pool }, wpit: poolId === "WPIT-USDC-TEST" ? pool.quoteReserve / pool.baseReserve : s.wpit };
+  if (pool.baseReserve <= 0 || pool.quoteReserve <= 0) return "Trade would drain the pool.";
+  let acc = creditToken(s.account, pool.base, -baseIn);
+  acc = creditToken(acc, pool.quote, out);
+  const next = syncPoolMark({ ...s, account: acc, pools: { ...s.pools, [poolId]: pool } }, poolId);
   return pushFill(next, {
     id: uid("f"),
     t: s.clock,
     product: "spot",
     symbol: poolId,
     side: "sell",
-    size: quoteAmt,
-    price: out / Math.max(quoteAmt, 1e-9),
+    size: baseIn,
+    price: out / baseIn,
     fee: out * (pool.feeBps / 10_000),
   });
 }
 
-export function tradeFuture(s: EngineState, side: FutSide, contracts: number, expiry: number, under = "ETH"): EngineState | string {
-  const sizeEth = contracts * miniQty(under);
-  if (under !== "ETH") {
-    const mark = markOf(s, under);
-    const bps = spreadBps(s);
-    const px = side === "long" ? mark * (1 + bps / 10_000) : mark * (1 - bps / 10_000);
-    const notional = sizeEth * px;
-    const margin = notional * FUT_IM;
-    const fee = notional * DERIV_FEE;
-    if (s.account.usdc < margin + fee) return "Insufficient USDC for initial margin + fee.";
-    const vault = { ...s.vault, reservedUsdc: s.vault.reservedUsdc + notional };
-    const pos = { id: uid("fut"), side, sizeEth, entry: px, expiry, margin, openedAt: s.clock, under };
-    const next: EngineState = {
-      ...s,
-      account: { ...s.account, usdc: s.account.usdc - margin - fee, realized: s.account.realized - fee },
-      vault,
-      futures: [...s.futures, pos],
-    };
-    return takeFee(
-      pushFill(next, {
-        id: uid("f"),
-        t: s.clock,
-        product: "future",
-        symbol: `${under} mini ${fmtExpiry(expiry)}`,
-        side,
-        size: sizeEth,
-        price: px,
-        fee,
-        note: "cash-settled · USDC IM",
-      }),
-      fee,
-    );
+function syncPoolMark(s: EngineState, poolId: PoolId): EngineState {
+  const pool = s.pools[poolId];
+  if (!pool || !(pool.baseReserve > 0)) return s;
+  if (pool.base === "WPIT" && pool.quote === "USDC") {
+    return { ...s, wpit: pool.quoteReserve / pool.baseReserve };
   }
-  const why = rejectFuture(s, side, sizeEth, expiry);
+  if (pool.base === "WPIT" && pool.quote === "ETH") {
+    return { ...s, wpit: (pool.quoteReserve / pool.baseReserve) * s.eth };
+  }
+  return s;
+}
+
+function rejectAnyFuture(s: EngineState, side: FutSide, size: number, expiry: number, under: string): string | null {
+  const bad = requireFinitePositive(size, "Size");
+  if (bad) return bad;
+  const mark = markOf(s, under);
+  if (!(mark > 0) || !Number.isFinite(mark)) return `No mark for ${under}.`;
+  const notional = size * mark;
+  if (!Number.isFinite(notional) || notional > MAX_NOTIONAL_USD) return "Notional exceeds house cap.";
+  const im = notional * FUT_IM;
+  const fee = notional * DERIV_FEE;
+  if (!(im >= MIN_IM_USD)) return "Margin too small.";
+  if (s.account.usdc + 1e-9 < im + fee) return "Not enough buying power for initial margin + fee.";
+  if (under === "ETH") return rejectFuture(s, side, size, expiry);
+  if (notional > freeUsdc(s) + 1e-9) return "Vault cannot cash-secure that notional.";
+  return null;
+}
+
+export function tradeFuture(s: EngineState, side: FutSide, contracts: number, expiry: number, under = "ETH"): EngineState | string {
+  const lot = requireFinitePositive(contracts, "Contracts");
+  if (lot) return lot;
+  const size = contracts * miniQty(under);
+  const why = rejectAnyFuture(s, side, size, expiry, under);
   if (why) return why;
+  const mark = markOf(s, under);
   const bps = spreadBps(s);
-  const mid = reservationPx(s);
+  const mid = under === "ETH" ? reservationPx(s) : mark;
   const px = side === "long" ? mid * (1 + bps / 10_000) : mid * (1 - bps / 10_000);
-  const notional = sizeEth * px;
+  const notional = size * px;
   const margin = notional * FUT_IM;
   const fee = notional * DERIV_FEE;
-  if (s.account.usdc < margin + fee) return "Insufficient USDC for initial margin + fee.";
+  if (s.account.usdc + 1e-9 < margin + fee) return "Not enough buying power for initial margin + fee.";
   const vault = { ...s.vault };
-  if (side === "long") {
-    vault.reservedEth += sizeEth;
+  if (under === "ETH") {
+    if (side === "long") {
+      vault.reservedEth += size;
+    } else {
+      if (vault.eth < size) return "Vault has no ETH to short against.";
+      vault.reservedUsdc += notional;
+      vault.eth -= size;
+      vault.usdc += size * px;
+    }
   } else {
     vault.reservedUsdc += notional;
-    vault.eth -= sizeEth;
-    vault.usdc += sizeEth * px;
   }
-  const pos = {
-    id: uid("fut"),
-    side,
-    sizeEth,
-    entry: px,
-    expiry,
-    margin,
-    openedAt: s.clock,
-  };
+  const pos = { id: uid("fut"), side, sizeEth: size, entry: px, expiry, margin, openedAt: s.clock, under };
   const next: EngineState = {
     ...s,
     account: { ...s.account, usdc: s.account.usdc - margin - fee, realized: s.account.realized - fee },
     vault,
     futures: [...s.futures, pos],
   };
-  return hedgeDelta(
-    takeFee(
-      pushFill(next, {
-        id: uid("f"),
-        t: s.clock,
-        product: "future",
-        symbol: `ETH mini ${new Date(expiry).toISOString().slice(0, 16).replace("T", " ")} UTC`,
-        side,
-        size: sizeEth,
-        price: px,
-        fee,
-        note: "covered · delta-hedged",
-      }),
+  const filled = takeFee(
+    pushFill(next, {
+      id: uid("f"),
+      t: s.clock,
+      product: "future",
+      symbol: `${under} mini ${fmtExpiry(expiry)}`,
+      side,
+      size,
+      price: px,
       fee,
-    ),
+      note: under === "ETH" ? "covered · delta-hedged" : "cash-settled · USDC IM",
+    }),
+    fee,
   );
+  return under === "ETH" ? hedgeDelta(filled) : filled;
 }
 
 export function closeFuture(s: EngineState, id: string): EngineState | string {
   const pos = s.futures.find((p) => p.id === id);
   if (!pos) return "Position not found.";
-  const pnl = futPnl(pos, s.eth);
+  const under = pos.under ?? "ETH";
+  const mark = markOf(s, under);
+  if (!(mark > 0) || !Number.isFinite(mark)) return `No mark for ${under}.`;
+  const pnl = futPnl(pos, mark);
   const vault = { ...s.vault };
-  if (pos.side === "long") {
-    vault.reservedEth = Math.max(0, vault.reservedEth - pos.sizeEth);
+  if (under === "ETH") {
+    if (pos.side === "long") {
+      vault.reservedEth = Math.max(0, vault.reservedEth - pos.sizeEth);
+    } else {
+      vault.reservedUsdc = Math.max(0, vault.reservedUsdc - pos.entry * pos.sizeEth);
+      vault.eth += pos.sizeEth;
+      vault.usdc -= pos.sizeEth * mark;
+    }
   } else {
     vault.reservedUsdc = Math.max(0, vault.reservedUsdc - pos.entry * pos.sizeEth);
-    vault.eth += pos.sizeEth;
-    vault.usdc -= pos.sizeEth * s.eth;
   }
   const next: EngineState = {
     ...s,
@@ -944,23 +952,27 @@ export function closeFuture(s: EngineState, id: string): EngineState | string {
     vault,
     futures: s.futures.filter((p) => p.id !== id),
   };
-  return hedgeDelta(
-    pushFill(next, {
-      id: uid("f"),
-      t: s.clock,
-      product: "future",
-      symbol: "ETH mini close",
-      side: pos.side === "long" ? "sell" : "buy",
-      size: pos.sizeEth,
-      price: s.eth,
-      fee: 0,
-      note: `PnL ${pnl.toFixed(2)}`,
-    }),
-  );
+  const filled = pushFill(next, {
+    id: uid("f"),
+    t: s.clock,
+    product: "future",
+    symbol: `${under} mini close`,
+    side: pos.side === "long" ? "sell" : "buy",
+    size: pos.sizeEth,
+    price: mark,
+    fee: 0,
+    note: `PnL ${pnl.toFixed(2)}`,
+  });
+  return under === "ETH" ? hedgeDelta(filled) : filled;
 }
 
 export function buyOption(s: EngineState, type: OptType, strike: number, expiry: number, contracts: number, under = "ETH"): EngineState | string {
+  const lot = requireFinitePositive(contracts, "Contracts");
+  if (lot) return lot;
+  if (!(strike > 0) || !Number.isFinite(strike)) return "Strike must be a finite positive number.";
   const sizeEth = contracts * miniQty(under);
+  const mark = markOf(s, under);
+  if (!(mark > 0)) return `No mark for ${under}.`;
   if (under !== "ETH") {
     const T = yearsTo(expiry, s.clock);
     if (T <= 0) return "That expiry is done.";
@@ -1133,6 +1145,8 @@ export function poolMark(s: EngineState, pool: EngineState["pools"][string]) {
 }
 
 export function addLiquidity(s: EngineState, poolId: PoolId, quoteAmt: number): EngineState | string {
+  const money = requireMoney(quoteAmt, "Size");
+  if (money) return money;
   if (quoteAmt <= 0) return "Size must be positive.";
   const pool = s.pools[poolId];
   if (!pool) return "Unknown pool.";

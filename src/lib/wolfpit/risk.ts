@@ -100,20 +100,23 @@ export function smileVol(s: EngineState, type: OptType, strike: number, T: numbe
 }
 
 export function rejectFuture(s: EngineState, side: FutSide, sizeEth: number, expiry: number): string | null {
-  if (sizeEth <= 0) return "Size must be positive.";
+  if (!Number.isFinite(sizeEth) || sizeEth <= 0) return "Size must be a finite positive number.";
+  if (sizeEth > 1_000_000) return "Size exceeds max lot.";
   if (side === "short" && circuitActive(s)) return "Circuit: new shorts halted.";
+  if (!(s.eth > 0) || !Number.isFinite(s.eth)) return "No ETH mark.";
   const notional = sizeEth * s.eth;
+  if (!Number.isFinite(notional) || notional > 25_000_000) return "Notional exceeds house cap.";
   const im = notional * FUT_IM;
   const fee = notional * DERIV_FEE;
   if (s.account.usdc + 1e-9 < im + fee) return "Not enough buying power for initial margin + fee.";
   const cap = remainingCap(s, side);
-  if (sizeEth > cap + 1e-9) return `Inventory cap. Max ${cap.toFixed(2)} ETH net this side.`;
+  if (sizeEth > cap + 1e-9) return `Inventory cap. Max ${cap.toFixed(4)} ETH net this side.`;
   if (oiExpiry(s, expiry) + sizeEth > s.vault.eth * OI_EXPIRY + 1e-9) {
     return "OI cap on this expiry (25% of vault ETH).";
   }
   const fillMax = cap * FILL_BAND;
   if (cap > 0 && sizeEth > fillMax + 1e-9) {
-    return `Single fill > 10% of remaining band (${fillMax.toFixed(2)} ETH).`;
+    return `Single fill > 10% of remaining band (${fillMax.toFixed(4)} ETH).`;
   }
   return null;
 }
@@ -127,7 +130,8 @@ export function rejectOption(
   bookGamma: number,
   bookVega: number,
 ): string | null {
-  if (sizeEth <= 0) return "Size must be positive.";
+  if (!Number.isFinite(sizeEth) || sizeEth <= 0) return "Size must be a finite positive number.";
+  if (sizeEth > 1_000_000) return "Size exceeds max lot.";
   if (haltShortGamma(s)) {
     if (circuitActive(s)) return "Circuit: new shorts halted.";
     return "Insurance / NAV < 1%. New short gamma halted.";

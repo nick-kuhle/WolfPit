@@ -7,12 +7,13 @@ import {
   futLiqPrice,
   markOf,
   maxMiniContracts,
+  maxSpotQty,
   miniQty,
   optionQuote,
   quoteInForBaseOut,
   strikeGrid,
 } from "@/lib/wolfpit/engine";
-import { rejectFuture } from "@/lib/wolfpit/risk";
+import { MAX_LOT } from "@/lib/wolfpit/limits";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { DeskSide, OrderKind, OptType, PoolId, Product, Tif } from "@/lib/wolfpit/types";
 import { FUT_IM, FUT_MM } from "@/lib/wolfpit/types";
@@ -81,7 +82,8 @@ export function OrderTicket({
   const exp = exps[exi]!;
   const grid = useMemo(() => strikeGrid(spot), [spot]);
   const k = strike || grid[Math.floor(grid.length / 2)] || spot;
-  const n = Math.max(0, Math.min(Number(qty) || 0, 500));
+  const rawN = Number(qty);
+  const n = Number.isFinite(rawN) && rawN > 0 ? rawN : 0;
   const products: Product[] = geo ? ["spot"] : ["spot", "future", "option"];
   const futSide = side === "buy" ? "long" : "short";
   const size = n * miniQty(under);
@@ -98,9 +100,14 @@ export function OrderTicket({
     under,
   });
   const bp = buyingPower(s);
-  const maxN = under === "ETH" ? maxMiniContracts(s, futSide) : Math.floor(bp / Math.max(miniQty(under) * spot * FUT_IM, 1e-9));
+  const maxSpot = maxSpotQty(s, poolId, side);
+  const maxMini = maxMiniContracts(s, futSide, under);
+  const optDebitEach = product === "option" ? (optionQuote(s, optType, k, exp.at, under).ask || 0) * miniQty(under) : 0;
+  const maxOpt = optDebitEach > 0 ? Math.floor(bp / (optDebitEach * (1 + 0.0005))) : 0;
+  const maxN =
+    product === "spot" ? maxSpot : product === "future" ? maxMini : Math.max(0, Math.min(maxOpt, MAX_LOT));
   const q = product === "option" ? optionQuote(s, optType, k, exp.at, under) : null;
-  const futWhy = product === "future" && under === "ETH" ? rejectFuture(s, futSide, size, exp.at) : null;
+  const futWhy = product === "future" ? (n > 0 ? null : "Size must be positive.") : null;
 
   const est = (() => {
     if (product === "spot") {
@@ -108,29 +115,38 @@ export function OrderTicket({
       if (!pool) return { label: "—", usd: 0 };
       if (side === "buy") {
         const quote = quoteInForBaseOut(pool, n);
-        return { label: `Debit ${fmtUsd(quote)}`, usd: quote };
+        if (!Number.isFinite(quote)) return { label: "Too large for the pool", usd: Number.POSITIVE_INFINITY };
+        return { label: `Debit ${fmtUsd(quote)} ${pool.quote}`, usd: quote };
       }
       const out = n * (pool.quoteReserve / pool.baseReserve) * (1 - pool.feeBps / 10_000);
-      return { label: `Credit ${fmtUsd(out)}`, usd: -out };
+      return { label: `Credit ~${fmtUsd(out)} ${pool.quote}`, usd: 0 };
     }
-    if (product === "future") return { label: `IM ${fmtUsd(im)} · ${((1 / FUT_IM)).toFixed(1)}×`, usd: im };
+    if (product === "future") {
+      return { label: `IM ${fmtUsd(im)} · debit ${fmtUsd(im + size * spot * 0.0005)} · ${(1 / FUT_IM).toFixed(1)}×`, usd: im + size * spot * 0.0005 };
+    }
     const debit = (q?.ask ?? 0) * n * miniQty(under);
     return { label: `Debit ${fmtUsd(debit)}`, usd: debit };
   })();
 
+  const overSize = n > 0 && n > maxN + 1e-12;
+  const overCash = est.usd > 0 && Number.isFinite(est.usd) && est.usd > bp + 1e-6;
   const blocked =
     paused ||
     n <= 0 ||
-    (product === "future" && !!futWhy) ||
+    !Number.isFinite(n) ||
+    overSize ||
+    overCash ||
     (product === "option" && (!!q?.blank || side === "sell"));
 
   function fire() {
+    if (blocked) return;
+    const qtySend = product === "spot" ? n : Math.min(n, maxN);
     send({
       product,
       side,
       kind,
       tif,
-      qty: n,
+      qty: qtySend,
       limit: limit ? Number(limit) : undefined,
       stop: stop ? Number(stop) : undefined,
       poolId,
@@ -263,7 +279,13 @@ export function OrderTicket({
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <div className="text-[10px] uppercase tracking-wider text-subtle">{product === "spot" ? "Qty" : "Contracts"}</div>
-              <Stepper value={qty} onChange={setQty} step={product === "spot" ? 0.1 : 1} presets={product === "spot" ? [0.1, 0.5, 1, 5] : [1, 2, 5, 10]} dp={product === "spot" ? 2 : 0} />
+              <Stepper
+                value={qty}
+                onChange={setQty}
+                step={product === "spot" ? 0.1 : 1}
+                presets={product === "spot" ? [0.1, 0.5, 1, Math.max(0.1, Math.min(5, maxN))] : [1, 2, 5, 10].filter((p) => p <= Math.max(1, maxN))}
+                dp={product === "spot" ? 4 : 0}
+              />
             </div>
             <Button className="h-11 px-5" variant={side === "buy" ? "up" : "down"} disabled={blocked} onClick={fire}>
               {side === "buy" ? "Buy" : "Sell"}
@@ -271,8 +293,11 @@ export function OrderTicket({
           </div>
           <p className="mt-1 font-mono text-[10px] text-muted">
             {est.label}
-            {product === "future" ? ` · IM ${fmtUsd(im)} · liq ${fmtPx(liq)} · max ${maxN}` : null}
+            {product === "future" ? ` · liq ${fmtPx(liq)} · MM ${fmtUsd(mm)}` : ""}
+            {` · max ${product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} · cash ${fmtUsd(bp)}`}
           </p>
+          {overSize ? <p className="text-[10px] text-down">Size exceeds max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} given cash, inventory, and pool depth.</p> : null}
+          {overCash ? <p className="text-[10px] text-down">Not enough cash for this size. Debit {fmtUsd(est.usd)} vs {fmtUsd(bp)} free.</p> : null}
           {product === "option" && side === "sell" ? <p className="text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p> : null}
           {q?.blank ? <p className="text-[10px] text-down">{q.blank}</p> : null}
           {err ? <p className="text-[10px] text-down">{err}</p> : null}

@@ -90,8 +90,14 @@ export function monthEnd(from: number) {
 }
 
 export function ammOut(dx: number, x: number, y: number, feeBps: number) {
+  if (!(dx > 0) || !(x > 0) || !(y > 0) || !Number.isFinite(dx) || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return 0;
+  }
   const dxNet = dx * (1 - feeBps / 10_000);
-  return (dxNet * y) / (x + dxNet);
+  if (!(dxNet > 0)) return 0;
+  const out = (dxNet * y) / (x + dxNet);
+  if (!Number.isFinite(out) || out <= 0) return 0;
+  return Math.min(out, y * 0.99);
 }
 
 export function uid(prefix: string) {
