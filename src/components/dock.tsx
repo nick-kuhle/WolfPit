@@ -26,7 +26,7 @@ export function PitDock() {
   return (
     <>
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-[#0d0d0d] pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-[#0d0d0d] pb-[env(safe-area-inset-bottom)] lg:hidden"
         aria-label="Pit"
       >
         <div className="grid h-[3.35rem] grid-cols-5">
@@ -84,11 +84,14 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-40 lg:hidden">
-      <button type="button" className="absolute inset-0 bg-bg/70" aria-label="Close" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-auto rounded-t-[1.1rem] border-t border-border bg-[#121212] pb-[calc(3.6rem+env(safe-area-inset-bottom))] shadow-2xl">
-        <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-border-strong" />
-        <div className="flex items-center gap-3 px-4 py-4">
+    <div className="fixed inset-x-0 top-0 z-40 lg:hidden" style={{ bottom: "calc(3.4rem + env(safe-area-inset-bottom))" }}>
+      <button type="button" className="absolute inset-0 bg-bg/75" aria-label="Fold menu down" onClick={onClose} />
+      <div className="absolute inset-x-0 bottom-0 max-h-[min(82dvh,36rem)] overflow-auto rounded-t-[1.1rem] border-t border-border bg-[#121212] shadow-2xl">
+        <button type="button" onClick={onClose} className="flex w-full flex-col items-center pb-1 pt-2" aria-label="Done">
+          <span className="h-1 w-10 rounded-full bg-border-strong" />
+          <span className="mt-1 font-mono text-[11px] uppercase tracking-wider text-brass">Done · fold down</span>
+        </button>
+        <div className="flex items-center gap-3 px-4 py-3">
           <div className="grid size-12 place-items-center rounded-full bg-brass font-display text-lg text-bg">N</div>
           <div className="min-w-0 flex-1">
             <div className="font-medium">You · paper</div>
@@ -133,6 +136,11 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
           <Row icon="↺" label="Reset paper" hint="1,000 ETH · 100,000 USDC" onClick={() => { reset(); onClose(); }} />
           <Row icon="§" label="Terms" hint="Clickwrap" onClick={() => go("/terms")} />
           <Row icon="⚙" label="Pit ops" hint="Admin" onClick={() => go("/admin")} />
+        </div>
+        <div className="sticky bottom-0 border-t border-border bg-[#121212] px-3 py-3">
+          <button type="button" onClick={onClose} className="h-11 w-full rounded-full bg-brass font-medium text-bg">
+            Fold down
+          </button>
         </div>
       </div>
     </div>

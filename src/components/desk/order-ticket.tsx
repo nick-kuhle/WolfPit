@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
   buyingPower,
+  equity,
   expiries,
   futLiqPrice,
   imRate,
@@ -13,12 +15,13 @@ import {
   optionQuote,
   quoteInForBaseOut,
   strikeGrid,
+  usedMargin,
 } from "@/lib/wolfpit/engine";
 import { MAX_LOT } from "@/lib/wolfpit/limits";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { DeskSide, OrderKind, OptType, PoolId, Product, Tif } from "@/lib/wolfpit/types";
 import { useAdmin } from "@/lib/admin/config";
-import { cn, fmtPx, fmtUsd } from "@/lib/utils";
+import { cn, fmtPx, fmtQty, fmtUsd } from "@/lib/utils";
 
 const KINDS: OrderKind[] = ["mkt", "lmt", "stp"];
 const TIFS: Tif[] = ["day", "gtc", "ioc"];
@@ -108,6 +111,10 @@ export function OrderTicket({
   const maxN =
     product === "spot" ? maxSpot : product === "future" ? maxMini : Math.max(0, Math.min(maxOpt, MAX_LOT));
   const q = product === "option" ? optionQuote(s, optType, k, exp.at, under) : null;
+  const used = usedMargin(s);
+  const navEq = equity(s);
+  const fillPx =
+    kind === "lmt" && Number(limit) > 0 ? Number(limit) : product === "option" ? (q?.ask ?? 0) : spot;
 
   const est = (() => {
     if (product === "spot") {
@@ -131,6 +138,11 @@ export function OrderTicket({
     const debit = (q?.ask ?? 0) * n * miniQty(under);
     return { label: `Debit ${fmtUsd(debit)}`, usd: debit };
   })();
+  const usedAfter = used + (product === "future" ? im : 0);
+  const cashAfter = Math.max(
+    0,
+    bp - (est.usd > 0 && Number.isFinite(est.usd) ? est.usd : 0) + (side === "sell" && product === "spot" ? Math.abs(est.usd) : 0),
+  );
 
   const overSize = n > 0 && n > maxN + 1e-12;
   const overCash = est.usd > 0 && Number.isFinite(est.usd) && est.usd > bp + 1e-6;
@@ -143,7 +155,7 @@ export function OrderTicket({
     (product === "option" && (!!q?.blank || side === "sell"));
 
   function fire() {
-    if (blocked) return;
+    if (blocked || !review) return;
     const qtySend = product === "spot" ? n : Math.min(n, maxN);
     send({
       product,
@@ -380,39 +392,67 @@ export function OrderTicket({
         </div>
       ) : null}
 
-      {review ? (
-        <div className="absolute inset-0 z-20 flex flex-col bg-bg/95 p-4 backdrop-blur-sm">
-          <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-brass">Simulated trade confirmation</p>
-          <h3 className="mt-2 font-display text-2xl">
-            {side.toUpperCase()} {n} {product === "option" ? `${optType.toUpperCase()} ${fmtPx(k)}` : product === "future" ? `${under} mini` : under}
-          </h3>
-          <p className="mt-1 font-mono text-sm text-muted">
-            {kind.toUpperCase()} · {tif.toUpperCase()}
-            {product !== "spot" ? ` · ${exp.when}` : ` · ${poolId}`}
-          </p>
-          <dl className="mt-4 space-y-1 font-mono text-[12px]">
-            <Row k="Cost of trade" v={fmtUsd(est.usd)} />
-            {product === "future" ? (
-              <>
-                <Row k="Initial margin" v={`${fmtUsd(im)} (${(rate * 100).toFixed(0)}%)`} />
-                <Row k="Maintenance" v={fmtUsd(mm)} />
-                <Row k="Liquidation" v={fmtPx(liq)} />
-                <Row k="Covered by pit" v="yes · inventory + pool depth" />
-              </>
-            ) : null}
-            <Row k="Buying power after" v={fmtUsd(Math.max(0, bp - (est.usd || 0)))} />
-          </dl>
-          <p className="mt-auto pt-4 text-[11px] text-muted">Paper funds. Confirm to shout it into the pit.</p>
-          <div className="mt-3 flex gap-2">
-            <Button variant="outline" className="h-12 flex-1" onClick={() => setReview(false)}>
-              Edit
-            </Button>
-            <Button className="h-12 flex-1" variant={side === "buy" ? "up" : "down"} onClick={fire}>
-              Confirm
-            </Button>
-          </div>
-        </div>
-      ) : null}
+      {review && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[80] flex items-end justify-center bg-bg/80 p-3 pb-[calc(3.6rem+env(safe-area-inset-bottom))] sm:items-center">
+              <div className="sheet-in flex max-h-[min(88dvh,40rem)] w-full max-w-md flex-col overflow-hidden rounded-[1.1rem] border border-brass/40 bg-panel shadow-2xl">
+                <div className="shrink-0 border-b border-border px-4 py-3">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-brass">Confirm simulated trade</p>
+                  <h3 className="mt-1 font-display text-2xl leading-tight">
+                    {side.toUpperCase()} {fmtQty(n)}{" "}
+                    {product === "option"
+                      ? `${optType.toUpperCase()} ${under} ${fmtPx(k)}`
+                      : product === "future"
+                        ? `${under} mini`
+                        : under}
+                  </h3>
+                  <p className="mt-1 font-mono text-[11px] text-muted">
+                    {kind.toUpperCase()}
+                    {kind !== "mkt" ? ` ${fmtPx(fillPx)}` : ` · mark ${fmtPx(spot)}`} · {tif.toUpperCase()}
+                    {product !== "spot" ? ` · ${exp.when}` : ` · ${poolId}`}
+                  </p>
+                </div>
+                <dl className="min-h-0 flex-1 space-y-0 overflow-auto px-4 py-2 font-mono text-[12px]">
+                  <Row k="Price" v={kind === "mkt" ? `${fmtPx(spot)} mark` : fmtPx(fillPx)} />
+                  <Row k="Quantity" v={product === "spot" ? `${fmtQty(n)} ${under}` : `${fmtQty(n)} contract${n === 1 ? "" : "s"}`} />
+                  {product === "future" ? <Row k="Underlying" v={`${fmtQty(size)} ${under}`} /> : null}
+                  <Row k={side === "sell" && product === "spot" ? "Credit" : "Debit / cost"} v={Number.isFinite(est.usd) ? fmtUsd(est.usd) : "—"} />
+                  {product === "future" ? (
+                    <>
+                      <Row k="Initial margin" v={`${fmtUsd(im)}  (${(rate * 100).toFixed(0)}%)`} />
+                      <Row k="Maint. margin" v={fmtUsd(mm)} />
+                      <Row k="Liquidation" v={fmtPx(liq)} />
+                      <Row k="Margin now" v={fmtUsd(used)} />
+                      <Row k="Margin after" v={fmtUsd(usedAfter)} />
+                      <Row k="Margin impact" v={`+${fmtUsd(im)}`} />
+                    </>
+                  ) : null}
+                  {product === "option" ? (
+                    <>
+                      <Row k="Premium each" v={fmtPx(q?.ask ?? 0)} />
+                      <Row k="Strike / type" v={`${fmtPx(k)} ${optType}`} />
+                      <Row k="Expiry" v={exp.when} />
+                    </>
+                  ) : null}
+                  <Row k="Cash / available now" v={fmtUsd(bp)} />
+                  <Row k="Available after" v={fmtUsd(cashAfter)} />
+                  <Row k="Net liq now" v={fmtUsd(navEq)} />
+                  {product === "future" ? <Row k="Cover" v="Vault inventory + pool depth" /> : null}
+                </dl>
+                <p className="px-4 pb-2 text-[11px] text-muted">Paper funds. Nothing leaves the sim until you confirm.</p>
+                <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-border p-3">
+                  <Button variant="outline" className="h-12" onClick={() => setReview(false)}>
+                    Edit
+                  </Button>
+                  <Button className="h-12" variant={side === "buy" ? "up" : "down"} onClick={fire}>
+                    Confirm {side}
+                  </Button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -493,9 +533,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between gap-3">
+    <div className="flex justify-between gap-3 border-b border-border/60 py-1.5">
       <dt className="text-subtle">{k}</dt>
-      <dd className="text-fg">{v}</dd>
+      <dd className="text-right tabular-nums text-fg">{v}</dd>
     </div>
   );
 }
