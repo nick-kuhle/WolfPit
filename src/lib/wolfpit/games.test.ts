@@ -12,6 +12,7 @@ import {
   fracOdds,
   makeCard,
   placeBet,
+  placeTickets,
   settleGames,
   slotStart,
   verifyFair,
@@ -177,5 +178,49 @@ describe("pit racetrack", () => {
     assert.equal(q?.status, "won");
     assert.equal(show?.status, "won");
     assert.equal(ex?.status, "lost");
+  });
+
+  it("boxes a 3-horse quinella into three tickets and pays the hitting pair", () => {
+    const start = slotStart(2_500_000_000_000, "horse");
+    const now = start + 1_000;
+    let s0 = initialState();
+    s0.account.wpit = 5_000;
+    s0 = ensureRace(s0, "horse", now);
+    const card = cardFor("horse", now, s0.games);
+    const a = card.places[0]!;
+    const b = card.places[1]!;
+    const c = card.places[3]!;
+    const r = placeTickets(s0, "horse", [a, b, c], 100, now, "quinella");
+    assert.equal(typeof r, "object");
+    if (typeof r === "string") throw new Error(r);
+    assert.equal(r.account.wpit, 4_700);
+    assert.equal(r.games?.bets.filter((x) => x.status === "open").length, 3);
+    const done = settleGames(r, card.settleAt + 50);
+    const wins = done.games?.bets.filter((x) => x.market === "quinella" && x.status === "won") ?? [];
+    const lost = done.games?.bets.filter((x) => x.market === "quinella" && x.status === "lost") ?? [];
+    assert.equal(wins.length, 1);
+    assert.equal(lost.length, 2);
+    const hit = wins[0]!;
+    const top = new Set([a, b]);
+    assert.ok(top.has(hit.runner) && hit.runnerB && top.has(hit.runnerB));
+    assert.ok(done.account.wpit > 4_700);
+    assert.ok(Math.abs(done.account.wpit - (4_700 + hit.payout)) < 1e-6);
+  });
+
+  it("credits WPIT on a late settle after the next card has started", () => {
+    const start = slotStart(2_600_000_000_000, "horse");
+    const now = start + 1_000;
+    let s0 = initialState();
+    s0.account.wpit = 1_000;
+    s0 = ensureRace(s0, "horse", now);
+    const card = cardFor("horse", now, s0.games);
+    const r = placeBet(s0, "horse", card.winner, 100, now, "win");
+    assert.equal(typeof r, "object");
+    if (typeof r === "string") throw new Error(r);
+    const done = settleGames(r, card.settleAt + RACE_MS + 5_000);
+    const win = done.games?.bets.find((x) => x.id === r.games?.bets[0]?.id);
+    assert.equal(win?.status, "won");
+    assert.ok(done.account.wpit > 900);
+    assert.ok(Math.abs(done.account.wpit - (900 + (win?.payout ?? 0))) < 1e-6);
   });
 });

@@ -292,9 +292,53 @@ export const MARKET_HINT: Record<BetMarket, string> = {
   win: "1st only",
   place: "1st or 2nd",
   show: "1st, 2nd or 3rd",
-  quinella: "1st and 2nd, any order",
+  quinella: "1st and 2nd, any order — tap two, or box three",
   exacta: "1st and 2nd, in order",
 };
+
+export function quinellaCombos(picks: number[]): [number, number][] {
+  const u = [...new Set(picks.filter((n) => n >= 1))].sort((a, b) => a - b);
+  const out: [number, number][] = [];
+  for (let i = 0; i < u.length; i++) {
+    for (let j = i + 1; j < u.length; j++) out.push([u[i]!, u[j]!]);
+  }
+  return out;
+}
+
+export function placeTickets(
+  s: EngineState,
+  kind: RaceKind,
+  picks: number[],
+  stake: number,
+  now = Date.now(),
+  market: BetMarket = "win",
+): EngineState | string {
+  if (market === "quinella") {
+    const combos = quinellaCombos(picks);
+    if (combos.length === 0) return "Pick two runners for the quinella.";
+    let cur: EngineState | string = s;
+    for (const [a, b] of combos) {
+      cur = placeBet(cur as EngineState, kind, a, stake, now, "quinella", b);
+      if (typeof cur === "string") return cur;
+    }
+    return cur;
+  }
+  if (market === "exacta") {
+    const a = picks[0];
+    const b = picks[1];
+    if (!a || !b || a === b) return "Pick 1st and 2nd.";
+    return placeBet(s, kind, a, stake, now, "exacta", b);
+  }
+  const a = picks[0];
+  if (!a) return "Pick a runner.";
+  return placeBet(s, kind, a, stake, now, market);
+}
+
+export function cardForBet(b: GameBet, games: GamesState, now = Date.now()): RaceCard {
+  const start = Number(String(b.raceId).split("-")[1]);
+  const probe = Number.isFinite(start) ? start + POST_AT + RUN_MS / 2 : now;
+  return applyFair(makeCard(b.kind, probe), games.races?.[b.raceId]);
+}
 
 export function placeBet(
   s: EngineState,
@@ -387,9 +431,7 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
     if (b.status !== "open") return b;
     let card = cards.get(b.raceId);
     if (!card) {
-      const start = Number(b.raceId.split("-")[1]);
-      const probe = Number.isFinite(start) ? start + POST_AT + RUN_MS + 1 : now;
-      card = applyFair(makeCard(b.kind, probe), games.races?.[b.raceId]);
+      card = cardForBet(b, games, now);
       cards.set(b.raceId, card);
     }
     if (now < card.settleAt) return b;
@@ -401,7 +443,7 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
       const before = { usdc: s.account.usdc, eth: s.account.eth, wpit };
       fills.unshift({
         id: uid("f"),
-        t: s.clock,
+        t: now,
         product: "spot",
         symbol: `${b.kind} ${b.name}`,
         side: "lose",
@@ -423,7 +465,7 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
     realized += pay - b.stake;
     fills.unshift({
       id: uid("f"),
-      t: s.clock,
+      t: now,
       product: "spot",
       symbol: `${b.kind} ${b.name}`,
       side: "win",

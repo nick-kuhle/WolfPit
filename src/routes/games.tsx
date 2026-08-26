@@ -13,6 +13,7 @@ import {
   fracOdds,
   marketOdds,
   openTickets,
+  quinellaCombos,
   ticketName,
   type RaceCard,
 } from "@/lib/wolfpit/games";
@@ -106,33 +107,66 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
   const bet = useWolf((st) => st.placeRaceBet);
   const wpit = useWolf((s) => s.account.wpit);
   const vault = useWolf((s) => s.games?.vaultWpit ?? 0);
-  const runner = card.runners.find((r) => r.no === pick)!;
   const [market, setMarket] = useState<BetMarket>("win");
-  const [pair, setPair] = useState<number | null>(null);
+  const [picks, setPicks] = useState<number[]>([pick]);
+  const [exacta2, setExacta2] = useState<number | null>(null);
   const [stake, setStake] = useState("100");
   const [confirm, setConfirm] = useState(false);
   const n = Number(stake) || 0;
-  const needsPair = market === "quinella" || market === "exacta";
-  const odds = marketOdds(card, market, pick, pair ?? undefined);
-  const maxPay = n * odds;
-  const maxLoss = n;
-  const ready = n >= MIN_BET && n <= wpit + 1e-9 && (!needsPair || (pair && pair !== pick));
 
   useEffect(() => {
-    setPair(null);
+    setPicks([pick]);
+    setExacta2(null);
     setConfirm(false);
     setMarket("win");
   }, [pick]);
 
+  const combos = market === "quinella" ? quinellaCombos(picks) : [];
+  const tickets = market === "quinella" ? Math.max(combos.length, 0) : 1;
+  const first = picks[0] ?? pick;
+  const second = market === "exacta" ? exacta2 : picks[1];
+  const odds =
+    market === "quinella" && combos.length
+      ? Math.max(...combos.map(([a, b]) => marketOdds(card, "quinella", a, b)))
+      : marketOdds(card, market, first, second ?? undefined);
+  const cost = n * tickets;
+  const maxPay = market === "quinella" ? n * odds : n * odds;
+  const maxLoss = cost;
+  const ready =
+    n >= MIN_BET &&
+    cost <= wpit + 1e-9 &&
+    (market === "quinella"
+      ? picks.length >= 2
+      : market === "exacta"
+        ? Boolean(first && exacta2 && exacta2 !== first)
+        : Boolean(first));
+
+  function toggleQuinella(no: number) {
+    setConfirm(false);
+    setPicks((cur) => {
+      if (cur.includes(no)) return cur.filter((x) => x !== no);
+      if (cur.length >= 3) return cur;
+      return [...cur, no];
+    });
+  }
+
   function send() {
     if (!ready) return;
-    bet(card.kind, pick, n, market, pair ?? undefined);
+    const sel =
+      market === "quinella"
+        ? picks
+        : market === "exacta"
+          ? [first, exacta2!]
+          : [first];
+    bet(card.kind, sel, n, market);
     onClose();
   }
 
+  const runner = card.runners.find((r) => r.no === first) ?? card.runners.find((r) => r.no === pick)!;
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-bg/80 p-3 pb-[calc(3.6rem+env(safe-area-inset-bottom))] sm:items-center">
-      <div className="sheet-in max-h-[min(88dvh,40rem)] w-full max-w-md overflow-auto rounded-[1.1rem] border border-brass/40 bg-panel p-4">
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-bg/80 p-3 pb-[calc(4.6rem+env(safe-area-inset-bottom))] sm:items-center">
+      <div className="sheet-in max-h-[min(88dvh,42rem)] w-full max-w-md overflow-auto rounded-[1.1rem] border border-brass/40 bg-panel p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">
             <RunnerGfx kind={card.kind} coat={runner.coat} no={runner.no} size={36} gait="idle" />
@@ -156,6 +190,8 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
               onClick={() => {
                 setMarket(m);
                 setConfirm(false);
+                if (m === "quinella") setPicks((cur) => (cur.length ? cur : [pick]));
+                else setPicks([pick]);
               }}
               className={cn(
                 "h-9 rounded-full border px-3 font-mono text-[11px] uppercase",
@@ -168,32 +204,95 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
         </div>
         <p className="mt-1 font-mono text-[10px] text-muted">{MARKET_HINT[market]}</p>
 
-        {needsPair ? (
+        {market === "quinella" ? (
           <div className="mt-2">
             <p className="font-mono text-[10px] uppercase tracking-wider text-subtle">
-              {market === "exacta" ? "2nd" : "With"}
+              Pick two, or box three · {picks.length} selected
             </p>
             <div className="mt-1 flex flex-wrap gap-1">
-              {card.runners
-                .filter((r) => r.no !== pick)
-                .map((r) => (
+              {card.runners.map((r) => (
+                <button
+                  key={r.no}
+                  type="button"
+                  onClick={() => toggleQuinella(r.no)}
+                  className={cn(
+                    "h-8 rounded-full border px-2.5 font-mono text-[10px]",
+                    picks.includes(r.no) ? "border-brass bg-brass text-bg" : "border-border text-muted",
+                  )}
+                >
+                  #{r.no} {r.name}
+                </button>
+              ))}
+            </div>
+            {combos.length > 1 ? (
+              <p className="mt-1 font-mono text-[10px] text-brass">
+                Box · {combos.length} quinellas · {fmtQty(cost)} WPIT total
+              </p>
+            ) : null}
+          </div>
+        ) : market === "exacta" ? (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-subtle">1st</p>
+              <div className="mt-1 flex flex-col gap-1">
+                {card.runners.map((r) => (
                   <button
                     key={r.no}
                     type="button"
-                    onClick={() => setPair(r.no)}
+                    onClick={() => {
+                      setPicks([r.no]);
+                      if (exacta2 === r.no) setExacta2(null);
+                    }}
                     className={cn(
-                      "h-8 rounded-full border px-2.5 font-mono text-[10px]",
-                      pair === r.no ? "border-brass bg-brass text-bg" : "border-border text-muted",
+                      "h-8 rounded-full border px-2 font-mono text-[10px]",
+                      first === r.no ? "border-brass bg-brass text-bg" : "border-border text-muted",
                     )}
                   >
                     #{r.no} {r.name}
                   </button>
                 ))}
+              </div>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-subtle">2nd</p>
+              <div className="mt-1 flex flex-col gap-1">
+                {card.runners
+                  .filter((r) => r.no !== first)
+                  .map((r) => (
+                    <button
+                      key={r.no}
+                      type="button"
+                      onClick={() => setExacta2(r.no)}
+                      className={cn(
+                        "h-8 rounded-full border px-2 font-mono text-[10px]",
+                        exacta2 === r.no ? "border-brass bg-brass text-bg" : "border-border text-muted",
+                      )}
+                    >
+                      #{r.no} {r.name}
+                    </button>
+                  ))}
+              </div>
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {card.runners.map((r) => (
+              <button
+                key={r.no}
+                type="button"
+                onClick={() => setPicks([r.no])}
+                className={cn(
+                  "h-8 rounded-full border px-2.5 font-mono text-[10px]",
+                  first === r.no ? "border-brass bg-brass text-bg" : "border-border text-muted",
+                )}
+              >
+                #{r.no} {r.name}
+              </button>
+            ))}
+          </div>
+        )}
 
-        <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-subtle">Stake</p>
+        <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-subtle">Stake {market === "quinella" && tickets > 1 ? "per combo" : ""}</p>
         <div className="mt-1 flex flex-wrap gap-1">
           {STAKES.map((x) => (
             <button
@@ -216,17 +315,32 @@ function TicketSheet({ card, pick, onClose }: { card: RaceCard; pick: number; on
         </div>
 
         <dl className="mt-3 space-y-0 font-mono text-[12px]">
-          <Row k="Selection" v={ticketName(card, market, pick, pair ?? undefined)} />
+          <Row
+            k="Selection"
+            v={
+              market === "quinella"
+                ? picks.map((no) => `#${no}`).join(" / ") || "—"
+                : ticketName(card, market, first, second ?? undefined)
+            }
+          />
           <Row k="Odds" v={`${fracOdds(odds)}  (${odds.toFixed(2)})`} />
+          <Row k="Tickets" v={String(tickets)} />
+          <Row k="Cost" v={`${fmtQty(cost)} WPIT`} />
           <Row k="Max payout" v={`${fmtQty(maxPay)} WPIT`} />
           <Row k="Max loss" v={`${fmtQty(maxLoss)} WPIT`} />
-          <Row k="Wallet after" v={fmtQty(Math.max(0, wpit - n))} />
+          <Row k="Wallet after" v={fmtQty(Math.max(0, wpit - cost))} />
           <Row k="Vault" v={`${fmtQty(vault)} WPIT`} />
         </dl>
 
         {!confirm ? (
           <Button className="mt-4 h-12 w-full bg-brass text-bg" disabled={!ready} onClick={() => setConfirm(true)}>
-            {ready ? "Review ticket" : needsPair && !pair ? "Pick the other runner" : "Set a stake"}
+            {ready
+              ? `Review ${fmtQty(cost)} WPIT`
+              : market === "quinella" && picks.length < 2
+                ? "Pick two runners"
+                : market === "exacta" && !exacta2
+                  ? "Pick 2nd"
+                  : "Set a stake"}
           </Button>
         ) : (
           <div className="mt-4 grid grid-cols-2 gap-2">

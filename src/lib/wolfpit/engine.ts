@@ -338,7 +338,8 @@ export function equity(s: EngineState) {
   const fut = s.futures.reduce((a, p) => a + p.margin + futPnl(p, markOf(s, p.under ?? "ETH")), 0);
   const opt = s.options.reduce((a, p) => a + optMark(s, p) * p.sizeEth, 0);
   const lpVal = s.lp.reduce((a, p) => a + lpValue(s, p.poolId, p.shares), 0);
-  return spot + extras + fut + opt + lpVal + s.stake.amount * s.wpit;
+  const tickets = (s.games?.bets ?? []).filter((b) => b.status === "open").reduce((a, b) => a + b.stake, 0);
+  return spot + extras + fut + opt + lpVal + s.stake.amount * s.wpit + tickets * s.wpit;
 }
 
 export function pushEquity(s: EngineState): EngineState {

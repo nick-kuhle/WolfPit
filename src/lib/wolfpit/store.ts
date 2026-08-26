@@ -23,7 +23,7 @@ import {
   tradeSpot,
   unstakeWpit,
 } from "./engine";
-import { placeBet, settleGames, ensureRaces } from "./games";
+import { placeTickets, settleGames, ensureRaces } from "./games";
 import type { BetMarket, EngineState, FutSide, OptType, PoolId, RaceKind, WorkingOrder } from "./types";
 import { useAdmin } from "@/lib/admin/config";
 import { PIT_OPEN, compBoard } from "./comp";
@@ -64,7 +64,7 @@ type Actions = {
   cancelOrder: (id: string) => void;
   listToken: (symbol: string, mark: number) => void;
   joinComp: () => void;
-  placeRaceBet: (kind: RaceKind, runner: number, stake: number, market?: BetMarket, runnerB?: number) => void;
+  placeRaceBet: (kind: RaceKind, picks: number[], stake: number, market?: BetMarket) => void;
   seedRaces: () => void;
 };
 
@@ -100,25 +100,33 @@ export const useWolf = create<WolfStore>()(
         void useWolf.persist.rehydrate();
       },
       step: (dtSec) => {
-        const prevFill = get().fills[0]?.id;
-        const prevMeets = get().games?.meets[0]?.raceId;
-        let next = tick(get(), dtSec);
-        next = settleGames(next, Date.now());
-        if (next.compJoined && !next.compPaid && Date.now() >= PIT_OPEN.end) {
-          const board = compBoard(Date.now(), { name: "You", equity: equity(next), joined: true });
-          const you = board.find((r) => r.you);
-          next = payCompPrize(next, you?.place ?? 99);
-          if ((you?.place ?? 99) <= 3) ping(`Pit Open prize · ${you?.place}`, "brass");
-        }
-        if (next.fills[0]?.id && next.fills[0].id !== prevFill) {
-          const f = next.fills[0];
-          ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up");
-        }
-        if (next.games?.meets[0]?.raceId && next.games.meets[0].raceId !== prevMeets) {
-          const m = next.games.meets[0];
-          ping(`Official · ${m.kind} ${m.winnerName} (${m.winner})`, "brass");
-        }
-        set(next);
+        set((s) => {
+          const prevFill = s.fills[0]?.id;
+          const prevMeets = s.games?.meets[0]?.raceId;
+          let next = tick(s, dtSec);
+          next = settleGames(next, Date.now());
+          if (next.compJoined && !next.compPaid && Date.now() >= PIT_OPEN.end) {
+            const board = compBoard(Date.now(), { name: "You", equity: equity(next), joined: true });
+            const you = board.find((r) => r.you);
+            next = payCompPrize(next, you?.place ?? 99);
+            if ((you?.place ?? 99) <= 3) ping(`Pit Open prize · ${you?.place}`, "brass");
+          }
+          const fresh = [];
+          for (const f of next.fills) {
+            if (f.id === prevFill) break;
+            fresh.push(f);
+          }
+          for (const f of fresh.slice(0, 8)) {
+            if (f.side === "win") ping(`Paid ${f.size.toFixed(2)} WPIT · ${f.symbol}`, "up");
+            else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down");
+            else ping(`Order filled · ${f.side} ${f.symbol} ${f.size.toPrecision(4)} @ ${f.price.toPrecision(6)}`, "up");
+          }
+          if (next.games?.meets[0]?.raceId && next.games.meets[0].raceId !== prevMeets) {
+            const m = next.games.meets[0];
+            ping(`Official · ${m.kind} ${m.winnerName} (${m.winner})`, "brass");
+          }
+          return next;
+        });
       },
       setSpeed: (simSpeed) => set({ simSpeed }),
       buySpot: (pool, usd) => apply(tradeSpot(get(), pool, "buy", usd), set),
@@ -176,7 +184,8 @@ export const useWolf = create<WolfStore>()(
           },
         });
       },
-      applyLive: (feed) => set(applyLiveFeed(get(), feed)),
+      applyLive: (feed) =>
+        set((s) => settleGames(applyLiveFeed(s, feed), Date.now())),
       createPool: (base, quote, baseAmt, quoteAmt) => {
         const r = createPoolEngine(get(), base, quote, baseAmt, quoteAmt);
         apply(r, set);
@@ -209,18 +218,19 @@ export const useWolf = create<WolfStore>()(
         ping("You're in the Pit Open. $100k paper. Go shout.", "brass");
         set({ ...joinCompEngine(get()), lastError: null });
       },
-      placeRaceBet: (kind, runner, stake, market = "win", runnerB) => {
-        const r = placeBet(get(), kind, runner, stake, Date.now(), market, runnerB);
-        if (typeof r === "string") {
-          ping(r, "down");
-          set({ lastError: r });
-          return;
-        }
-        const b = r.games?.bets[0];
-        ping(`Ticket · ${b?.market?.toUpperCase() ?? "WIN"} ${b?.name ?? "runner"} @ ${b?.odds ?? "?"} · ${stake} WPIT`, "brass");
-        set({ ...r, lastError: null });
+      placeRaceBet: (kind, picks, stake, market = "win") => {
+        set((s) => {
+          const r = placeTickets(s, kind, picks, stake, Date.now(), market);
+          if (typeof r === "string") {
+            ping(r, "down");
+            return { lastError: r };
+          }
+          const n = r.games?.bets.filter((b) => b.status === "open" && b.placedAt >= Date.now() - 2000).length ?? 1;
+          ping(`Ticket${n > 1 ? "s" : ""} · ${market.toUpperCase()} · ${stake * (market === "quinella" ? Math.max(1, n) : 1)} WPIT`, "brass");
+          return { ...r, lastError: null };
+        });
       },
-      seedRaces: () => set(ensureRaces(get(), Date.now())),
+      seedRaces: () => set((s) => settleGames(ensureRaces(s, Date.now()), Date.now())),
       reset: () => {
         ping("Paper reset", "brass");
         set({ ...initialState(), lastError: null });

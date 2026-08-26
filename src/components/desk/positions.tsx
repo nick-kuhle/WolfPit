@@ -26,7 +26,7 @@ import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
 import type { Candle, PoolId } from "@/lib/wolfpit/types";
 import { cn, fmtPct, fmtPx, fmtQty, fmtUsd } from "@/lib/utils";
-import { fracOdds, openTickets } from "@/lib/wolfpit/games";
+import { fracOdds, gamesPnl, openTickets } from "@/lib/wolfpit/games";
 
 const COLS = "grid grid-cols-[minmax(0,1fr)_5.1rem_4.6rem_5.4rem] items-baseline gap-x-2 px-3";
 
@@ -61,6 +61,10 @@ export function Positions({ flush }: { flush?: boolean }) {
   const minis = groupedFutures(s);
   const vanillas = groupedOptions(s);
   const extras = Object.entries(s.account.tokens ?? {}).filter(([, q]) => Math.abs(q) > 1e-8);
+  const tickets = openTickets(s);
+  const inPlay = tickets.reduce((a, b) => a + b.stake, 0);
+  const trackPnl = gamesPnl(s);
+  const settled = (s.games?.bets ?? []).filter((b) => b.status !== "open").slice(0, 8);
   const holdings = [
     { k: "USDC", qty: s.account.usdc, mark: 1 },
     { k: "ETH", qty: s.account.eth, mark: s.eth },
@@ -107,7 +111,7 @@ export function Positions({ flush }: { flush?: boolean }) {
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <Metric k="Available" v={fmtUsd(avail)} />
           <Metric k="Margin" v={fmtUsd(used)} />
-          <Metric k="Health" v={health.label} tone={health.tone} className="hidden sm:flex" />
+          <Metric k="Track P/L" v={signed(trackPnl * s.wpit)} tone={trackPnl > 0 ? "up" : trackPnl < 0 ? "down" : undefined} />
         </div>
       </header>
 
@@ -338,21 +342,51 @@ export function Positions({ flush }: { flush?: boolean }) {
           </Sec>
         ) : null}
 
-        {openTickets(s).length > 0 ? (
-          <Sec title="Track" count={openTickets(s).length}>
-            {openTickets(s).map((b) => (
+        {inPlay > 0 ? (
+          <Sec title="In play">
+            <div className={cn(COLS, "border-t border-border/50 py-2 font-mono text-[12px]")}>
+              <span className="truncate font-medium">WPIT tickets</span>
+              <span className="text-right tabular-nums">{fmtQty(inPlay)}</span>
+              <span className="text-right tabular-nums text-muted">{fmtPx(s.wpit)}</span>
+              <span className="text-right tabular-nums">{fmtUsd(inPlay * s.wpit)}</span>
+            </div>
+          </Sec>
+        ) : null}
+
+        {tickets.length > 0 ? (
+          <Sec title="Track" count={tickets.length}>
+            {tickets.map((b) => (
               <div key={b.id} className="border-t border-border/50 px-3 py-2">
                 <div className={cn(COLS, "font-mono text-[12px]")}>
                   <span className="truncate font-medium">
-                    #{b.runner} {b.name}
+                    {(b.market ?? "win").toUpperCase()} {b.name}
                   </span>
                   <span className="text-right tabular-nums">{fmtQty(b.stake)}</span>
                   <span className="text-right tabular-nums text-muted">{fracOdds(b.odds)}</span>
                   <span className="text-right tabular-nums text-brass">{fmtQty(b.stake * b.odds)}</span>
                 </div>
                 <p className="mt-0.5 font-mono text-[10px] text-subtle">
-                  {b.kind} · WPIT ticket · pays if it hits
+                  {b.kind} · WPIT · max {fmtQty(b.stake * b.odds)}
                 </p>
+              </div>
+            ))}
+          </Sec>
+        ) : null}
+
+        {settled.length > 0 ? (
+          <Sec title="Official" count={settled.length}>
+            {settled.map((b) => (
+              <div key={b.id} className="border-t border-border/50 px-3 py-2">
+                <div className={cn(COLS, "font-mono text-[12px]")}>
+                  <span className={cn("truncate font-medium", b.status === "won" ? "text-up" : "text-down")}>
+                    {b.status === "won" ? "WON" : "LOST"} {b.name}
+                  </span>
+                  <span className="text-right tabular-nums">{fmtQty(b.stake)}</span>
+                  <span className="text-right tabular-nums text-muted">{fracOdds(b.odds)}</span>
+                  <span className={cn("text-right tabular-nums", b.status === "won" ? "text-up" : "text-down")}>
+                    {b.status === "won" ? `+${fmtQty(b.payout)}` : fmtQty(-b.stake)}
+                  </span>
+                </div>
               </div>
             ))}
           </Sec>
