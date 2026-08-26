@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { BrandLockup, ChainChip } from "@/components/shell";
+import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { LiveTicker } from "@/components/ticker";
 import { Button } from "@/components/ui/button";
@@ -22,22 +22,7 @@ function Home() {
   const ends = new Date(PIT_OPEN.end).toUTCString().replace("GMT", "UTC");
 
   return (
-    <div className="min-h-dvh bg-bg pb-16 text-fg lg:pb-0">
-      <header className="flex h-14 items-center justify-between px-3 sm:px-5">
-        <BrandLockup />
-        <div className="flex items-center gap-2">
-          <span className="hidden sm:inline">
-            <ChainChip />
-          </span>
-          <Link to="/learn" className="hidden h-11 items-center px-3 text-sm text-muted hover:text-fg sm:flex">
-            Learn
-          </Link>
-          <Link to="/trade">
-            <Button size="sm">Take a seat</Button>
-          </Link>
-        </div>
-      </header>
-
+    <Shell>
       <LiveTicker />
 
       <section className="relative overflow-hidden border-b border-brass/40 bg-brass text-bg">
@@ -180,7 +165,7 @@ function Home() {
         />
       </section>
       <SiteFooter />
-    </div>
+    </Shell>
   );
 }
 

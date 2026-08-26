@@ -25,7 +25,7 @@ import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
 import { cn, fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
-export function Positions() {
+export function Positions({ flush }: { flush?: boolean }) {
   const nav = useNavigate();
   const s = useWolf();
   const closeFut = useWolf((st) => st.closeFut);
@@ -45,7 +45,7 @@ export function Positions() {
   const vanillas = groupedOptions(s);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-border bg-panel">
+    <aside className={cn("flex h-full min-h-0 flex-col overflow-hidden bg-panel", !flush && "border-l border-border")}>
       <div className="shrink-0 border-b border-border px-3 py-2">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg">Positions</h2>

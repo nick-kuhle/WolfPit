@@ -13,7 +13,7 @@ function AssetPage() {
     <Shell desk>
       <ProductGate product="desk">
         <div className="h-[calc(100dvh-3rem)] min-h-0">
-          <Desk seed={symbol} />
+          <Desk seed={symbol} pane="trade" />
         </div>
       </ProductGate>
     </Shell>

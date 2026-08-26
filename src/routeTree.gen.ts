@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as BookRouteImport } from './routes/book'
 import { Route as LearnRouteImport } from './routes/learn'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as PlanRouteImport } from './routes/plan'
@@ -18,6 +19,7 @@ import { Route as PoolsRouteImport } from './routes/pools'
 import { Route as StakeRouteImport } from './routes/stake'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TradeRouteImport } from './routes/trade'
+import { Route as WatchRouteImport } from './routes/watch'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AssetSymbolRouteImport } from './routes/asset.$symbol'
 
@@ -29,6 +31,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BookRoute = BookRouteImport.update({
+  id: '/book',
+  path: '/book',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LearnRoute = LearnRouteImport.update({
@@ -66,6 +73,11 @@ const TradeRoute = TradeRouteImport.update({
   path: '/trade',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WatchRoute = WatchRouteImport.update({
+  id: '/watch',
+  path: '/watch',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -80,6 +92,7 @@ const AssetSymbolRoute = AssetSymbolRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/book': typeof BookRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
@@ -87,12 +100,14 @@ export interface FileRoutesByFullPath {
   '/stake': typeof StakeRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
+  '/watch': typeof WatchRoute
   '/admin/login': typeof AdminLoginRoute
   '/asset/$symbol': typeof AssetSymbolRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/book': typeof BookRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
@@ -100,6 +115,7 @@ export interface FileRoutesByTo {
   '/stake': typeof StakeRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
+  '/watch': typeof WatchRoute
   '/admin/login': typeof AdminLoginRoute
   '/asset/$symbol': typeof AssetSymbolRoute
 }
@@ -107,6 +123,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/book': typeof BookRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
@@ -114,6 +131,7 @@ export interface FileRoutesById {
   '/stake': typeof StakeRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
+  '/watch': typeof WatchRoute
   '/admin/login': typeof AdminLoginRoute
   '/asset/$symbol': typeof AssetSymbolRoute
 }
@@ -122,6 +140,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/book'
     | '/learn'
     | '/orders'
     | '/plan'
@@ -129,12 +148,14 @@ export interface FileRouteTypes {
     | '/stake'
     | '/terms'
     | '/trade'
+    | '/watch'
     | '/admin/login'
     | '/asset/$symbol'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
+    | '/book'
     | '/learn'
     | '/orders'
     | '/plan'
@@ -142,12 +163,14 @@ export interface FileRouteTypes {
     | '/stake'
     | '/terms'
     | '/trade'
+    | '/watch'
     | '/admin/login'
     | '/asset/$symbol'
   id:
     | '__root__'
     | '/'
     | '/admin'
+    | '/book'
     | '/learn'
     | '/orders'
     | '/plan'
@@ -155,6 +178,7 @@ export interface FileRouteTypes {
     | '/stake'
     | '/terms'
     | '/trade'
+    | '/watch'
     | '/admin/login'
     | '/asset/$symbol'
   fileRoutesById: FileRoutesById
@@ -162,6 +186,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
+  BookRoute: typeof BookRoute
   LearnRoute: typeof LearnRoute
   OrdersRoute: typeof OrdersRoute
   PlanRoute: typeof PlanRoute
@@ -169,6 +194,7 @@ export interface RootRouteChildren {
   StakeRoute: typeof StakeRoute
   TermsRoute: typeof TermsRoute
   TradeRoute: typeof TradeRoute
+  WatchRoute: typeof WatchRoute
   AssetSymbolRoute: typeof AssetSymbolRoute
 }
 
@@ -186,6 +212,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/book': {
+      id: '/book'
+      path: '/book'
+      fullPath: '/book'
+      preLoaderRoute: typeof BookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/learn': {
@@ -237,6 +270,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TradeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/watch': {
+      id: '/watch'
+      path: '/watch'
+      fullPath: '/watch'
+      preLoaderRoute: typeof WatchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/login': {
       id: '/admin/login'
       path: '/login'
@@ -267,6 +307,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
+  BookRoute: BookRoute,
   LearnRoute: LearnRoute,
   OrdersRoute: OrdersRoute,
   PlanRoute: PlanRoute,
@@ -274,6 +315,7 @@ const rootRouteChildren: RootRouteChildren = {
   StakeRoute: StakeRoute,
   TermsRoute: TermsRoute,
   TradeRoute: TradeRoute,
+  WatchRoute: WatchRoute,
   AssetSymbolRoute: AssetSymbolRoute,
 }
 export const routeTree = rootRouteImport

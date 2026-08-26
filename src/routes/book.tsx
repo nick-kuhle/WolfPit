@@ -1,16 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Desk } from "@/components/desk/desk";
+import { Positions } from "@/components/desk/positions";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 
-export const Route = createFileRoute("/trade")({ component: TradePage });
+export const Route = createFileRoute("/book")({ component: BookPage });
 
-function TradePage() {
+function BookPage() {
   return (
     <Shell desk>
       <ProductGate product="desk">
         <div className="h-[calc(100dvh-3rem)] min-h-0">
-          <Desk pane="trade" />
+          <Positions flush />
         </div>
       </ProductGate>
     </Shell>

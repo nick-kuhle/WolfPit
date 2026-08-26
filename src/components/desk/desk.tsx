@@ -14,11 +14,12 @@ import { cn, fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
 
 type Tab = "list" | "trade" | "pos";
 
-export function Desk({ seed }: { seed?: string }) {
+export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
   const nav = useNavigate();
   const s = useWolf();
   const focus = useDesk((d) => d.focus);
-  const [tab, setTab] = useState<Tab>(seed ? "trade" : "list");
+  const [tab, setTab] = useState<Tab>(pane ?? (seed ? "trade" : "list"));
+  const view = pane ?? tab;
   const [prefer, setPrefer] = useState<"buy" | "sell" | null>(null);
   const [want, setWant] = useState<"spot" | "future" | "option" | null>(null);
   const [interval, setIv] = useState<ChartInterval>("1h");
@@ -93,24 +94,26 @@ export function Desk({ seed }: { seed?: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
       <AccountBar />
-      <div className="flex border-b border-border lg:hidden">
-        {(["list", "trade", "pos"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={cn(
-              "pressable h-11 flex-1 text-[11px] uppercase tracking-wider",
-              tab === t ? "border-b border-brass text-brass" : "text-muted",
-            )}
-          >
-            {t === "list" ? "Watchlist" : t === "trade" ? "Trade" : "Positions"}
-          </button>
-        ))}
-      </div>
+      {!pane ? (
+        <div className="flex border-b border-border lg:hidden">
+          {(["list", "trade", "pos"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={cn(
+                "pressable h-11 flex-1 text-[11px] uppercase tracking-wider",
+                tab === t ? "border-b border-brass text-brass" : "text-muted",
+              )}
+            >
+              {t === "list" ? "Watchlist" : t === "trade" ? "Trade" : "Positions"}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[16.5rem_minmax(0,1fr)_16.5rem]">
-        <aside className={cn("min-h-0 overflow-hidden border-r border-border", tab === "list" ? "block" : "hidden lg:block")}>
+        <aside className={cn("min-h-0 overflow-hidden border-r border-border", view === "list" ? "block" : "hidden lg:block")}>
           <div className="border-b border-border px-3 py-2">
             <p className="font-mono text-[10px] uppercase tracking-wider text-subtle">Account</p>
             <p className="font-display text-2xl leading-none">{fmtUsd(eq)}</p>
@@ -134,7 +137,7 @@ export function Desk({ seed }: { seed?: string }) {
           </div>
         </aside>
 
-        <section className={cn("flex min-h-0 flex-col overflow-hidden", tab === "trade" ? "flex" : "hidden lg:flex")}>
+        <section className={cn("flex min-h-0 flex-col overflow-hidden", view === "trade" ? "flex" : "hidden lg:flex")}>
           <div className="shrink-0 border-b border-border px-3 py-2">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -183,7 +186,7 @@ export function Desk({ seed }: { seed?: string }) {
           </div>
         </section>
 
-        <div className={cn("min-h-0", tab === "pos" ? "block" : "hidden lg:block")}>
+        <div className={cn("min-h-0", view === "pos" ? "block" : "hidden lg:block")}>
           <Positions />
         </div>
       </div>

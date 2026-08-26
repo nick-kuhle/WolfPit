@@ -1,15 +1,9 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { DesktopNav, PitDock } from "@/components/dock";
 import { WolfMark } from "@/components/mark";
 import { cn } from "@/lib/utils";
 import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
-
-const NAV = [
-  { to: "/trade" as const, label: "Floor" },
-  { to: "/orders" as const, label: "Fills" },
-  { to: "/pools" as const, label: "Farms" },
-  { to: "/stake" as const, label: "Stake" },
-];
 
 export function BrandLockup({ className, markClass }: { className?: string; markClass?: string }) {
   return (
@@ -43,56 +37,10 @@ export function Shell({ children, desk }: { children: ReactNode; desk?: boolean 
         <span className="hidden sm:inline">
           <ChainChip />
         </span>
-        <nav className="ml-auto hidden items-center gap-1 lg:flex">
-          {NAV.map((n) => (
-            <Link
-              key={n.to}
-              to={n.to}
-              className={cn(
-                "pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg",
-                pathname === n.to && "text-brass",
-              )}
-            >
-              {n.label}
-            </Link>
-          ))}
-          <Link
-            to="/trade"
-            className={cn("pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg", pathname === "/trade" && "text-brass")}
-          >
-            Ticket
-          </Link>
-          <Link to="/learn" className="pressable flex h-11 items-center px-3 text-sm text-muted hover:text-fg">
-            Learn
-          </Link>
-        </nav>
+        <DesktopNav pathname={pathname} />
       </header>
-      <div className={cn("min-h-0 flex-1", "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>{children}</div>
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden">
-        <div className="grid grid-cols-5">
-          {NAV.map((n) => (
-            <Link
-              key={n.to}
-              to={n.to}
-              className={cn(
-                "pressable flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
-                pathname === n.to ? "text-brass" : "text-muted",
-              )}
-            >
-              {n.label}
-            </Link>
-          ))}
-          <Link
-            to="/trade"
-            className={cn(
-              "pressable flex h-14 flex-col items-center justify-center text-[11px] uppercase tracking-wider",
-              pathname === "/trade" ? "text-brass" : "text-muted",
-            )}
-          >
-            Ticket
-          </Link>
-        </div>
-      </nav>
+      <div className={cn("min-h-0 flex-1", pathname.startsWith("/admin") ? "" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0")}>{children}</div>
+      {pathname.startsWith("/admin") ? null : <PitDock />}
     </div>
   );
 }
