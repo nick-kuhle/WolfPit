@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useState, type SVGProps } from "react";
+import { useEffect, useState, type SVGProps } from "react";
 import { harvestDue } from "@/lib/wolfpit/engine";
 import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
 import { useWolf, useEquity } from "@/lib/wolfpit/store";
@@ -18,11 +18,20 @@ const TABS = [
 export function PitDock() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [more, setMore] = useState(false);
+  const [sheet, setSheet] = useState(false);
   const ripe = useWolf(harvestDue);
   const working = useWolf((s) => (s.working ?? []).length);
   const alerts = useAlerts((s) => s.items.length);
   const badge = working + (alerts > 0 ? 1 : 0);
-  const moreActive = more || !TABS.some((t) => t.match(pathname));
+  const moreActive = more || sheet || !TABS.some((t) => t.match(pathname));
+
+  useEffect(() => {
+    if (more) setSheet(true);
+  }, [more]);
+
+  function requestClose() {
+    setMore(false);
+  }
 
   return (
     <>
@@ -38,7 +47,7 @@ export function PitDock() {
               <Link
                 key={t.to}
                 to={t.to}
-                onClick={() => setMore(false)}
+                onClick={() => requestClose()}
                 className={cn(
                   "relative flex flex-col items-center justify-center gap-0.5 pt-1",
                   on ? "text-brass" : "text-[#8e8e8e]",
@@ -67,33 +76,59 @@ export function PitDock() {
           </button>
         </div>
       </nav>
-      {more ? <MoreSheet onClose={() => setMore(false)} /> : null}
+      {sheet ? (
+        <MoreSheet
+          open={more}
+          onClose={requestClose}
+          onExited={() => setSheet(false)}
+        />
+      ) : null}
     </>
   );
 }
 
-function MoreSheet({ onClose }: { onClose: () => void }) {
+function MoreSheet({ open, onClose, onExited }: { open: boolean; onClose: () => void; onExited: () => void }) {
   const nav = useNavigate();
   const eq = useEquity();
   const s = useWolf();
   const reset = useWolf((st) => st.reset);
   const setSpeed = useWolf((st) => st.setSpeed);
   const wallet = useWallet();
+  const closing = !open;
+
+  useEffect(() => {
+    if (!closing) return;
+    const t = window.setTimeout(onExited, 340);
+    return () => window.clearTimeout(t);
+  }, [closing, onExited]);
 
   function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch" | "/profile" | "/games") {
     onClose();
-    void nav({ to });
+    window.setTimeout(() => {
+      void nav({ to });
+    }, 180);
   }
 
   return (
     <div className="fixed inset-x-0 top-0 z-40 lg:hidden" style={{ bottom: "calc(3.4rem + env(safe-area-inset-bottom))" }}>
-      <button type="button" className="absolute inset-0 bg-bg/75" aria-label="Fold menu down" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 max-h-[min(82dvh,36rem)] overflow-auto rounded-t-[1.1rem] border-t border-border bg-[#121212] shadow-2xl">
-        <button type="button" onClick={onClose} className="flex w-full flex-col items-center pb-1 pt-2" aria-label="Done">
+      <button
+        type="button"
+        className={cn("absolute inset-0 bg-bg/75 dock-dim", closing && "is-closing")}
+        aria-label="Close menu"
+        onClick={onClose}
+      />
+      <div
+        key={open ? "up" : "down"}
+        className={cn(
+          "dock-sheet absolute inset-x-0 bottom-0 max-h-[min(82dvh,36rem)] overflow-auto rounded-t-[1.1rem] border-t border-border bg-[#121212] shadow-2xl",
+          closing && "is-closing",
+        )}
+      >
+        <button type="button" onClick={onClose} className="flex w-full flex-col items-center pb-1 pt-2" aria-label="Close">
           <span className="h-1 w-10 rounded-full bg-border-strong" />
-          <span className="mt-1 font-mono text-[11px] uppercase tracking-wider text-brass">Done · fold down</span>
+          <span className="mt-1 font-mono text-[11px] uppercase tracking-wider text-brass">Close</span>
         </button>
-        <button type="button" onClick={() => go("/profile")} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+        <button type="button" onClick={() => go("/profile")} className="dock-row flex w-full items-center gap-3 px-4 py-3 text-left" style={{ animationDelay: "40ms" }}>
           <div className="grid size-12 place-items-center rounded-full bg-brass font-display text-lg text-bg">
             {wallet.address ? wallet.address.slice(2, 4).toUpperCase() : "?"}
           </div>
@@ -114,19 +149,23 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
         </button>
 
         <div className="px-3 pb-3">
-          <p className="px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-subtle">Pit</p>
-          <Row icon="☻" label="Profile" hint={wallet.address ? truncAddr(wallet.address) : "Connect wallet to trade"} onClick={() => go("/profile")} />
-          <Row icon="♞" label="Track" hint="Horses · dogs · 5 minutes" onClick={() => go("/games")} />
-          <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} />
-          <Row icon="◎" label="Stake" hint="12% APR junior" onClick={() => go("/stake")} />
-          <Row icon="☰" label="Fills" hint={`${s.fills.length} on the tape`} onClick={() => go("/orders")} />
-          <Row icon="?" label="Learn" hint="Pit school" onClick={() => go("/learn")} />
-          <Row icon="⌘" label="Plan" hint="Roadmap" onClick={() => go("/plan")} />
+          <p className="dock-row px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-subtle" style={{ animationDelay: "70ms" }}>
+            Pit
+          </p>
+          <Row icon="☻" label="Profile" hint={wallet.address ? truncAddr(wallet.address) : "Connect wallet to trade"} onClick={() => go("/profile")} delay={90} />
+          <Row icon="♞" label="Track" hint="Horses · dogs · every minute" onClick={() => go("/games")} delay={120} />
+          <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} delay={150} />
+          <Row icon="◎" label="Stake" hint="12% APR junior" onClick={() => go("/stake")} delay={180} />
+          <Row icon="☰" label="Fills" hint={`${s.fills.length} on the tape`} onClick={() => go("/orders")} delay={210} />
+          <Row icon="?" label="Learn" hint="Pit school" onClick={() => go("/learn")} delay={240} />
+          <Row icon="⌘" label="Plan" hint="Roadmap" onClick={() => go("/plan")} delay={270} />
         </div>
 
         <div className="border-t border-border px-3 py-3">
-          <p className="px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-subtle">Settings</p>
-          <div className="flex items-center justify-between rounded-lg px-2 py-2">
+          <p className="dock-row px-1 pb-1 font-mono text-[10px] uppercase tracking-wider text-subtle" style={{ animationDelay: "300ms" }}>
+            Settings
+          </p>
+          <div className="dock-row flex items-center justify-between rounded-lg px-2 py-2" style={{ animationDelay: "320ms" }}>
             <span className="text-sm">Sim speed</span>
             <div className="flex overflow-hidden rounded-full border border-border">
               {([1, 10, 60] as const).map((n) => (
@@ -141,13 +180,13 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </div>
-          <Row icon="↺" label="Reset paper" hint="1,000 ETH · 100,000 USDC" onClick={() => { reset(); onClose(); }} />
-          <Row icon="§" label="Terms" hint="Clickwrap" onClick={() => go("/terms")} />
-          <Row icon="⚙" label="Pit ops" hint="Admin" onClick={() => go("/admin")} />
+          <Row icon="↺" label="Reset paper" hint="1,000 ETH · 100,000 USDC" onClick={() => { reset(); onClose(); }} delay={350} />
+          <Row icon="§" label="Terms" hint="Clickwrap" onClick={() => go("/terms")} delay={380} />
+          <Row icon="⚙" label="Pit ops" hint="Admin" onClick={() => go("/admin")} delay={410} />
         </div>
         <div className="sticky bottom-0 border-t border-border bg-[#121212] px-3 py-3">
           <button type="button" onClick={onClose} className="h-11 w-full rounded-full bg-brass font-medium text-bg">
-            Fold down
+            Close
           </button>
         </div>
       </div>
@@ -155,9 +194,14 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Row({ icon, label, hint, onClick }: { icon: string; label: string; hint: string; onClick: () => void }) {
+function Row({ icon, label, hint, onClick, delay = 0 }: { icon: string; label: string; hint: string; onClick: () => void; delay?: number }) {
   return (
-    <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-elevated">
+    <button
+      type="button"
+      onClick={onClick}
+      className="dock-row flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-elevated"
+      style={{ animationDelay: `${delay}ms` }}
+    >
       <span className="grid size-9 place-items-center rounded-lg bg-elevated text-sm">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-fg">{label}</span>
