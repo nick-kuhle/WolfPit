@@ -346,7 +346,7 @@ export function liqHealth(s: EngineState) {
   for (const p of s.futures) {
     const mark = markOf(s, p.under ?? "ETH");
     const eq = p.margin + futPnl(p, mark);
-    const maint = p.sizeEth * mark * FUT_MM;
+    const maint = futMaint(p, mark);
     worst = Math.min(worst, eq / Math.max(maint, 1e-9));
   }
   if (worst < 1.05) return { label: "LIQ", score: worst, tone: "down" as const };
@@ -707,7 +707,50 @@ export function residualDelta(s: EngineState) {
   return g.delta + s.vault.reservedEth - s.vault.reservedUsdc / Math.max(s.eth, 1e-9) + hedge;
 }
 
-export function futLiqPrice(p: EngineState["futures"][number], mm = FUT_MM) {
+/** Total inventory the pit can post, including already-reserved. Used for IM slope. */
+export function grossCover(s: EngineState, under: string, side: FutSide): number {
+  if (under === "ETH") {
+    if (side === "long") return Math.max(0, s.vault.eth * UTIL_CAP);
+    return Math.max(0, (s.vault.usdc * UTIL_CAP) / Math.max(s.eth, 1e-9));
+  }
+  const mark = markOf(s, under);
+  if (!(mark > 0)) return 0;
+  return Math.max(0, (s.vault.usdc * UTIL_CAP) / mark);
+}
+
+export function coverQty(s: EngineState, under: string, side: FutSide): number {
+  if (under === "ETH") return side === "long" ? maxNetLongEth(s) : maxNetShortEth(s);
+  const mark = markOf(s, under);
+  if (!(mark > 0)) return 0;
+  return Math.max(0, freeUsdc(s) / mark);
+}
+
+export function poolDepth(s: EngineState, under: string): number {
+  if (under === "ETH") return s.pools["ETH-USDC"]?.baseReserve ?? 0;
+  const p = Object.values(s.pools).find((x) => x.base === under);
+  return p?.baseReserve ?? 0;
+}
+
+/** IM as a fraction of notional. Rises with size vs cover and vs pool depth so we only book what we can hedge. */
+export function imRate(s: EngineState, size: number, under: string): number {
+  const cover = Math.max(grossCover(s, under, "long"), grossCover(s, under, "short"), 1e-9);
+  const depth = Math.max(poolDepth(s, under), 1e-9);
+  const uCover = clamp(Math.abs(size) / cover, 0, 3);
+  const uPool = clamp(Math.abs(size) / depth, 0, 1);
+  return clamp(0.25 + 0.3 * uCover * uCover + 0.45 * uPool, 0.25, 0.75);
+}
+
+export function mmRate(s: EngineState, size: number, under: string): number {
+  return imRate(s, size, under) * 0.5;
+}
+
+export function posMmRate(p: EngineState["futures"][number]): number {
+  const n = p.entry * p.sizeEth;
+  const im = n > 0 ? p.margin / n : FUT_IM;
+  return clamp(im * 0.5, 0.08, 0.6);
+}
+
+export function futLiqPrice(p: EngineState["futures"][number], mm = posMmRate(p)) {
   const q = p.sizeEth;
   if (q <= 0) return p.entry;
   if (p.side === "long") return (p.entry * q - p.margin) / (q * (1 - mm));
@@ -715,7 +758,7 @@ export function futLiqPrice(p: EngineState["futures"][number], mm = FUT_MM) {
 }
 
 export function futMaint(p: EngineState["futures"][number], mark: number) {
-  return p.sizeEth * mark * FUT_MM;
+  return p.sizeEth * mark * posMmRate(p);
 }
 
 export function usedMargin(s: EngineState) {
@@ -730,19 +773,49 @@ export function maxMiniContracts(s: EngineState, side: FutSide, under = "ETH") {
   const mark = markOf(s, under);
   const unit = miniQty(under);
   if (!(mark > 0) || !(unit > 0)) return 0;
-  const im = unit * mark * FUT_IM;
-  const fee = unit * mark * DERIV_FEE;
-  const cost = im + fee;
-  if (!(cost > 0) || !Number.isFinite(cost)) return 0;
-  const byCash = Math.floor(buyingPower(s) / cost);
-  if (under !== "ETH") {
-    const byVault = Math.floor(freeUsdc(s) / Math.max(unit * mark, MIN_IM_USD));
-    return Math.max(0, Math.min(byCash, byVault, MAX_LOT));
+  const cover = coverQty(s, under, side);
+  const byInv = Math.floor(cover / unit);
+  let lo = 0;
+  let hi = Math.max(0, Math.min(byInv, MAX_LOT));
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi + 1) / 2);
+    const size = mid * unit;
+    const rate = imRate(s, size, under);
+    const cost = size * mark * rate + size * mark * DERIV_FEE;
+    if (Number.isFinite(cost) && cost <= buyingPower(s) + 1e-9 && size <= cover + 1e-9) lo = mid;
+    else hi = mid - 1;
   }
-  const cap = side === "long" ? maxNetLongEth(s) : maxNetShortEth(s);
-  const byInv = Math.floor(cap / unit);
-  const byFill = Math.floor(maxFillEth(s, side) / unit);
-  return Math.max(0, Math.min(byCash, byInv, byFill, MAX_LOT));
+  return lo;
+}
+
+export function groupedFutures(s: EngineState): EngineState["futures"] {
+  const map = new Map<string, EngineState["futures"][number]>();
+  for (const p of s.futures) {
+    const k = `${p.under ?? "ETH"}|${p.side}|${p.expiry}`;
+    const g = map.get(k);
+    if (!g) map.set(k, { ...p });
+    else {
+      const size = g.sizeEth + p.sizeEth;
+      const entry = size > 0 ? (g.entry * g.sizeEth + p.entry * p.sizeEth) / size : g.entry;
+      map.set(k, { ...g, sizeEth: size, entry, margin: g.margin + p.margin });
+    }
+  }
+  return [...map.values()];
+}
+
+export function groupedOptions(s: EngineState): EngineState["options"] {
+  const map = new Map<string, EngineState["options"][number]>();
+  for (const p of s.options) {
+    const k = `${p.under ?? "ETH"}|${p.type}|${p.strike}|${p.expiry}`;
+    const g = map.get(k);
+    if (!g) map.set(k, { ...p });
+    else {
+      const size = g.sizeEth + p.sizeEth;
+      const premium = size > 0 ? (g.premium * g.sizeEth + p.premium * p.sizeEth) / size : g.premium;
+      map.set(k, { ...g, sizeEth: size, premium });
+    }
+  }
+  return [...map.values()];
 }
 
 function takeFee(s: EngineState, fee: number): EngineState {
@@ -863,13 +936,89 @@ function rejectAnyFuture(s: EngineState, side: FutSide, size: number, expiry: nu
   if (!(mark > 0) || !Number.isFinite(mark)) return `No mark for ${under}.`;
   const notional = size * mark;
   if (!Number.isFinite(notional) || notional > MAX_NOTIONAL_USD) return "Notional exceeds house cap.";
-  const im = notional * FUT_IM;
+  const cover = coverQty(s, under, side);
+  if (size > cover + 1e-9) return `Not enough protocol cover. Max ${cover.toPrecision(4)} ${under}.`;
+  const depth = poolDepth(s, under);
+  if (depth > 0 && size > depth * MAX_POOL_FRAC + 1e-9) {
+    return `Size > 25% of ${under} pool depth.`;
+  }
+  const rate = imRate(s, size, under);
+  const im = notional * rate;
   const fee = notional * DERIV_FEE;
   if (!(im >= MIN_IM_USD)) return "Margin too small.";
   if (s.account.usdc + 1e-9 < im + fee) return "Not enough buying power for initial margin + fee.";
   if (under === "ETH") return rejectFuture(s, side, size, expiry);
   if (notional > freeUsdc(s) + 1e-9) return "Vault cannot cash-secure that notional.";
   return null;
+}
+
+function applyVaultOpen(
+  vault: EngineState["vault"],
+  side: FutSide,
+  size: number,
+  px: number,
+  under: string,
+): EngineState["vault"] | string {
+  const v = { ...vault };
+  if (under === "ETH") {
+    if (side === "long") {
+      v.reservedEth += size;
+    } else {
+      if (v.eth < size) return "Vault has no ETH to short against.";
+      v.reservedUsdc += size * px;
+      v.eth -= size;
+      v.usdc += size * px;
+    }
+  } else {
+    v.reservedUsdc += size * px;
+  }
+  return v;
+}
+
+function applyVaultClose(vault: EngineState["vault"], pos: EngineState["futures"][number], closeSize: number, mark: number) {
+  const v = { ...vault };
+  const under = pos.under ?? "ETH";
+  if (under === "ETH") {
+    if (pos.side === "long") v.reservedEth = Math.max(0, v.reservedEth - closeSize);
+    else {
+      v.reservedUsdc = Math.max(0, v.reservedUsdc - pos.entry * closeSize);
+      v.eth += closeSize;
+      v.usdc -= closeSize * mark;
+    }
+  } else {
+    v.reservedUsdc = Math.max(0, v.reservedUsdc - pos.entry * closeSize);
+  }
+  return v;
+}
+
+export function reduceFuture(
+  s: EngineState,
+  pos: EngineState["futures"][number],
+  closeSize: number,
+  mark: number,
+): EngineState | string {
+  if (!(closeSize > 0) || closeSize > pos.sizeEth + 1e-9) return "Cannot reduce that size.";
+  const frac = closeSize / pos.sizeEth;
+  const slice = { ...pos, sizeEth: closeSize, margin: pos.margin * frac };
+  const pnl = futPnl(slice, mark);
+  const vault = applyVaultClose(s.vault, pos, closeSize, mark);
+  const rest = pos.sizeEth - closeSize;
+  const futures =
+    rest <= 1e-12
+      ? s.futures.filter((p) => p.id !== pos.id)
+      : s.futures.map((p) =>
+          p.id === pos.id ? { ...p, sizeEth: rest, margin: p.margin * (rest / p.sizeEth) } : p,
+        );
+  return {
+    ...s,
+    account: {
+      ...s.account,
+      usdc: s.account.usdc + slice.margin + pnl,
+      realized: s.account.realized + pnl,
+    },
+    vault,
+    futures,
+  };
 }
 
 export function tradeFuture(s: EngineState, side: FutSide, contracts: number, expiry: number, under = "ETH"): EngineState | string {
@@ -882,29 +1031,52 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
   const bps = spreadBps(s);
   const mid = under === "ETH" ? reservationPx(s) : mark;
   const px = side === "long" ? mid * (1 + bps / 10_000) : mid * (1 - bps / 10_000);
-  const notional = size * px;
-  const margin = notional * FUT_IM;
-  const fee = notional * DERIV_FEE;
-  if (s.account.usdc + 1e-9 < margin + fee) return "Not enough buying power for initial margin + fee.";
-  const vault = { ...s.vault };
-  if (under === "ETH") {
-    if (side === "long") {
-      vault.reservedEth += size;
-    } else {
-      if (vault.eth < size) return "Vault has no ETH to short against.";
-      vault.reservedUsdc += notional;
-      vault.eth -= size;
-      vault.usdc += size * px;
-    }
-  } else {
-    vault.reservedUsdc += notional;
+  const fee = size * px * DERIV_FEE;
+
+  const opp = s.futures.find(
+    (p) => (p.under ?? "ETH") === under && p.expiry === expiry && p.side !== side,
+  );
+  if (opp) {
+    const cut = Math.min(opp.sizeEth, size);
+    const reduced = reduceFuture(s, opp, cut, px);
+    if (typeof reduced === "string") return reduced;
+    const filled = takeFee(
+      pushFill(reduced, {
+        id: uid("f"),
+        t: s.clock,
+        product: "future",
+        symbol: `${under} mini ${fmtExpiry(expiry)}`,
+        side,
+        size: cut,
+        price: px,
+        fee: fee * (cut / size),
+        note: "flatten",
+      }),
+      fee * (cut / size),
+    );
+    const rem = size - cut;
+    if (rem <= 1e-12) return under === "ETH" ? hedgeDelta(filled) : filled;
+    return tradeFuture(filled, side, rem / miniQty(under), expiry, under);
   }
-  const pos = { id: uid("fut"), side, sizeEth: size, entry: px, expiry, margin, openedAt: s.clock, under };
+
+  const hit = s.futures.find((p) => (p.under ?? "ETH") === under && p.side === side && p.expiry === expiry);
+  const total = (hit?.sizeEth ?? 0) + size;
+  const rate = imRate(s, total, under);
+  const want = total * px * rate;
+  const extra = want - (hit?.margin ?? 0);
+  if (s.account.usdc + 1e-9 < extra + fee) return "Not enough buying power for initial margin + fee.";
+  const vault = applyVaultOpen(s.vault, side, size, px, under);
+  if (typeof vault === "string") return vault;
+  const entry = hit ? (hit.entry * hit.sizeEth + px * size) / total : px;
+  const pos = hit
+    ? { ...hit, sizeEth: total, entry, margin: want }
+    : { id: uid("fut"), side, sizeEth: size, entry: px, expiry, margin: want, openedAt: s.clock, under };
+  const futures = hit ? s.futures.map((p) => (p.id === hit.id ? pos : p)) : [...s.futures, pos];
   const next: EngineState = {
     ...s,
-    account: { ...s.account, usdc: s.account.usdc - margin - fee, realized: s.account.realized - fee },
+    account: { ...s.account, usdc: s.account.usdc - extra - fee, realized: s.account.realized - fee },
     vault,
-    futures: [...s.futures, pos],
+    futures,
   };
   const filled = takeFee(
     pushFill(next, {
@@ -916,7 +1088,7 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
       size,
       price: px,
       fee,
-      note: under === "ETH" ? "covered · delta-hedged" : "cash-settled · USDC IM",
+      note: under === "ETH" ? "covered · delta-hedged · netted" : "cash-settled · USDC IM · netted",
     }),
     fee,
   );
@@ -929,30 +1101,10 @@ export function closeFuture(s: EngineState, id: string): EngineState | string {
   const under = pos.under ?? "ETH";
   const mark = markOf(s, under);
   if (!(mark > 0) || !Number.isFinite(mark)) return `No mark for ${under}.`;
+  const reduced = reduceFuture(s, pos, pos.sizeEth, mark);
+  if (typeof reduced === "string") return reduced;
   const pnl = futPnl(pos, mark);
-  const vault = { ...s.vault };
-  if (under === "ETH") {
-    if (pos.side === "long") {
-      vault.reservedEth = Math.max(0, vault.reservedEth - pos.sizeEth);
-    } else {
-      vault.reservedUsdc = Math.max(0, vault.reservedUsdc - pos.entry * pos.sizeEth);
-      vault.eth += pos.sizeEth;
-      vault.usdc -= pos.sizeEth * mark;
-    }
-  } else {
-    vault.reservedUsdc = Math.max(0, vault.reservedUsdc - pos.entry * pos.sizeEth);
-  }
-  const next: EngineState = {
-    ...s,
-    account: {
-      ...s.account,
-      usdc: s.account.usdc + pos.margin + pnl,
-      realized: s.account.realized + pnl,
-    },
-    vault,
-    futures: s.futures.filter((p) => p.id !== id),
-  };
-  const filled = pushFill(next, {
+  const filled = pushFill(reduced, {
     id: uid("f"),
     t: s.clock,
     product: "future",
@@ -964,6 +1116,53 @@ export function closeFuture(s: EngineState, id: string): EngineState | string {
     note: `PnL ${pnl.toFixed(2)}`,
   });
   return under === "ETH" ? hedgeDelta(filled) : filled;
+}
+
+function commitOption(
+  s: EngineState,
+  pos: EngineState["options"][number],
+  extraPremium: number,
+  fee: number,
+  vault: EngineState["vault"],
+  hedge: boolean,
+): EngineState {
+  const hit = s.options.find(
+    (p) =>
+      (p.under ?? "ETH") === (pos.under ?? "ETH") &&
+      p.type === pos.type &&
+      p.strike === pos.strike &&
+      p.expiry === pos.expiry,
+  );
+  let options: EngineState["options"];
+  if (hit) {
+    const total = hit.sizeEth + pos.sizeEth;
+    const premium = (hit.premium * hit.sizeEth + pos.premium * pos.sizeEth) / total;
+    const merged = { ...hit, sizeEth: total, premium };
+    options = s.options.map((p) => (p.id === hit.id ? merged : p));
+  } else {
+    options = [...s.options, pos];
+  }
+  const next: EngineState = {
+    ...s,
+    account: { ...s.account, usdc: s.account.usdc - extraPremium - fee, realized: s.account.realized - fee },
+    vault,
+    options,
+  };
+  const filled = takeFee(
+    pushFill(next, {
+      id: uid("f"),
+      t: s.clock,
+      product: "option",
+      symbol: `${pos.under ?? "ETH"} ${pos.strike} ${pos.type} mini`,
+      side: "buy",
+      size: pos.sizeEth,
+      price: pos.premium,
+      fee,
+      note: hedge ? "covered / cash-secured · delta-hedged · netted" : "cash-settled · cash-secured · netted",
+    }),
+    fee,
+  );
+  return hedge ? hedgeDelta(filled) : filled;
 }
 
 export function buyOption(s: EngineState, type: OptType, strike: number, expiry: number, contracts: number, under = "ETH"): EngineState | string {
@@ -986,26 +1185,7 @@ export function buyOption(s: EngineState, type: OptType, strike: number, expiry:
     if (s.vault.usdc - s.vault.reservedUsdc < lock) return "Not enough USDC to cash-secure.";
     const vault = { ...s.vault, reservedUsdc: s.vault.reservedUsdc + lock };
     const pos = { id: uid("opt"), type, strike, expiry, sizeEth, premium: px, openedAt: s.clock, under };
-    const next: EngineState = {
-      ...s,
-      account: { ...s.account, usdc: s.account.usdc - premium - fee, realized: s.account.realized - fee },
-      vault,
-      options: [...s.options, pos],
-    };
-    return takeFee(
-      pushFill(next, {
-        id: uid("f"),
-        t: s.clock,
-        product: "option",
-        symbol: `${under} ${strike} ${type} mini`,
-        side: "buy",
-        size: sizeEth,
-        price: px,
-        fee,
-        note: "cash-settled · cash-secured",
-      }),
-      fee,
-    );
+    return commitOption(s, pos, premium, fee, vault, false);
   }
   const g = bookGreeks(s);
   const why = rejectOption(s, type, strike, expiry, sizeEth, g.gamma, g.vega);
@@ -1033,29 +1213,9 @@ export function buyOption(s: EngineState, type: OptType, strike: number, expiry:
     sizeEth,
     premium: px,
     openedAt: s.clock,
+    under,
   };
-  const next: EngineState = {
-    ...s,
-    account: { ...s.account, usdc: s.account.usdc - premium - fee, realized: s.account.realized - fee },
-    vault,
-    options: [...s.options, pos],
-  };
-  return hedgeDelta(
-    takeFee(
-      pushFill(next, {
-        id: uid("f"),
-        t: s.clock,
-        product: "option",
-        symbol: `ETH ${strike} ${type} mini`,
-        side: "buy",
-        size: sizeEth,
-        price: px,
-        fee,
-        note: "covered / cash-secured · delta-hedged",
-      }),
-      fee,
-    ),
-  );
+  return commitOption(s, pos, premium, fee, vault, true);
 }
 
 function settleAndLiq(s: EngineState): EngineState {
@@ -1063,7 +1223,7 @@ function settleAndLiq(s: EngineState): EngineState {
   for (const p of s.futures) {
     const mark = markOf(next, p.under ?? "ETH");
     const eq = p.margin + futPnl(p, mark);
-    const maint = p.sizeEth * mark * FUT_MM;
+    const maint = futMaint(p, mark);
     if (eq < maint || s.clock >= p.expiry) {
       const closed = closeFuture(next, p.id);
       if (typeof closed !== "string") {

@@ -35,6 +35,9 @@ import {
   maxSpotQty,
   maxMiniContracts,
   placeDeskOrder,
+  groupedFutures,
+  groupedOptions,
+  imRate,
 } from "./engine.ts";
 import { MAX_FARM_APY, MAX_LOT } from "./limits.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
@@ -75,15 +78,17 @@ describe("golden G1–G6", () => {
     assert.ok(s.vault.reservedEth / s.vault.eth >= 0.24);
   });
 
-  it("G4 open future IM = 0.25 × size × S", () => {
+  it("G4 open future IM starts at 25% and scales with size", () => {
     const s = initialState();
     const r = tradeFuture(s, "long", 1, exp);
     assert.equal(typeof r, "object");
     const next = r as typeof s;
     const size = MINI_ETH;
-    const im = size * next.futures[0]!.entry * FUT_IM;
-    assert.ok(Math.abs(next.futures[0]!.margin - im) < 1e-6);
-    assert.ok(Math.abs(s.account.usdc - next.account.usdc - im - next.fills[0]!.fee) < 1e-4);
+    const notional = size * next.futures[0]!.entry;
+    const rate = next.futures[0]!.margin / notional;
+    assert.ok(rate >= FUT_IM - 1e-9, String(rate));
+    assert.ok(rate <= 0.28, String(rate));
+    assert.ok(Math.abs(s.account.usdc - next.account.usdc - next.futures[0]!.margin - next.fills[0]!.fee) < 1e-4);
   });
 
   it("G5 liquidation when equity < 0.125 × size × S", () => {
@@ -507,5 +512,60 @@ describe("house limits", () => {
     assert.ok(n >= 1);
     const poor = { ...s, account: { ...s.account, usdc: 1 } };
     assert.equal(maxMiniContracts(poor, "long", "ETH"), 0);
+  });
+});
+
+describe("netting and cover", () => {
+  it("two longs of the same expiry collapse to one book", () => {
+    let s = initialState();
+    const a = tradeFuture(s, "long", 1, exp);
+    assert.equal(typeof a, "object", String(a));
+    s = a as typeof s;
+    const b = tradeFuture(s, "long", 2, exp);
+    assert.equal(typeof b, "object", String(b));
+    s = b as typeof s;
+    assert.equal(s.futures.length, 1);
+    assert.ok(Math.abs(s.futures[0]!.sizeEth - 3 * MINI_ETH) < 1e-9);
+    assert.equal(groupedFutures(s).length, 1);
+  });
+
+  it("buying the other side flattens instead of opening a second line", () => {
+    let s = initialState();
+    const a = tradeFuture(s, "long", 2, exp);
+    assert.equal(typeof a, "object", String(a));
+    s = a as typeof s;
+    const b = tradeFuture(s, "short", 2, exp);
+    assert.equal(typeof b, "object", String(b));
+    s = b as typeof s;
+    assert.equal(s.futures.length, 0);
+  });
+
+  it("two same-strike calls net to one option line", () => {
+    let s = initialState();
+    const a = buyOption(s, "call", 4000, exp, 1);
+    assert.equal(typeof a, "object", String(a));
+    s = a as typeof s;
+    const b = buyOption(s, "call", 4000, exp, 1);
+    assert.equal(typeof b, "object", String(b));
+    s = b as typeof s;
+    assert.equal(s.options.length, 1);
+    assert.ok(Math.abs(s.options[0]!.sizeEth - 2 * MINI_ETH) < 1e-9);
+    assert.equal(groupedOptions(s).length, 1);
+  });
+
+  it("IM rate rises as size eats cover", () => {
+    const s = initialState();
+    const small = imRate(s, MINI_ETH, "ETH");
+    const big = imRate(s, 20, "ETH");
+    assert.ok(small >= 0.25 - 1e-12);
+    assert.ok(big > small + 0.02, `${small} vs ${big}`);
+    assert.ok(big <= 0.75);
+  });
+
+  it("rejects a book the vault cannot cover", () => {
+    const s = initialState();
+    const r = tradeFuture(s, "long", 10_000, exp);
+    assert.equal(typeof r, "string");
+    assert.match(String(r), /cover|cap|pool|Inventory|notional/i);
   });
 });

@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  buyingPower,
   dayPnl,
   equity,
   farmApy,
@@ -9,11 +10,15 @@ import {
   fmtExpiry,
   futLiqPrice,
   futPnl,
+  groupedFutures,
+  groupedOptions,
+  liqHealth,
   lpPnl,
   lpValue,
   markOf,
-  optionQuote,
+  optMark,
   tokenPx,
+  usedMargin,
 } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { STAKE_APR } from "@/lib/wolfpit/types";
@@ -30,8 +35,13 @@ export function Positions() {
   const eq = equity(s);
   const day = dayPnl(s);
   const start = s.account.startEquity || eq;
-  const pnl = eq - start;
+  const openPnl = eq - start;
+  const health = liqHealth(s);
+  const used = usedMargin(s);
+  const avail = buyingPower(s);
   const harvested = s.harvestedWpit ?? 0;
+  const minis = groupedFutures(s);
+  const vanillas = groupedOptions(s);
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-border bg-panel">
@@ -42,116 +52,92 @@ export function Positions() {
             Fills
           </Button>
         </div>
-        <p className="mt-1 font-display text-2xl leading-none">{fmtUsd(eq)}</p>
-        <p className={cn("mt-1 font-mono text-[11px]", pnl >= 0 ? "text-up" : "text-down")}>
-          Book {pnl >= 0 ? "+" : "−"}
-          {fmtUsd(Math.abs(pnl))} · day {day >= 0 ? "+" : "−"}
-          {fmtUsd(Math.abs(day))}
-        </p>
-        <p className="font-mono text-[10px] text-muted">Realized {fmtUsd(s.account.realized)}</p>
+        <p className="mt-1 font-display text-2xl leading-none tabular-nums">{fmtUsd(eq)}</p>
+        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[11px]">
+          <Stat k="P/L Day" v={signed(day)} tone={day} />
+          <Stat k="P/L Open" v={signed(openPnl)} tone={openPnl} />
+          <Stat k="Net Liq" v={fmtUsd(eq)} />
+          <Stat k="Available $" v={fmtUsd(avail)} />
+          <Stat k="Margin" v={fmtUsd(used)} />
+          <Stat k="Health" v={health.label} tone={health.tone === "down" ? -1 : health.tone === "warn" ? 0 : 1} />
+        </dl>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        <Sec title="Cash">
-          <Row k="USDC" v={fmtUsd(s.account.usdc)} />
-          <Row k="ETH" v={`${s.account.eth.toPrecision(4)} · ${fmtUsd(s.account.eth * s.eth)}`} />
-          <Row k="WPIT" v={`${s.account.wpit.toFixed(1)} · ${fmtUsd(s.account.wpit * s.wpit)}`} />
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 border-b border-border bg-elevated px-3 py-1 font-mono text-[9px] uppercase tracking-wider text-subtle">
+          <span>Symbol</span>
+          <span className="text-right">Qty</span>
+          <span className="text-right">Mark</span>
+          <span className="text-right">P/L Open</span>
+        </div>
+
+        <Sec title="Holdings">
+          <Hold k="USDC" qty={s.account.usdc} mark={1} />
+          <Hold k="ETH" qty={s.account.eth} mark={s.eth} />
+          <Hold k="WPIT" qty={s.account.wpit} mark={s.wpit} />
           {Object.entries(s.account.tokens ?? {}).map(([sym, qty]) =>
-            Math.abs(qty) > 1e-8 ? (
-              <Row key={sym} k={sym} v={`${qty.toPrecision(4)} · ${fmtUsd(qty * tokenPx(s, sym))}`} />
-            ) : null,
+            Math.abs(qty) > 1e-8 ? <Hold key={sym} k={sym} qty={qty} mark={tokenPx(s, sym)} /> : null,
           )}
         </Sec>
 
         <Sec title="Minis">
-          {s.futures.length === 0 ? <Empty>No minis</Empty> : null}
-          {s.futures.map((p) => {
+          {minis.length === 0 ? <Empty>No minis</Empty> : null}
+          {minis.map((p) => {
             const mark = markOf(s, p.under ?? "ETH");
             const pnlP = futPnl(p, mark);
+            const qty = p.side === "long" ? p.sizeEth : -p.sizeEth;
             return (
-              <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                <button
-                  type="button"
-                  className="min-w-0 text-left"
-                  onClick={() => void nav({ to: "/trade" })}
-                >
-                  <div className={cn("font-mono text-[11px] uppercase", p.side === "long" ? "text-up" : "text-down")}>
-                    {p.side} {p.under ?? "ETH"}
-                  </div>
-                  <div className="font-mono text-[10px] text-muted">
-                    {p.sizeEth} · {fmtPx(p.entry)} → {fmtPx(mark)} · liq {fmtPx(futLiqPrice(p))}
-                  </div>
-                  <div className="font-mono text-[10px] text-subtle">{fmtExpiry(p.expiry)}</div>
-                </button>
-                <div className="shrink-0 text-right">
-                  <div className={cn("font-mono text-xs", pnlP >= 0 ? "text-up" : "text-down")}>{fmtUsd(pnlP)}</div>
-                  <button type="button" className="pressable mt-1 text-[11px] text-brass" onClick={() => closeFut(p.id)}>
-                    Close
-                  </button>
-                </div>
-              </div>
+              <PosRow
+                key={p.id}
+                symbol={`${p.under ?? "ETH"} mini ${fmtExpiry(p.expiry)}`}
+                sub={`${p.side.toUpperCase()} · liq ${fmtPx(futLiqPrice(p))} · IM ${fmtUsd(p.margin)}`}
+                qty={qty}
+                mark={mark}
+                pnl={pnlP}
+                tone={p.side === "long" ? "up" : "down"}
+                onClose={() => closeFut(p.id)}
+              />
             );
           })}
         </Sec>
 
         <Sec title="Options">
-          {s.options.length === 0 ? <Empty>No vanillas</Empty> : null}
-          {s.options.map((p) => {
-            const q = optionQuote(s, p.type, p.strike, p.expiry, p.under ?? "ETH");
-            const mid = ((q.bid || 0) + (q.ask || 0)) / 2 || p.premium;
+          {vanillas.length === 0 ? <Empty>No vanillas</Empty> : null}
+          {vanillas.map((p) => {
+            const mid = optMark(s, p);
             const pnlP = (mid - p.premium) * p.sizeEth;
             return (
-              <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="font-mono text-[11px]">
-                    {p.type.toUpperCase()} {p.under ?? "ETH"} {fmtPx(p.strike)}
-                  </div>
-                  <div className="font-mono text-[10px] text-muted">
-                    {p.sizeEth} · paid {fmtPx(p.premium)} · {fmtExpiry(p.expiry)}
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className={cn("font-mono text-xs", pnlP >= 0 ? "text-up" : "text-down")}>{fmtUsd(pnlP)}</div>
-                  <button type="button" className="pressable mt-1 text-[11px] text-brass" onClick={() => closeOpt(p.id)}>
-                    Close
-                  </button>
-                </div>
-              </div>
+              <PosRow
+                key={p.id}
+                symbol={`${p.under ?? "ETH"} ${fmtPx(p.strike)} ${p.type.toUpperCase()}`}
+                sub={`paid ${fmtPx(p.premium)} · ${fmtExpiry(p.expiry)}`}
+                qty={p.sizeEth}
+                mark={mid}
+                pnl={pnlP}
+                onClose={() => closeOpt(p.id)}
+              />
             );
           })}
         </Sec>
 
-        <Sec title="Farms · LP tokens">
+        <Sec title="Farms · LP">
           {s.lp.length === 0 ? <Empty>No LP</Empty> : null}
           {s.lp.map((p) => {
             const val = lpValue(s, p.poolId, p.shares);
             const pnlP = lpPnl(s, p);
             const pending = farmPending(s, p.poolId);
+            const mark = p.shares > 0 ? val / p.shares : 0;
             return (
-              <div key={p.poolId} className="px-3 py-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="font-mono text-[11px]">{p.poolId.replace("-TEST", "")}</div>
-                    <div className="font-mono text-[10px] text-muted">
-                      {p.shares.toPrecision(4)} LP · {fmtUsd(val)} · {fmtPct(farmApy(s, p.poolId))} APY
-                    </div>
-                    <div className="font-mono text-[10px] text-subtle">
-                      Ripe {pending.toFixed(2)} WPIT
-                      {p.costUsdc ? ` · cost ${fmtUsd(p.costUsdc)}` : ""}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className={cn("font-mono text-xs", pnlP >= 0 ? "text-up" : "text-down")}>{fmtUsd(pnlP)}</div>
-                    <button
-                      type="button"
-                      className="pressable mt-1 text-[11px] text-brass"
-                      onClick={() => lpRemove(p.poolId, p.shares)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <PosRow
+                key={p.poolId}
+                symbol={p.poolId.replace("-TEST", "")}
+                sub={`${fmtPct(farmApy(s, p.poolId))} APY · ripe ${pending.toFixed(2)} WPIT`}
+                qty={p.shares}
+                mark={mark}
+                pnl={pnlP}
+                onClose={() => lpRemove(p.poolId, p.shares)}
+                closeLabel="Remove"
+              />
             );
           })}
           <div className="flex items-center justify-between px-3 py-2 font-mono text-[11px]">
@@ -168,17 +154,15 @@ export function Positions() {
           {s.stake.amount <= 0 ? (
             <Empty>None staked</Empty>
           ) : (
-            <div className="flex items-center justify-between px-3 py-2">
-              <div>
-                <div className="font-mono text-[11px]">{s.stake.amount.toFixed(1)} WPIT</div>
-                <div className="font-mono text-[10px] text-muted">
-                  {fmtUsd(s.stake.amount * s.wpit)} · {(STAKE_APR * 100).toFixed(0)}% APR
-                </div>
-              </div>
-              <button type="button" className="pressable text-[11px] text-brass" onClick={() => unstake()}>
-                Unstake
-              </button>
-            </div>
+            <PosRow
+              symbol="WPIT stake"
+              sub={`${(STAKE_APR * 100).toFixed(0)}% APR`}
+              qty={s.stake.amount}
+              mark={s.wpit}
+              pnl={0}
+              onClose={() => unstake()}
+              closeLabel="Unstake"
+            />
           )}
         </Sec>
       </div>
@@ -186,24 +170,81 @@ export function Positions() {
   );
 }
 
+function Hold({ k, qty, mark }: { k: string; qty: number; mark: number }) {
+  return (
+    <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-2 px-3 py-1.5 font-mono text-[11px]">
+      <span>{k}</span>
+      <span className="text-right tabular-nums">{qty.toPrecision(4)}</span>
+      <span className="text-right tabular-nums text-muted">{fmtPx(mark)}</span>
+      <span className="w-[4.6rem] text-right tabular-nums text-subtle">{fmtUsd(qty * mark)}</span>
+    </div>
+  );
+}
+
+function PosRow({
+  symbol,
+  sub,
+  qty,
+  mark,
+  pnl,
+  tone,
+  onClose,
+  closeLabel = "Close",
+}: {
+  symbol: string;
+  sub: string;
+  qty: number;
+  mark: number;
+  pnl: number;
+  tone?: "up" | "down";
+  onClose: () => void;
+  closeLabel?: string;
+}) {
+  return (
+    <div className="border-t border-border/60 px-3 py-1.5">
+      <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-2 font-mono text-[11px]">
+        <span className={cn("truncate uppercase", tone === "up" && "text-up", tone === "down" && "text-down")}>{symbol}</span>
+        <span className={cn("text-right tabular-nums", qty >= 0 ? "text-up" : "text-down")}>
+          {qty >= 0 ? "+" : ""}
+          {qty.toPrecision(4)}
+        </span>
+        <span className="text-right tabular-nums">{fmtPx(mark)}</span>
+        <span className={cn("w-[4.6rem] text-right tabular-nums", pnl >= 0 ? "text-up" : "text-down")}>{signed(pnl)}</span>
+      </div>
+      <div className="mt-0.5 flex items-center justify-between">
+        <span className="font-mono text-[10px] text-subtle">{sub}</span>
+        <button type="button" className="pressable text-[11px] text-brass" onClick={onClose}>
+          {closeLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ k, v, tone }: { k: string; v: string; tone?: number }) {
+  const cls =
+    tone === undefined ? "text-fg" : tone > 0 ? "text-up" : tone < 0 ? "text-down" : "text-warn";
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <dt className="text-subtle">{k}</dt>
+      <dd className={cn("tabular-nums", cls)}>{v}</dd>
+    </div>
+  );
+}
+
+function signed(n: number) {
+  return `${n >= 0 ? "+" : "−"}${fmtUsd(Math.abs(n))}`;
+}
+
 function Sec({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="border-b border-border">
-      <h3 className="px-3 pt-3 font-mono text-[10px] uppercase tracking-wider text-brass">{title}</h3>
+      <h3 className="px-3 pt-2 font-mono text-[10px] uppercase tracking-wider text-brass">{title}</h3>
       {children}
     </section>
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-center justify-between px-3 py-1.5 font-mono text-[11px]">
-      <span className="text-muted">{k}</span>
-      <span>{v}</span>
-    </div>
-  );
-}
-
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-3 py-2 text-[11px] text-subtle">{children}</p>;
+  return <p className="px-3 py-2 text-[11px] text-muted">{children}</p>;
 }

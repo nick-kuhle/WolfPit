@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { SideToggle } from "@/components/ui/toggle";
 import {
   buyingPower,
   expiries,
   futLiqPrice,
+  imRate,
   markOf,
   maxMiniContracts,
   maxSpotQty,
   miniQty,
+  mmRate,
   optionQuote,
   quoteInForBaseOut,
   strikeGrid,
@@ -16,15 +17,11 @@ import {
 import { MAX_LOT } from "@/lib/wolfpit/limits";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { DeskSide, OrderKind, OptType, PoolId, Product, Tif } from "@/lib/wolfpit/types";
-import { FUT_IM, FUT_MM } from "@/lib/wolfpit/types";
 import { useAdmin } from "@/lib/admin/config";
 import { cn, fmtPx, fmtUsd } from "@/lib/utils";
 
-const KINDS: { id: OrderKind; label: string }[] = [
-  { id: "mkt", label: "MKT" },
-  { id: "lmt", label: "LMT" },
-  { id: "stp", label: "STP" },
-];
+const KINDS: OrderKind[] = ["mkt", "lmt", "stp"];
+const TIFS: Tif[] = ["day", "gtc", "ioc"];
 
 export function OrderTicket({
   prefer,
@@ -51,6 +48,7 @@ export function OrderTicket({
   const [optType, setOptType] = useState<OptType>("call");
   const [strike, setStrike] = useState(0);
   const [sheet, setSheet] = useState(false);
+  const [review, setReview] = useState(false);
 
   const s = useWolf();
   const send = useWolf((st) => st.sendOrder);
@@ -75,6 +73,7 @@ export function OrderTicket({
     setPoolId(id);
     setQty("1");
     setSheet(false);
+    setReview(false);
   }, [under]);
 
   const clock = s.clock;
@@ -87,8 +86,10 @@ export function OrderTicket({
   const products: Product[] = geo ? ["spot"] : ["spot", "future", "option"];
   const futSide = side === "buy" ? "long" : "short";
   const size = n * miniQty(under);
-  const im = size * spot * FUT_IM;
-  const mm = size * spot * FUT_MM;
+  const rate = imRate(s, Math.max(size, miniQty(under)), under);
+  const mmR = mmRate(s, Math.max(size, miniQty(under)), under);
+  const im = size * spot * rate;
+  const mm = size * spot * mmR;
   const liq = futLiqPrice({
     id: "",
     side: futSide,
@@ -107,7 +108,6 @@ export function OrderTicket({
   const maxN =
     product === "spot" ? maxSpot : product === "future" ? maxMini : Math.max(0, Math.min(maxOpt, MAX_LOT));
   const q = product === "option" ? optionQuote(s, optType, k, exp.at, under) : null;
-  const futWhy = product === "future" ? (n > 0 ? null : "Size must be positive.") : null;
 
   const est = (() => {
     if (product === "spot") {
@@ -122,7 +122,11 @@ export function OrderTicket({
       return { label: `Credit ~${fmtUsd(out)} ${pool.quote}`, usd: 0 };
     }
     if (product === "future") {
-      return { label: `IM ${fmtUsd(im)} · debit ${fmtUsd(im + size * spot * 0.0005)} · ${(1 / FUT_IM).toFixed(1)}×`, usd: im + size * spot * 0.0005 };
+      const lev = rate > 0 ? 1 / rate : 0;
+      return {
+        label: `IM ${fmtUsd(im)} · ${(lev).toFixed(1)}× · liq ${fmtPx(liq)}`,
+        usd: im + size * spot * 0.0005,
+      };
     }
     const debit = (q?.ask ?? 0) * n * miniQty(under);
     return { label: `Debit ${fmtUsd(debit)}`, usd: debit };
@@ -156,6 +160,7 @@ export function OrderTicket({
       under,
     });
     setSheet(false);
+    setReview(false);
   }
 
   function pickLadder(type: OptType, click: "bid" | "ask", ks: number) {
@@ -164,10 +169,13 @@ export function OrderTicket({
     setStrike(ks);
     setSide(click === "ask" ? "buy" : "sell");
     setSheet(true);
+    setReview(false);
   }
 
+  const editor = sheet || product !== "option";
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-panel">
+    <div className="relative flex h-full min-h-0 flex-col bg-panel">
       <div className="flex border-b border-border">
         {products.map((p) => (
           <button
@@ -175,6 +183,7 @@ export function OrderTicket({
             onClick={() => {
               setProduct(p);
               setSheet(false);
+              setReview(false);
               clear();
             }}
             className={cn(
@@ -232,36 +241,29 @@ export function OrderTicket({
               })}
             </div>
           </>
-        ) : product !== "option" ? (
-          <>
-            <div className="mt-2">
-              <SideToggle value={side} onChange={setSide} />
-            </div>
-            {product === "future" ? (
-              <div className="mt-2 flex gap-1 overflow-x-auto">
-                {exps.map((e, i) => (
-                  <button
-                    key={e.at}
-                    onClick={() => setExi(i)}
-                    className={cn(
-                      "pressable h-9 shrink-0 rounded-full border px-3 font-mono text-[11px]",
-                      i === exi ? "border-brass bg-brass text-bg" : "border-border text-muted",
-                    )}
-                  >
-                    {e.label} · {e.when.replace(" UTC", "")}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <Field label="Pool">
-                <select className={inp} value={poolId} onChange={(e) => setPoolId(e.target.value as PoolId)}>
-                  {Object.keys(s.pools).map((id) => (
-                    <option key={id}>{id}</option>
-                  ))}
-                </select>
-              </Field>
-            )}
-          </>
+        ) : product === "future" ? (
+          <div className="mt-2 flex gap-1 overflow-x-auto">
+            {exps.map((e, i) => (
+              <button
+                key={e.at}
+                onClick={() => setExi(i)}
+                className={cn(
+                  "pressable h-9 shrink-0 rounded-full border px-3 font-mono text-[11px]",
+                  i === exi ? "border-brass bg-brass text-bg" : "border-border text-muted",
+                )}
+              >
+                {e.label} · {e.when.replace(" UTC", "")}
+              </button>
+            ))}
+          </div>
+        ) : product === "spot" ? (
+          <Field label="Pool">
+            <select className={inp} value={poolId} onChange={(e) => setPoolId(e.target.value as PoolId)}>
+              {Object.keys(s.pools).map((id) => (
+                <option key={id}>{id}</option>
+              ))}
+            </select>
+          </Field>
         ) : (
           <p className="mt-2 font-mono text-[11px] text-brass">
             {side.toUpperCase()} {optType.toUpperCase()} {under} {fmtPx(k)} · {exp.when}
@@ -269,43 +271,97 @@ export function OrderTicket({
         )}
       </div>
 
-      {sheet || product !== "option" ? (
-        <div className="shrink-0 border-t border-brass/30 bg-elevated px-3 py-2">
-          {product === "option" ? (
-            <p className="mb-1 font-mono text-[11px] text-brass">
-              {side.toUpperCase()} {optType.toUpperCase()} {fmtPx(k)} · {exp.label}
+      {editor ? (
+        <div className="shrink-0 border-t border-brass/30 bg-[#1a0c0c]">
+          <div className="flex items-center gap-1 px-3 py-2">
+            <div className="grid h-9 w-28 grid-cols-2 overflow-hidden rounded-full border border-down/50">
+              <button
+                type="button"
+                className={cn("text-[11px] font-medium", side === "sell" ? "bg-down text-fg" : "text-muted")}
+                onClick={() => setSide("sell")}
+              >
+                Sell
+              </button>
+              <button
+                type="button"
+                className={cn("text-[11px] font-medium", side === "buy" ? "bg-up text-bg" : "text-muted")}
+                onClick={() => setSide("buy")}
+              >
+                Buy
+              </button>
+            </div>
+            <Carousel
+              value={kind}
+              items={KINDS}
+              label={(knd) => (knd === "mkt" ? "MARKET" : knd === "lmt" ? "LIMIT" : "STOP")}
+              onChange={setKind}
+            />
+          </div>
+
+          <Line label="Quantity">
+            <Stepper value={qty} onChange={setQty} step={product === "spot" ? 0.1 : 1} dp={product === "spot" ? 4 : 0} />
+          </Line>
+          {kind === "lmt" || kind === "stp" ? (
+            <Line label={kind === "lmt" ? "Limit" : "Stop"}>
+              <Stepper
+                value={kind === "lmt" ? limit : stop}
+                onChange={kind === "lmt" ? setLimit : setStop}
+                step={spot > 100 ? 0.5 : 0.01}
+                dp={spot > 100 ? 2 : 4}
+              />
+            </Line>
+          ) : null}
+
+          <div className="flex items-center justify-between border-t border-white/5 px-3 py-2">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-subtle">Cost of Trade</div>
+              <div className="font-display text-xl tabular-nums">{Number.isFinite(est.usd) ? fmtUsd(side === "sell" && product === "spot" ? -est.usd : est.usd) : "—"}</div>
+            </div>
+            <div className="text-right font-mono text-[10px] text-muted">
+              {product === "future" ? (
+                <>
+                  IM {fmtUsd(im)} · MM {fmtUsd(mm)}
+                  <br />
+                  liq {fmtPx(liq)} · {(rate * 100).toFixed(0)}%
+                </>
+              ) : (
+                est.label
+              )}
+              <br />
+              max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} · cash {fmtUsd(bp)}
+            </div>
+          </div>
+
+          <Line label="TIF">
+            <Carousel value={tif} items={TIFS} label={(x) => x.toUpperCase()} onChange={setTif} />
+          </Line>
+
+          {overSize ? (
+            <p className="px-3 text-[10px] text-down">
+              Size exceeds max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} given cash, inventory, and pool depth.
             </p>
           ) : null}
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <div className="text-[10px] uppercase tracking-wider text-subtle">{product === "spot" ? "Qty" : "Contracts"}</div>
-              <Stepper
-                value={qty}
-                onChange={setQty}
-                step={product === "spot" ? 0.1 : 1}
-                presets={product === "spot" ? [0.1, 0.5, 1, Math.max(0.1, Math.min(5, maxN))] : [1, 2, 5, 10].filter((p) => p <= Math.max(1, maxN))}
-                dp={product === "spot" ? 4 : 0}
-              />
-            </div>
-            <Button className="h-11 px-5" variant={side === "buy" ? "up" : "down"} disabled={blocked} onClick={fire}>
-              {side === "buy" ? "Buy" : "Sell"}
+          {overCash ? (
+            <p className="px-3 text-[10px] text-down">
+              Not enough cash. Debit {fmtUsd(est.usd)} vs {fmtUsd(bp)} free.
+            </p>
+          ) : null}
+          {product === "option" && side === "sell" ? (
+            <p className="px-3 text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p>
+          ) : null}
+          {q?.blank ? <p className="px-3 text-[10px] text-down">{q.blank}</p> : null}
+          {err ? <p className="px-3 text-[10px] text-down">{err}</p> : null}
+
+          <div className="flex gap-2 px-3 py-2">
+            {product === "option" ? (
+              <Button variant="ghost" className="h-11 flex-1" onClick={() => { setSheet(false); setReview(false); }}>
+                Edit
+              </Button>
+            ) : null}
+            <Button className="h-11 flex-1" variant={side === "buy" ? "up" : "down"} disabled={blocked} onClick={() => setReview(true)}>
+              Review
             </Button>
           </div>
-          <p className="mt-1 font-mono text-[10px] text-muted">
-            {est.label}
-            {product === "future" ? ` · liq ${fmtPx(liq)} · MM ${fmtUsd(mm)}` : ""}
-            {` · max ${product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} · cash ${fmtUsd(bp)}`}
-          </p>
-          {overSize ? <p className="text-[10px] text-down">Size exceeds max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} given cash, inventory, and pool depth.</p> : null}
-          {overCash ? <p className="text-[10px] text-down">Not enough cash for this size. Debit {fmtUsd(est.usd)} vs {fmtUsd(bp)} free.</p> : null}
-          {product === "option" && side === "sell" ? <p className="text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p> : null}
-          {q?.blank ? <p className="text-[10px] text-down">{q.blank}</p> : null}
-          {err ? <p className="text-[10px] text-down">{err}</p> : null}
-          {product === "option" ? (
-            <button type="button" className="mt-1 text-[11px] text-brass" onClick={() => setSheet(false)}>
-              Back to chain
-            </button>
-          ) : null}
         </div>
       ) : null}
 
@@ -323,6 +379,74 @@ export function OrderTicket({
           ))}
         </div>
       ) : null}
+
+      {review ? (
+        <div className="absolute inset-0 z-20 flex flex-col bg-bg/95 p-4 backdrop-blur-sm">
+          <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-brass">Simulated trade confirmation</p>
+          <h3 className="mt-2 font-display text-2xl">
+            {side.toUpperCase()} {n} {product === "option" ? `${optType.toUpperCase()} ${fmtPx(k)}` : product === "future" ? `${under} mini` : under}
+          </h3>
+          <p className="mt-1 font-mono text-sm text-muted">
+            {kind.toUpperCase()} · {tif.toUpperCase()}
+            {product !== "spot" ? ` · ${exp.when}` : ` · ${poolId}`}
+          </p>
+          <dl className="mt-4 space-y-1 font-mono text-[12px]">
+            <Row k="Cost of trade" v={fmtUsd(est.usd)} />
+            {product === "future" ? (
+              <>
+                <Row k="Initial margin" v={`${fmtUsd(im)} (${(rate * 100).toFixed(0)}%)`} />
+                <Row k="Maintenance" v={fmtUsd(mm)} />
+                <Row k="Liquidation" v={fmtPx(liq)} />
+                <Row k="Covered by pit" v="yes · inventory + pool depth" />
+              </>
+            ) : null}
+            <Row k="Buying power after" v={fmtUsd(Math.max(0, bp - (est.usd || 0)))} />
+          </dl>
+          <p className="mt-auto pt-4 text-[11px] text-muted">Paper funds. Confirm to shout it into the pit.</p>
+          <div className="mt-3 flex gap-2">
+            <Button variant="outline" className="h-12 flex-1" onClick={() => setReview(false)}>
+              Edit
+            </Button>
+            <Button className="h-12 flex-1" variant={side === "buy" ? "up" : "down"} onClick={fire}>
+              Confirm
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Carousel<T extends string>({
+  value,
+  items,
+  label,
+  onChange,
+}: {
+  value: T;
+  items: T[];
+  label: (v: T) => string;
+  onChange: (v: T) => void;
+}) {
+  const i = Math.max(0, items.indexOf(value));
+  return (
+    <div className="flex h-9 flex-1 items-center justify-center gap-2 rounded-full border border-down/40 px-2">
+      <button type="button" className="pressable px-1 text-brass" onClick={() => onChange(items[(i - 1 + items.length) % items.length]!)}>
+        ‹
+      </button>
+      <span className="min-w-[4.5rem] text-center font-mono text-[11px] uppercase tracking-wider">{label(value)}</span>
+      <button type="button" className="pressable px-1 text-brass" onClick={() => onChange(items[(i + 1) % items.length]!)}>
+        ›
+      </button>
+    </div>
+  );
+}
+
+function Line({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-white/5 px-3 py-1.5">
+      <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
+      {children}
     </div>
   );
 }
@@ -380,37 +504,24 @@ function Stepper({
   value,
   onChange,
   step,
-  presets,
   dp,
 }: {
   value: string;
   onChange: (v: string) => void;
   step: number;
-  presets?: number[];
   dp?: number;
 }) {
   const n = Number(value) || 0;
   const d = dp ?? (step < 1 ? 4 : 2);
   return (
-    <div>
-      <div className="flex gap-1">
-        <button className="pressable h-11 w-11 rounded-[var(--radius-sm)] border border-border" onClick={() => onChange(Math.max(0, n - step).toFixed(d))}>
-          −
-        </button>
-        <input className={inp} value={value} onChange={(e) => onChange(e.target.value)} />
-        <button className="pressable h-11 w-11 rounded-[var(--radius-sm)] border border-border" onClick={() => onChange((n + step).toFixed(d))}>
-          +
-        </button>
-      </div>
-      {presets ? (
-        <div className="mt-1 flex gap-1">
-          {presets.map((p) => (
-            <button key={p} className="pressable h-8 rounded-full border border-border px-2 font-mono text-[11px] text-muted" onClick={() => onChange(String(p))}>
-              {p}
-            </button>
-          ))}
-        </div>
-      ) : null}
+    <div className="flex gap-1">
+      <button type="button" className="pressable h-9 w-9 rounded-[var(--radius-sm)] border border-border" onClick={() => onChange(Math.max(0, n - step).toFixed(d))}>
+        −
+      </button>
+      <input className="h-9 w-20 rounded-[var(--radius-sm)] border border-border bg-surface text-center font-mono text-sm" value={value} onChange={(e) => onChange(e.target.value)} />
+      <button type="button" className="pressable h-9 w-9 rounded-[var(--radius-sm)] border border-border" onClick={() => onChange((n + step).toFixed(d))}>
+        +
+      </button>
     </div>
   );
 }
