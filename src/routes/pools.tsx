@@ -4,7 +4,7 @@ import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
-import { farmApy, farmPending, lpPnl, lpValue, poolMark, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
+import { farmApy, farmPending, harvestDue, lpPnl, lpValue, poolMark, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { cn, fmtPct, fmtUsd } from "@/lib/utils";
 
@@ -33,8 +33,9 @@ function PoolsPage() {
     const extra = Object.keys(s.account.tokens ?? {});
     return ["ETH", "USDC", "WPIT", ...extra];
   }, [s.account.tokens]);
-  const tax = s.farmWpit * 0.01;
-  const ripe = s.farmWpit > 0;
+  const tax = harvestDue(s) * 0.01;
+  const ripeAmt = harvestDue(s);
+  const ripe = ripeAmt > 0;
 
   function openFarm(id: string) {
     setOpenId(id === openId ? null : id);
@@ -74,8 +75,8 @@ function PoolsPage() {
           >
             <div>
               <div className="font-mono text-[11px] uppercase tracking-wider text-brass">Ripe to cut</div>
-              <div className="font-display text-4xl font-medium tabular-nums">{s.farmWpit.toFixed(2)}</div>
-              <p className="text-xs text-muted">WPIT · 1% tax → insurance ({tax.toFixed(2)})</p>
+              <div className="font-display text-4xl font-medium tabular-nums">{ripeAmt.toFixed(2)}</div>
+              <p className="text-xs text-muted">WPIT · your LP share · 1% tax → insurance ({tax.toFixed(2)})</p>
             </div>
             <Button
               disabled={!ripe}
@@ -83,7 +84,7 @@ function PoolsPage() {
               onClick={() =>
                 setPending({
                   title: "Harvest WPIT",
-                  body: `Collect ${s.farmWpit.toFixed(2)} WPIT. 1% tax to insurance.`,
+                  body: `Collect ${ripeAmt.toFixed(2)} WPIT (your share of emissions). 1% tax to insurance.`,
                   run: () => harvest(),
                 })
               }
@@ -96,7 +97,7 @@ function PoolsPage() {
             <section className="mt-8">
               <h2 className="font-display text-2xl">Your liquidity</h2>
               <p className="mt-1 text-sm text-muted">
-                Harvested {(s.harvestedWpit ?? 0).toFixed(2)} WPIT · ripe {s.farmWpit.toFixed(2)} WPIT
+                Harvested {(s.harvestedWpit ?? 0).toFixed(2)} WPIT · ripe {ripeAmt.toFixed(2)} WPIT
               </p>
               <div className="mt-3 grid gap-3">
                 {s.lp.map((pos) => {

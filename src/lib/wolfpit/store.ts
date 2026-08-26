@@ -27,6 +27,7 @@ import type { EngineState, FutSide, OptType, PoolId, WorkingOrder } from "./type
 import { useAdmin } from "@/lib/admin/config";
 import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
+import { sanitizeState } from "./sanitize";
 
 type Actions = {
   lastError: string | null;
@@ -150,13 +151,22 @@ export const useWolf = create<WolfStore>()(
       lockStake: (amt) => apply(stakeWpit(get(), amt), set),
       unstake: () => set(unstakeWpit(get())),
       harvest: () => {
-        ping("Harvested WPIT", "up");
-        set(harvestFarm(get()));
+        const before = get().harvestedWpit ?? 0;
+        const next = harvestFarm(get());
+        set(next);
+        if ((next.harvestedWpit ?? 0) > before) ping("Harvested WPIT", "up");
+        else ping("Nothing ripe. Add LP first.", "brass");
       },
-      seedVault: (eth, usdc) =>
+      seedVault: (eth, usdc) => {
+        if (!Number.isFinite(eth) || !Number.isFinite(usdc) || eth < 0 || usdc < 0) return;
         set({
-          vault: { ...get().vault, eth, usdc },
-        }),
+          vault: {
+            ...get().vault,
+            eth: Math.min(eth, 1_000_000),
+            usdc: Math.min(usdc, 1_000_000_000),
+          },
+        });
+      },
       applyLive: (feed) => set(applyLiveFeed(get(), feed)),
       createPool: (base, quote, baseAmt, quoteAmt) => {
         const r = createPoolEngine(get(), base, quote, baseAmt, quoteAmt);
@@ -185,8 +195,12 @@ export const useWolf = create<WolfStore>()(
       clearError: () => set({ lastError: null }),
     }),
     {
-      name: "wolfpit-sim-v9",
+      name: "wolfpit-sim-v10",
       skipHydration: true,
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<EngineState>;
+        return { ...current, ...sanitizeState(p, initialState()) };
+      },
       partialize: (s) => ({
         clock: s.clock,
         eth: s.eth,

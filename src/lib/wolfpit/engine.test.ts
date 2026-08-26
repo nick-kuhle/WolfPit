@@ -13,6 +13,7 @@ import {
   poolMark,
   expiries,
   harvestFarm,
+  harvestDue,
   initialState,
   removeLiquidity,
   setMark,
@@ -38,7 +39,10 @@ import {
   groupedFutures,
   groupedOptions,
   imRate,
+  ensureListed,
 } from "./engine.ts";
+import { sanitizeState } from "./sanitize.ts";
+import { PIT_OPEN } from "./comp.ts";
 import { MAX_FARM_APY, MAX_LOT } from "./limits.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
 import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
@@ -205,14 +209,21 @@ describe("W1-02 risk limits", () => {
     assert.equal(spotFeeBps(1.2), 30);
   });
 
-  it("harvest 1% tax → insurance", () => {
-    const s = initialState();
-    s.farmWpit = 100;
-    s.wpit = 2;
+  it("harvest 1% tax → insurance, only LP share", () => {
+    let s = initialState();
+    const added = addLiquidity(s, "ETH-USDC", 4_000);
+    assert.equal(typeof added, "object", String(added));
+    s = added as typeof s;
+    s = { ...s, farmWpit: 100, wpit: 2 };
+    const due = harvestDue(s);
+    assert.ok(due > 0 && due < 100);
     const next = harvestFarm(s);
-    assert.equal(next.farmWpit, 0);
-    assert.ok(Math.abs(next.account.wpit - (s.account.wpit + 99)) < 1e-9);
-    assert.ok(Math.abs(next.insuranceUsdc - (s.insuranceUsdc + 2)) < 1e-9);
+    assert.ok(next.farmWpit < s.farmWpit);
+    assert.ok(next.account.wpit > s.account.wpit);
+    const tax = due * 0.01;
+    assert.ok(Math.abs(next.insuranceUsdc - (s.insuranceUsdc + tax * 2)) < 1e-6);
+    const empty = harvestFarm(initialState());
+    assert.equal(empty.account.wpit, initialState().account.wpit);
   });
 });
 
@@ -370,10 +381,13 @@ describe("Pit Open", () => {
 
   it("first place pays 1M WPIT once", () => {
     let s = joinCompetition(initialState());
-    s = payCompPrize(s, 1);
+    s = payCompPrize(s, 1, PIT_OPEN.end);
     assert.equal(s.account.wpit, 1_000_000);
-    const again = payCompPrize(s, 1);
+    const again = payCompPrize(s, 1, PIT_OPEN.end);
     assert.equal(again.account.wpit, 1_000_000);
+    const early = payCompPrize(joinCompetition(initialState()), 1, PIT_OPEN.start);
+    assert.equal(early.account.wpit, 0);
+    assert.equal(early.compPaid, false);
   });
 });
 
@@ -567,5 +581,64 @@ describe("netting and cover", () => {
     const r = tradeFuture(s, "long", 10_000, exp);
     assert.equal(typeof r, "string");
     assert.match(String(r), /cover|cap|pool|Inventory|notional/i);
+  });
+});
+
+describe("risk audit", () => {
+  it("does not mint an unbacked AMM when listing a ticker", () => {
+    const s = initialState();
+    const n = Object.keys(s.pools).length;
+    const next = ensureListed(s, "PEPE", 0.000001);
+    assert.equal(Object.keys(next.pools).length, n);
+    assert.equal(next.pools["PEPE-USDC"], undefined);
+  });
+
+  it("rejects derivatives on a self-priced junk ticker", () => {
+    let s = initialState();
+    const made = createPool(s, "PEPE", "USDC", 1, 1);
+    // no PEPE balance
+    assert.equal(typeof made, "string");
+    const r = tradeFuture(s, "long", 1, exp, "PEPE");
+    assert.equal(typeof r, "string");
+    assert.match(String(r), /ETH and WPIT|oracle/i);
+    const o = buyOption(s, "call", 1, exp, 1, "PEPE");
+    assert.equal(typeof o, "string");
+  });
+
+  it("sanitize drops NaN balances and negative vault", () => {
+    const dirty = {
+      ...initialState(),
+      account: { usdc: Number.NaN, eth: -5, wpit: 1e20, tokens: { "$$": 1 }, realized: 0, startEquity: 1 },
+      vault: { eth: 10, usdc: 10, reservedEth: 99, reservedUsdc: 99, hedgeEth: 0, escrowUsdc: 50 },
+      eth: Number.POSITIVE_INFINITY,
+    };
+    const clean = sanitizeState(dirty, initialState());
+    assert.ok(clean.account.usdc >= 0);
+    assert.ok(clean.account.eth >= 0);
+    assert.ok(clean.vault.reservedEth <= clean.vault.eth);
+    assert.ok(clean.eth < 1e6);
+    assert.ok(!clean.account.tokens["$$"]);
+  });
+
+  it("oracle jump is clamped after the book is live", () => {
+    let s = applyLive(initialState(), {
+      eth: 2461,
+      ethBid: 2460,
+      ethAsk: 2462,
+      candles: initialState().candles.map((c) => ({ ...c, c: 2461, o: 2461, h: 2462, l: 2460 })),
+      at: Date.now(),
+      source: "Coinbase",
+    });
+    assert.equal(s.eth, 2461);
+    const spiked = applyLive(s, {
+      eth: 1,
+      ethBid: 1,
+      ethAsk: 1,
+      candles: s.candles,
+      at: Date.now() + 1000,
+      source: "evil",
+    });
+    assert.ok(spiked.eth > 2000, `clamped to ${spiked.eth}`);
+    assert.ok(spiked.circuitUntil > s.circuitUntil);
   });
 });

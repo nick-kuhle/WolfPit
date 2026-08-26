@@ -10,6 +10,7 @@ import {
   fmtExpiry,
   futLiqPrice,
   futPnl,
+  harvestDue,
   groupedFutures,
   groupedOptions,
   liqHealth,
@@ -142,9 +143,9 @@ export function Positions() {
           })}
           <div className="flex items-center justify-between px-3 py-2 font-mono text-[11px]">
             <span className="text-muted">
-              Harvested {harvested.toFixed(1)} WPIT · ripe {s.farmWpit.toFixed(2)}
+              Harvested {harvested.toFixed(1)} WPIT · ripe {harvestDue(s).toFixed(2)}
             </span>
-            <button type="button" className="text-brass disabled:text-subtle" disabled={s.farmWpit <= 0} onClick={() => harvest()}>
+            <button type="button" className="text-brass disabled:text-subtle" disabled={harvestDue(s) <= 0} onClick={() => harvest()}>
               Harvest
             </button>
           </div>

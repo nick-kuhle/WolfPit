@@ -39,6 +39,8 @@ export type OptionPos = {
   premium: number;
   openedAt: number;
   under?: string;
+  securedUsdc?: number;
+  securedEth?: number;
 };
 
 export type OrderFill = {
@@ -59,6 +61,7 @@ export type VaultState = {
   reservedEth: number;
   reservedUsdc: number;
   hedgeEth: number;
+  escrowUsdc?: number;
 };
 
 export type PoolState = {
@@ -155,5 +158,6 @@ export const SPOT_FEE = 0.003;
 export const DERIV_FEE = 0.0005;
 export const UTIL_CAP = 0.4;
 export const WPIT_EMIT_PER_SEC = 0.08;
+export const DERIV_UNDERS = ["ETH", "WPIT"] as const;
 export const STAKE_APR = 0.12;
 export const INSURANCE_SEED = 25_000;

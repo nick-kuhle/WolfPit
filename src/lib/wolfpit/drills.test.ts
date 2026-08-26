@@ -78,25 +78,20 @@ describe("W1-03 recorded drills", () => {
     );
   });
 
-  it("D4 A shorts, B longs, A scratches", () => {
+  it("D4 A shorts, B longs, the book nets", () => {
     let s = initialState();
     const e = expOf(s);
-    s = asState(tradeFuture(s, "short", 10, e), "A short 1 ETH @4000");
-    const aId = s.futures[0]!.id;
+    s = asState(tradeFuture(s, "short", 10, e), "A short 1 ETH");
+    assert.equal(s.futures.length, 1);
     s = setMark(s, 3000, { settle: false });
-    s = asState(tradeFuture(s, "long", 10, e), "B long 1 ETH @3000");
-    const bId = s.futures.find((p) => p.id !== aId)!.id;
-    s = setMark(s, 4000, { settle: false });
-    s = asState(closeFuture(s, aId), "A scratch");
-    const beforeB = s.account.usdc;
-    s = asState(closeFuture(s, bId), "B close");
-    const bPnl = s.account.usdc - beforeB;
-    assert.ok(bPnl > 800, `B pnl ${bPnl}`);
+    const usdc0 = s.account.usdc;
+    s = asState(tradeFuture(s, "long", 10, e), "B long flattens A");
+    assert.equal(s.futures.length, 0, "same-account opposite side must net, not double the book");
+    assert.ok(s.account.usdc > usdc0, "short from 4000 to 3000 credits the account");
     assert.ok(s.vault.eth + 1e-9 >= s.vault.reservedEth);
-    assert.equal(s.futures.length, 0);
     writeReport(
       "D4.md",
-      `# D4 mismatched entries\n\n- B close credit: ${bPnl.toFixed(2)} USDC (mark 3000 → 4000 on 1 ETH)\n- Futures left: ${s.futures.length}\n- Vault ETH ${s.vault.eth} ≥ reserved ${s.vault.reservedEth}\n- Cover restored. Pass\n`,
+      `# D4 netted book\n\n- Opposite 1 ETH mini on the same expiry flattened the short\n- USDC ${usdc0.toFixed(2)} → ${s.account.usdc.toFixed(2)}\n- Futures left: ${s.futures.length}\n- Vault ETH ${s.vault.eth} ≥ reserved ${s.vault.reservedEth}\n- Cover restored. Pass\n`,
     );
   });
 

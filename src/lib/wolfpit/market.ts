@@ -234,7 +234,10 @@ export const CHAINS: { id: string; label: string }[] = [
 
 export const getChainTape = createServerFn({ method: "GET" })
   .validator((d: { network: string }) => d)
-  .handler(async ({ data }): Promise<Listing[]> => geckoTerminalTape(data.network));
+  .handler(async ({ data }): Promise<Listing[]> => {
+    if (!CHAINS.some((c) => c.id === data.network)) return [];
+    return geckoTerminalTape(data.network);
+  });
 
 export const getUniverse = createServerFn({ method: "GET" }).handler(async (): Promise<Listing[]> => {
   const cg = await geckoMarkets();
@@ -246,7 +249,7 @@ export const getUniverse = createServerFn({ method: "GET" }).handler(async (): P
 export const searchTokens = createServerFn({ method: "GET" })
   .validator((d: { q: string }) => d)
   .handler(async ({ data }): Promise<Listing[]> => {
-    const q = data.q.trim();
+    const q = data.q.trim().slice(0, 80);
     if (!q) return [];
     if (/^wpit$/i.test(q) || /^wolf/i.test(q)) {
       return [
@@ -269,7 +272,7 @@ export const searchTokens = createServerFn({ method: "GET" })
 export const lookupToken = createServerFn({ method: "GET" })
   .validator((d: { q: string }) => d)
   .handler(async ({ data }): Promise<Listing> => {
-    const q = data.q.trim();
+    const q = data.q.trim().slice(0, 80);
     if (/^wpit$/i.test(q) || /^wolfpit$/i.test(q)) {
       return {
         symbol: "WPIT",
@@ -301,21 +304,42 @@ export const getSymbolCandles = createServerFn({ method: "GET" })
       const bars = await coinbaseKlines(cb, interval);
       if (bars.length) return bars;
     }
-    const pair = data.binance || BINANCE_MAP[sym];
+    const pair = safeBinance(data.binance) || BINANCE_MAP[sym];
     if (pair) {
       const bars = await binanceKlines(pair, interval);
       if (bars.length) return bars;
     }
-    if (data.geckoId) {
-      const bars = await geckoOhlc(data.geckoId, interval);
+    const geckoId = safeGeckoId(data.geckoId);
+    if (geckoId) {
+      const bars = await geckoOhlc(geckoId, interval);
       if (bars.length) return bars;
     }
-    if (data.network && data.poolAddress) {
-      const bars = await geckoTerminalOhlcv(data.network, data.poolAddress, interval);
+    const network = safeNetwork(data.network);
+    const poolAddress = safePool(data.poolAddress);
+    if (network && poolAddress) {
+      const bars = await geckoTerminalOhlcv(network, poolAddress, interval);
       if (bars.length) return bars;
     }
     return [];
   });
+
+const NET_OK = new Set(CHAINS.map((c) => c.id));
+
+function safeNetwork(n?: string) {
+  return n && NET_OK.has(n) ? n : "";
+}
+function safePool(addr?: string) {
+  if (!addr) return "";
+  if (/^0x[a-fA-F0-9]{40}$/.test(addr)) return addr.toLowerCase();
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) return addr;
+  return "";
+}
+function safeGeckoId(id?: string) {
+  return id && /^[a-z0-9-]{1,80}$/.test(id) ? id : "";
+}
+function safeBinance(p?: string) {
+  return p && /^[A-Z0-9]{5,20}$/.test(p) ? p : "";
+}
 
 const candleJobs = new Map<string, Promise<Candle[]>>();
 

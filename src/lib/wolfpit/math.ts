@@ -25,6 +25,7 @@ export function normCdf(x: number) {
 }
 
 export function bsCall(S: number, K: number, T: number, r: number, sig: number) {
+  if (!(S > 0) || !(K > 0) || !Number.isFinite(S) || !Number.isFinite(K)) return 0;
   if (T <= 1 / 365 / 24) return Math.max(S - K, 0);
   const v = Math.max(sig, 0.01);
   const d1 = (Math.log(S / K) + (r + (v * v) / 2) * T) / (v * Math.sqrt(T));
@@ -39,6 +40,7 @@ export function bsPut(S: number, K: number, T: number, r: number, sig: number) {
 }
 
 export function bsDelta(S: number, K: number, T: number, r: number, sig: number, type: "call" | "put") {
+  if (!(S > 0) || !(K > 0) || !Number.isFinite(S) || !Number.isFinite(K)) return 0;
   if (T <= 1 / 365 / 24) {
     if (type === "call") return S > K ? 1 : 0;
     return S < K ? -1 : 0;
@@ -50,6 +52,7 @@ export function bsDelta(S: number, K: number, T: number, r: number, sig: number,
 }
 
 export function bsGamma(S: number, K: number, T: number, r: number, sig: number) {
+  if (!(S > 0) || !(K > 0) || !Number.isFinite(S) || !Number.isFinite(K)) return 0;
   if (T <= 1 / 365 / 24) return 0;
   const v = Math.max(sig, 0.01);
   const d1 = (Math.log(S / K) + (r + (v * v) / 2) * T) / (v * Math.sqrt(T));
@@ -58,6 +61,7 @@ export function bsGamma(S: number, K: number, T: number, r: number, sig: number)
 }
 
 export function bsVega(S: number, K: number, T: number, r: number, sig: number) {
+  if (!(S > 0) || !(K > 0) || !Number.isFinite(S) || !Number.isFinite(K)) return 0;
   if (T <= 1 / 365 / 24) return 0;
   const v = Math.max(sig, 0.01);
   const d1 = (Math.log(S / K) + (r + (v * v) / 2) * T) / (v * Math.sqrt(T));
@@ -101,6 +105,8 @@ export function ammOut(dx: number, x: number, y: number, feeBps: number) {
 }
 
 export function uid(prefix: string) {
+  const g = globalThis.crypto?.randomUUID?.();
+  if (g) return `${prefix}-${g.slice(0, 12)}`;
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
 }
 
