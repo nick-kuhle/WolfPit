@@ -52,11 +52,11 @@ export function RaceTrack({ card, now, compact }: { card: RaceCard; now: number;
           {card.status === "official" ? "Official" : card.status === "running" ? `Live ${Math.round(t * 100)}%` : "Gate"}
         </div>
       </div>
-      <ol className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5">
+      <ol className="mt-1.5 flex flex-col gap-0.5">
         {live.map((r, i) => {
           const place = i + 1;
           return (
-            <li key={r.no} className="flex min-w-0 items-center gap-1">
+            <li key={r.no} className="flex min-w-0 items-center gap-1.5 border-b border-border/60 py-1 last:border-0">
               <PlaceMark place={place} />
               <span className="grid size-4 shrink-0 place-items-center rounded-[3px] font-mono text-[9px] font-bold text-bg" style={{ background: r.silk }}>
                 {r.no}
@@ -118,7 +118,7 @@ export function EntryBoard({
         <p className="font-display text-lg text-brass">Entry</p>
         <p className="font-mono text-[9px] uppercase tracking-wider text-subtle">Tap a runner</p>
       </div>
-      <div className="grid grid-cols-2 gap-1 p-1.5">
+      <div className="flex flex-col gap-1 p-1.5">
         {card.runners.map((r) => (
           <EntryCard key={r.no} kind={card.kind} r={r} official={card.status === "official"} winner={card.winner} on={picked === r.no} locked={card.status !== "open"} onPick={onPick} />
         ))}
