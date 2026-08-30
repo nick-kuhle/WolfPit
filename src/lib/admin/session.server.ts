@@ -96,7 +96,8 @@ export function clearAdminCookie() {
 
 // ---------------------------------------------------------------- rate limit
 // The login throttle is DB-backed and shared across instances: see
-// `guardAdminLogin` in ../auth/rate-limit.server.ts (same
-// wolfpit_rate_limit table as the /api/auth/* guard). Fail-closed on store
-// errors. The previous in-memory per-process counter allowed N×5 attempts
-// across N serverless instances and lived here; it was removed.
+// `checkAdminLogin` / `recordAdminLoginFailure` / `resetAdminLogin` in
+// ../auth/rate-limit.server.ts (same wolfpit_rate_limit table as the
+// /api/auth/* guard). Failures-only counters, reset on success, fail-closed on
+// store errors. The previous in-memory per-process counter allowed N×5
+// attempts across N serverless instances and lived here; it was removed.

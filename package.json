@@ -16,7 +16,7 @@
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test:engine": "npx tsx --test src/lib/wolfpit/engine.test.ts src/lib/wolfpit/drills.test.ts src/lib/wolfpit/games.test.ts",
     "test:forge": "forge test --root contracts",
-    "test": "node --test scripts/*.test.mjs && npx tsx --test src/lib/auth/gate-identity.test.ts && npm run test:engine",
+    "test": "node --test scripts/*.test.mjs && npx tsx --test src/lib/auth/gate-identity.test.ts src/lib/auth/rate-limit.server.test.ts && npm run test:engine",
     "lint": "eslint .",
     "format": "prettier --write .",
     "lint:errors": "eslint . --quiet"

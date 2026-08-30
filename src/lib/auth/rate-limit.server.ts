@@ -18,6 +18,10 @@
  * sign-in popup initiation (`popup.server.ts`) before Better Auth processes
  * the request. This module is framework-agnostic (web `Request` in, `Response`
  * out) so both the Vite dev middleware and the Nitro route can use it.
+ *
+ * The admin-panel login uses the same table via `createAdminLoginGuard` /
+ * `checkAdminLogin` / `recordAdminLoginFailure` / `resetAdminLogin` (see the
+ * ADMIN PANEL section below).
  */
 export const RL_WINDOW_SEC = 15 * 60;
 export const RL_MAX_IP = 20;
@@ -40,17 +44,52 @@ export class RateLimitStoreError extends Error {
   }
 }
 
-function clientIp(request: Request): string | undefined {
+/**
+ * The smallest shape of an HTTP request this module needs. Both a web `Request`
+ * and TanStack Start's server request satisfy it, so the guards run unchanged
+ * on the `/api/auth/*` route (web Request) and inside server-function handlers
+ * (getRequest() from @tanstack/react-start/server).
+ */
+export interface RequestLike {
+  headers: { get(name: string): string | null };
+}
+
+export function clientIp(request: RequestLike | null | undefined): string | undefined {
+  if (!request) return undefined;
   const fwd = request.headers.get("x-forwarded-for");
   if (fwd) return fwd.split(",")[0]!.trim() || undefined;
   return request.headers.get("cf-connecting-ip")?.trim() || undefined;
 }
 
-async function bump(id: string, kind: "ip" | "acct" | "pair" | "admin-user", key: string, max: number) {
-  const { getSql } = await import("../db");
-  const sql = await getSql();
-  const bucket = Math.floor(Date.now() / 1000 / RL_WINDOW_SEC);
-  const rows = (await sql.query(
+/** Minimal query surface (both pg and PGLite satisfy `.query(text, params)`). */
+export type QueryRunner = <T = Record<string, unknown>>(
+  text: string,
+  params?: unknown[],
+) => Promise<T[]>;
+
+function bucketAt(now: () => number): number {
+  return Math.floor(now() / 1000 / RL_WINDOW_SEC);
+}
+
+/** Current count for a row in the CURRENT window (0 when absent/stale). */
+async function readCount(run: QueryRunner, id: string, bucket: number): Promise<number> {
+  const rows = (await run(
+    "select count from wolfpit_rate_limit where id = $1 and window_start = $2",
+    [id, bucket],
+  )) as { count: number }[];
+  return Number(rows[0]?.count ?? 0);
+}
+
+/** Atomic increment (upsert); true when the row is over `max` after the bump. */
+async function bumpCount(
+  run: QueryRunner,
+  id: string,
+  kind: string,
+  key: string,
+  max: number,
+  bucket: number,
+): Promise<boolean> {
+  const rows = (await run(
     `insert into wolfpit_rate_limit (id, kind, key, count, window_start)
      values ($1, $2, $3, 1, $4)
      on conflict (id) do update set
@@ -58,9 +97,20 @@ async function bump(id: string, kind: "ip" | "acct" | "pair" | "admin-user", key
                     then wolfpit_rate_limit.count + 1 else 1 end,
        window_start = excluded.window_start
      returning count`,
-    [`${kind}:${key}`, kind, key, bucket],
+    [id, kind, key, bucket],
   )) as { count: number }[];
   return Number(rows[0]?.count ?? max + 1) > max;
+}
+
+async function deleteRow(run: QueryRunner, id: string): Promise<void> {
+  await run("delete from wolfpit_rate_limit where id = $1", [id]);
+}
+
+/** Run a query against the app database (Neon in prod, PGLite in preview). */
+async function withSql<T>(fn: (run: QueryRunner) => Promise<T>): Promise<T> {
+  const { getSql } = await import("../db");
+  const sql = await getSql();
+  return fn(sql.query.bind(sql) as QueryRunner);
 }
 
 function tooManyResponse() {
@@ -97,11 +147,15 @@ export async function guardAuthRequest(request: Request): Promise<Response | nul
     }
   }
 
+  const bumpFor = (kind: string, key: string, max: number, bucket: number) =>
+    withSql((run) => bumpCount(run, `${kind}:${key}`, kind, key, max, bucket));
+
   try {
-    if (await bump(`ip`, "ip", ip, RL_MAX_IP)) return tooManyResponse();
+    const bucket = bucketAt(() => Date.now());
+    if (await bumpFor("ip", ip, RL_MAX_IP, bucket)) return tooManyResponse();
     if (email) {
-      if (await bump(`acct`, "acct", email, RL_MAX_ACCT)) return tooManyResponse();
-      if (await bump(`pair`, "pair", `${ip}:${email}`, RL_MAX_PAIR)) return tooManyResponse();
+      if (await bumpFor("acct", email, RL_MAX_ACCT, bucket)) return tooManyResponse();
+      if (await bumpFor("pair", `${ip}:${email}`, RL_MAX_PAIR, bucket)) return tooManyResponse();
     }
     return null;
   } catch {
@@ -122,50 +176,124 @@ export async function assertNotRateLimited(request: Request): Promise<void> {
 export async function throttledByIp(request: Request): Promise<boolean> {
   const ip = clientIp(request) ?? "unknown";
   try {
-    return await bump("ip", "ip", ip, RL_MAX_IP);
+    const bucket = bucketAt(() => Date.now());
+    return await withSql((run) => bumpCount(run, `ip:${ip}`, "ip", ip, RL_MAX_IP, bucket));
   } catch {
     return true; // fail-closed
   }
 }
 
-/** The caller's IP, or null when unknown (for logging/audit). */
-export function callerIp(request: Request): string | undefined {
+/** The caller's IP, or undefined when unknown (for logging/audit). */
+export function callerIp(request: RequestLike | null | undefined): string | undefined {
   return clientIp(request);
 }
 
 // ─────────────────────────────── Admin panel ────────────────────────────────
 // The admin login previously kept an in-memory per-process counter, so N
-// serverless instances allowed N×5 attempts per account. Same fixed-window
-// table as above, hence shared across every instance.
+// serverless instances allowed N×5 attempts per account — and it counted
+// SUCCESSES too (self-lockout after 5 logins). The guard below:
 //
-// Attempt-based (successes count too): 5 attempts / 15 min per username.
-// Per-user only — this TanStack Start server-fn surface exposes no request
-// headers (no getWebRequest in this version), so there is no IP dimension
-// here; the /api/auth/* guard above covers IP for credential auth.
+//   - counts FAILURES only, 5 / 15 min per username (single admin account),
+//     plus 20 / 15 min per IP when the request is available — getRequest() IS
+//     reachable from server-function handlers (the auth isolation middleware
+//     already uses it, see src/lib/auth/isolation.server.ts), so the "no
+//     request plumbing" note in the earlier revision was wrong.
+//   - SHARED across every instance via the same wolfpit_rate_limit table
+//   - resets on successful login (verify-then-record keeps the counter honest)
+//   - fail-closed: a store error is reported, never bypassed
+//
+// The state machine is split so the check does not count: `check` (read-only,
+// before verifying credentials), `recordFailure` (atomic bump AFTER a failed
+// verify), `reset` (after a successful login). Bound a check-then-record race
+// is harmless: the counter still only ever moves on real failures, and the
+// atomic upsert means the window cannot be bypassed by concurrent attempts.
 
 export const ADMIN_RL_MAX_USER = 5;
+export const ADMIN_RL_MAX_IP = 20;
 
 export type AdminThrottle =
   | { blocked: true; retryAfterSec: number }
   | { blocked: false }
   | { storeError: true };
 
-/** Seconds left in the current fixed window (used for the retry message). */
-function windowRemainingSec(): number {
-  return RL_WINDOW_SEC - (Math.floor(Date.now() / 1000) % RL_WINDOW_SEC);
+export interface AdminLoginGuard {
+  check(user: string, ip?: string): Promise<AdminThrottle>;
+  recordFailure(user: string, ip?: string): Promise<AdminThrottle>;
+  reset(user: string, ip?: string): Promise<void>;
 }
 
 /**
- * Shared, DB-backed attempt counter for the admin panel login.
- * Fail-closed: a store error is reported, never bypassed.
+ * Build the admin login guard over an injected query runner (the app DB in
+ * production; a PGLite instance in tests). `now` is injectable so the window
+ * rollover is testable without sleeping 15 minutes.
  */
-export async function guardAdminLogin(user: string): Promise<AdminThrottle> {
-  try {
-    if (await bump("admin-user", "admin-user", user, ADMIN_RL_MAX_USER)) {
-      return { blocked: true, retryAfterSec: windowRemainingSec() };
-    }
-    return { blocked: false };
-  } catch {
-    return { storeError: true };
-  }
+export function createAdminLoginGuard(
+  run: QueryRunner,
+  opts: { now?: () => number } = {},
+): AdminLoginGuard {
+  const now = opts.now ?? (() => Date.now());
+  const bucket = () => bucketAt(now);
+  const remainingSec = () => RL_WINDOW_SEC - (Math.floor(now() / 1000) % RL_WINDOW_SEC);
+
+  const ids = (user: string, ip?: string) => ({
+    user: `admin-user:${user}`,
+    ip: ip ? `admin-ip:${ip}` : undefined,
+  });
+
+  return {
+    async check(user: string, ip?: string): Promise<AdminThrottle> {
+      try {
+        const b = bucket();
+        const { user: uid, ip: iid } = ids(user, ip);
+        if (iid && (await readCount(run, iid, b)) >= ADMIN_RL_MAX_IP) {
+          return { blocked: true, retryAfterSec: remainingSec() };
+        }
+        if ((await readCount(run, uid, b)) >= ADMIN_RL_MAX_USER) {
+          return { blocked: true, retryAfterSec: remainingSec() };
+        }
+        return { blocked: false };
+      } catch {
+        return { storeError: true }; // fail-closed
+      }
+    },
+
+    async recordFailure(user: string, ip?: string): Promise<AdminThrottle> {
+      try {
+        const b = bucket();
+        const { user: uid, ip: iid } = ids(user, ip);
+        if (iid) await bumpCount(run, iid, "admin-ip", iid, ADMIN_RL_MAX_IP, b);
+        const blocked = await bumpCount(run, uid, "admin-user", uid, ADMIN_RL_MAX_USER, b);
+        return blocked ? { blocked: true, retryAfterSec: remainingSec() } : { blocked: false };
+      } catch {
+        return { storeError: true }; // fail-closed
+      }
+    },
+
+    async reset(user: string, ip?: string): Promise<void> {
+      const { user: uid, ip: iid } = ids(user, ip);
+      await deleteRow(run, uid);
+      if (iid) await deleteRow(run, iid);
+    },
+  };
+}
+
+// Default wrappers backed by the app database. Tests use createAdminLoginGuard
+// directly with an injected runner.
+async function withLoginGuard<T>(fn: (guard: AdminLoginGuard) => Promise<T>): Promise<T> {
+  return withSql((run) => fn(createAdminLoginGuard(run)));
+}
+
+/** Read-only pre-check (does NOT count). Pass `ip` to also gate per-IP. */
+export async function checkAdminLogin(user: string, ip?: string): Promise<AdminThrottle> {
+  return withLoginGuard((g) => g.check(user, ip));
+}
+
+/** Record one failed login attempt; true shape after the atomic bump. */
+export async function recordAdminLoginFailure(user: string, ip?: string): Promise<AdminThrottle> {
+  return withLoginGuard((g) => g.recordFailure(user, ip));
+}
+
+/** Clear the counter after a successful login (best-effort by callers). */
+export async function resetAdminLogin(user: string, ip?: string): Promise<void> {
+  return withLoginGuard((g) => g.reset(user, ip));
 }

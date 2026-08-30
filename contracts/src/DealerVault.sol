@@ -194,7 +194,9 @@ contract DealerVault {
     /// @notice Slash order (RISK.md): insurance USDC -> staked WPIT -> pause.
     ///         Owner calls this when a vault hole exceeds insurance; the stake
     ///         contract transfers WPIT here and it is credited to insuranceWpit.
-    function slashInsuranceJunior(uint256 amt) external onlyOwner {
+    ///         nonReentrant: `stake.slash` is an external call — a malicious
+    ///         stake must not re-enter risk accounting mid-slash.
+    function slashInsuranceJunior(uint256 amt) external onlyOwner nonReentrant {
         if (stake == address(0) || amt == 0) revert Zero();
         uint256 slashed = IStake(stake).slash(amt);
         insuranceWpit += slashed; // stake caps at its own total
@@ -260,7 +262,11 @@ contract DealerVault {
     /// @notice Dual-asset deposit. Shares track contributed USDC value (oracle
     ///         marked) — never a raw sum of 18-dec WETH and 6-dec USDC units.
     ///         Virtual share/NAV offset ($1) bounds first-depositor inflation.
-    function deposit(uint256 ethAmt, uint256 usdcAmt) external live {
+    ///         nonReentrant: the swap callback of an allowlisted router (exec /
+    ///         openShort) must not re-enter minting mid-swap — that would book
+    ///         the deposit's USDC twice (once here, once as swap proceeds) and
+    ///         inflate the ledger past the real balance.
+    function deposit(uint256 ethAmt, uint256 usdcAmt) external live nonReentrant {
         if (ethAmt == 0 && usdcAmt == 0) revert Zero();
         uint256 value = depositValue(ethAmt, usdcAmt);
         if (shares == 0 && value < MIN_FIRST_DEPOSIT_USDC) revert FirstDepositTooSmall();
