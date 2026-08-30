@@ -306,7 +306,7 @@ contract DealerVault {
         return insuranceUsdc * 10_000 < nav * INSURANCE_NAV_MIN_BPS;
     }
 
-    function writeCall(uint256 size) external live onlyOperator {
+    function writeCall(uint256 size) external live onlyOperator nonReentrant {
         if (size == 0) revert Zero();
         if (haltShortGamma()) revert InsuranceHalt();
         if (size > freeEth()) revert NakedCall();
@@ -315,7 +315,7 @@ contract DealerVault {
         emit RiskOpened(this.writeCall.selector, size, 0);
     }
 
-    function writePut(uint256 size, uint256 strike) external live onlyOperator {
+    function writePut(uint256 size, uint256 strike) external live onlyOperator nonReentrant {
         if (size == 0) revert Zero();
         // Short puts are short gamma: the same insurance halt as writeCall.
         // Fail-closed with zero insurance / dead oracle / insurance < 1% NAV.
@@ -327,7 +327,7 @@ contract DealerVault {
         emit RiskOpened(this.writePut.selector, size, strike);
     }
 
-    function openLong(uint256 size) external live onlyOperator {
+    function openLong(uint256 size) external live onlyOperator nonReentrant {
         if (size == 0) revert Zero();
         reservedEth += size;
         if (reservedEth * 10_000 > ethBal * ALPHA_BPS) revert UtilCap();
@@ -386,13 +386,13 @@ contract DealerVault {
         usdcBal = u;
     }
 
-    function releaseCall(uint256 size) external live onlyOperator {
+    function releaseCall(uint256 size) external live onlyOperator nonReentrant {
         if (size > reservedEth) revert Zero();
         reservedEth -= size;
         emit RiskReleased(this.releaseCall.selector, size);
     }
 
-    function releasePut(uint256 lock) external live onlyOperator {
+    function releasePut(uint256 lock) external live onlyOperator nonReentrant {
         if (lock > reservedUsdc) revert Zero();
         reservedUsdc -= lock;
         emit RiskReleased(this.releasePut.selector, lock);

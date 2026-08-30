@@ -29,7 +29,7 @@ WETH/USDC pit pool is seeded (`VITE_MARKETS=spot,future,option`).
   is not Base mainnet (8453) unless `BASE_ALLOW_ANY_CHAIN=1` is set explicitly.
 - `ChainlinkOracle`: staleness (1h), positivity, and sanity-band checks; a bad
   feed reverts and the vault halts risk-taking rather than marking fantasy.
-- Keeper (F3): can now TRANSCAT — `WOLFPIT_KEEPER_KEY` signs as the operator
+- Keeper (F3): can now TRANSACT — `WOLFPIT_KEEPER_KEY` signs as the operator
   for `writeCall` / `writePut` / `openShort` (atomic swap) / `reconcileBalances`
   / `pause` / `releaseCall`; a `monitor` loop reads
   `owner/operator/navUsdc/haltShortGamma()` and FAILS CLOSED by pausing the
