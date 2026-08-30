@@ -40,9 +40,15 @@ Isolated per futures position.
 equity = margin + signed_PnL
 if equity < MM: liquidate
 penalty = min(max(equity,0), 1% * size * S) → insurance
-remainder to trader
+remainder to trader            # ALWAYS paid in full (engine F11)
 if equity ≤ 0 after mark: insurance eats the hole; pause if insurance < 0
 ```
+
+Shortfall rule (F11): the vault pays the remainder from its free USDC first;
+whatever it cannot cover is drawn from insurance. If insurance itself cannot
+cover it, insurance goes NEGATIVE and the circuit breaker trips (everything
+halted on the next engine step, visible on the tape) — the trader is never
+silently haircut. ADL remains the last resort after insurance is empty.
 
 No cross-margin in v1. Options: user already paid premium (long only). No user short options in v1.
 

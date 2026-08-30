@@ -8,6 +8,10 @@
  * copy from `migrations/auth/` into `migrations/` when an app turns sign-in on:
  * a database that already has `0001_auth.sql` will not re-run it.
  *
+ * The auth-on step copies EVERY `migrations/auth/*.sql` (currently the Better
+ * Auth schema `0001_auth.sql` AND the F14 throttle `0002_wolfpit_rate_limit.sql`
+ * — copying only the schema would silently skip the rate-limit table).
+ *
  * Neither applier descends into subdirectories, so `migrations/auth/*.sql` is
  * out of scope for both until it is copied up.
  */

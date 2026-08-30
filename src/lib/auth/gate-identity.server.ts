@@ -5,7 +5,7 @@ import {
   type JWTVerifyGetKey,
 } from "jose";
 
-export const GATE_IDENTITY_HEADER = "x-grok-identity";
+export const GATE_IDENTITY_HEADER = "x-wolfpit-identity";
 export const GATE_JWKS_PATH = "/__gate/identity-key";
 
 const JWKS_CACHE_TTL_MS = 300_000;
@@ -27,7 +27,7 @@ function env(key: string): string | undefined {
 }
 
 export function gateIdentityEnabled(): boolean {
-  return env("VITE_AUTH_ENABLED") !== "false" && Boolean(env("GROK_PROJECT_ID"));
+  return env("VITE_AUTH_ENABLED") !== "false" && Boolean(env("WOLFPIT_GATE_PROJECT_ID"));
 }
 
 async function defaultJwksFetch(url: string): Promise<GateJwks | null> {
@@ -117,30 +117,30 @@ export async function verifyGateIdentityToken(
 
 type GateEndpoints = { issuer: string; jwksUrl: string };
 
+/**
+ * The identity-gate issuer/JWKS. No platform hostnames are baked in:
+ *
+ *  1. `WOLFPIT_GATE_ORIGIN` — explicit (preferred).
+ *  2. `WOLFPIT_GATE_DERIVE_HOST=1` — derive `https://gate.<request-host>` so a
+ *     hosting platform can serve its gate on the same domain family. Fail-closed
+ *     otherwise: no header, no verification, sign-in falls through to Better
+ *     Auth's own sessions.
+ */
 export function resolveGateEndpoints(headers: Headers): GateEndpoints | null {
-  const explicit = env("GROK_GATE_ORIGIN");
+  const explicit = env("WOLFPIT_GATE_ORIGIN");
   if (explicit) {
     const origin = explicit.replace(/\/+$/, "");
     return { issuer: origin, jwksUrl: `${origin}${GATE_JWKS_PATH}` };
   }
 
+  if (env("WOLFPIT_GATE_DERIVE_HOST") !== "1") return null;
   const xf = headers.get("x-forwarded-host")?.split(",")[0]?.trim();
   const host = (xf || headers.get("host") || "")
     .split(":")[0]
     ?.trim()
     .toLowerCase();
-  if (!host) return null;
-
-  let issuer: string | null = null;
-  if (
-    host === "app-builder-testing.com" ||
-    host.endsWith(".app-builder-testing.com")
-  ) {
-    issuer = "https://gate.app-builder-testing.com";
-  } else if (host === "grok.me" || host.endsWith(".grok.me")) {
-    issuer = "https://gate.grok.me";
-  }
-  if (!issuer) return null;
+  if (!host || host === "localhost" || host === "127.0.0.1") return null;
+  const issuer = `https://gate.${host}`;
 
   return { issuer, jwksUrl: `${issuer}${GATE_JWKS_PATH}` };
 }
@@ -166,7 +166,7 @@ export async function gateIdentityFromHeaders(
   if (!gateIdentityEnabled()) return null;
   const token = headers.get(GATE_IDENTITY_HEADER)?.trim();
   if (!token) return null;
-  const projectId = env("GROK_PROJECT_ID");
+  const projectId = env("WOLFPIT_GATE_PROJECT_ID");
   if (!projectId) return null;
   const endpoints = resolveGateEndpoints(headers);
   if (!endpoints) return null;

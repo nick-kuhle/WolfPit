@@ -30,7 +30,7 @@ function hasGlobbedMigrations(root: string): boolean {
  */
 function pgliteBootstrapPlugin(): Plugin {
   return {
-    name: "app-builder:pglite-bootstrap",
+    name: "wolfpit:pglite-bootstrap",
     apply: "serve",
     async configureServer(server) {
       if (!hasGlobbedMigrations(server.config.root)) return;
@@ -42,7 +42,7 @@ function pgliteBootstrapPlugin(): Plugin {
           await mod.ensureDbReady();
         }
       } catch (err) {
-        console.error("[app-builder] DB bootstrap failed:", err);
+        console.error("[wolfpit] DB bootstrap failed:", err);
         throw err;
       }
     },
@@ -50,9 +50,8 @@ function pgliteBootstrapPlugin(): Plugin {
 }
 
 /**
- * Live-preview OAuth popup — handled HERE so the agent never has to create a
- * `/auth/popup` route (and cannot break it by scaffolding a React page that
- * paints the full app shell in the popup).
+ * Live-preview OAuth popup — handled HERE so no `/auth/popup` React route can
+ * ever shadow it (a page there would paint the full app shell in the popup).
  *
  * `signIn` (client.ts) opens `/auth/popup?providerId=…` in a top-level window.
  * This middleware runs before TanStack Start, calls `handleAuthPopupRequest`,
@@ -61,11 +60,11 @@ function pgliteBootstrapPlugin(): Plugin {
  */
 function authPopupPlugin(): Plugin {
   return {
-    name: "app-builder:auth-popup",
+    name: "wolfpit:auth-popup",
     apply: "serve",
     configureServer(server) {
       // Register immediately (not in a returned post-hook) so we run BEFORE
-      // TanStack Start / the SPA HTML fallback. A model-authored
+      // TanStack Start / the SPA HTML fallback. A scaffolded
       // `src/routes/auth/popup.tsx` React page must never win this path.
       server.middlewares.use(async (req, res, next) => {
         try {
@@ -128,7 +127,7 @@ function authPopupPlugin(): Plugin {
           const body = Buffer.from(await response.arrayBuffer());
           res.end(body);
         } catch (err) {
-          console.error("[app-builder] /auth/popup handler failed:", err);
+          console.error("[wolfpit] /auth/popup handler failed:", err);
           if (!res.headersSent) {
             res.statusCode = 500;
             res.setHeader("content-type", "text/plain; charset=utf-8");
@@ -141,8 +140,7 @@ function authPopupPlugin(): Plugin {
 }
 
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
-// The dev server starts once `src/router.tsx` and `src/routes/` exist — see
-// AGENTS.md § "First scaffold".
+// The dev server starts once `src/router.tsx` and `src/routes/` exist.
 export default defineConfig(({ command, isPreview }) => ({
   server: {
     host: "0.0.0.0",

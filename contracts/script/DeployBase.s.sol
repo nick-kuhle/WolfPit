@@ -7,6 +7,7 @@ import {ChainlinkOracle} from "../src/oracle/ChainlinkOracle.sol";
 interface Vm {
     function envAddress(string calldata key) external returns (address);
     function envOr(string calldata key, address value) external returns (address);
+    function envOr(string calldata key, bool value) external returns (bool);
     function startBroadcast() external;
     function stopBroadcast() external;
     function label(address account, string calldata newName) external;
@@ -43,6 +44,13 @@ contract DeployBase {
     address constant CANONICAL_WETH = 0x4200000000000000000000000000000000000006;
 
     function run() external {
+        // Hard guard: this script deploys the MAINNET launch shape with
+        // canonical USDC/WETH. Refuse to run on anything but Base mainnet
+        // unless BASE_ALLOW_ANY_CHAIN=1 is set deliberately (e.g. Sepolia
+        // dry-runs of the same deploy).
+        if (!vm.envOr("BASE_ALLOW_ANY_CHAIN", false) && block.chainid != 8453) {
+            revert("WolfPit: DeployBase targets Base mainnet (8453). Set BASE_ALLOW_ANY_CHAIN=1 to override.");
+        }
         address agg = vm.envAddress("BASE_ORACLE_AGG");
         address owner = vm.envAddress("BASE_OWNER");
         address operator = vm.envAddress("BASE_OPERATOR");

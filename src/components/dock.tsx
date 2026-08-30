@@ -1,7 +1,7 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type SVGProps } from "react";
 import { harvestDue } from "@/lib/wolfpit/engine";
-import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
+import { chainLabel, chainState } from "@/lib/wolfpit/chain";
 import { useWolf, useEquity } from "@/lib/wolfpit/store";
 import { useAlerts } from "@/lib/wolfpit/alerts";
 import { fmtUsd } from "@/lib/utils";
@@ -144,7 +144,7 @@ function MoreSheet({ open, onClose, onExited }: { open: boolean; onClose: () => 
           <span
             className={cn(
               "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider",
-              chainMode() === "base" ? "border border-down text-down" : "border border-border text-brass",
+              chainState().live ? "border border-down text-down" : "border border-border text-brass",
             )}
           >
             {chainLabel()}

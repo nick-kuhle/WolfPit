@@ -1,5 +1,5 @@
 import { DERIV_FEE, FUT_IM, UTIL_CAP, type EngineState, type FutSide, type OptType } from "./types";
-import { bsGamma, bsVega, clamp, ivSmile, yearsTo } from "./math";
+import { bsCall, bsGamma, bsPut, bsVega, clamp, ivSmile, yearsTo } from "./math";
 
 export const GAMMA_NAV = 0.02;
 export const VEGA_NAV = 0.15;
@@ -12,8 +12,54 @@ export const DT_1H = 1 / (365.25 * 24);
 export const MINUTES_YR = 365.25 * 24 * 60;
 export const CALL_INV_VOL = 0.005;
 
+/**
+ * LP.md NAV:
+ *   NAV = ETH·S + USDC
+ *       + MTM(short options)      // ≤ 0 on a mark-to-mid; house is short every trader option
+ *       − trader credits          // escrowed trader margin held by the vault
+ *       + insurance               // not shareable until epoch
+ * Reserves (reservedEth/reservedUsdc) are SUB-accounts of vault.eth/vault.usdc,
+ * so they are not added again — their escrow side is the −trader credits term.
+ */
 export function vaultNav(s: EngineState) {
-  return s.vault.eth * s.eth + s.vault.usdc;
+  let mtmShort = 0;
+  for (const p of s.options) {
+    if (s.clock >= p.expiry) continue; // settled (payout booked) by settleAndLiq
+    const under = p.under ?? "ETH";
+    const spot = under === "WPIT" ? s.wpit : s.eth;
+    const T = Math.max(yearsTo(p.expiry, s.clock), 1 / 365 / 24);
+    const vol = ivSmile(s.iv, spot, p.strike, T);
+    const mid = p.type === "call" ? bsCall(spot, p.strike, T, 0.03, vol) : bsPut(spot, p.strike, T, 0.03, vol);
+    mtmShort -= mid * p.sizeEth;
+  }
+  return s.vault.eth * s.eth + s.vault.usdc + mtmShort - (s.vault.escrowUsdc ?? 0) + (s.insuranceUsdc ?? 0);
+}
+
+
+/** Total inventory the pit can post, including already-reserved. Used for IM slope. */
+export function grossCover(s: EngineState, under: string, side: FutSide): number {
+  if (under === "ETH") {
+    if (side === "long") return Math.max(0, s.vault.eth * UTIL_CAP);
+    return Math.max(0, (s.vault.usdc * UTIL_CAP) / Math.max(s.eth, 1e-9));
+  }
+  const mark = Math.max(under === "ETH" ? s.eth : s.wpit, 1e-9);
+  if (!(mark > 0)) return 0;
+  return Math.max(0, (s.vault.usdc * UTIL_CAP) / mark);
+}
+
+export function poolDepth(s: EngineState, under: string): number {
+  if (under === "ETH") return s.pools["ETH-USDC"]?.baseReserve ?? 0;
+  const p = Object.values(s.pools).find((x) => x.base === under);
+  return p?.baseReserve ?? 0;
+}
+
+/** IM as a fraction of notional. Rises with size vs cover and vs pool depth so we only book what we can hedge. */
+export function imRate(s: EngineState, size: number, under: string): number {
+  const cover = Math.max(grossCover(s, under, "long"), grossCover(s, under, "short"), 1e-9);
+  const depth = Math.max(poolDepth(s, under), 1e-9);
+  const uCover = clamp(Math.abs(size) / cover, 0, 3);
+  const uPool = clamp(Math.abs(size) / depth, 0, 1);
+  return clamp(0.25 + 0.3 * uCover * uCover + 0.45 * uPool, 0.25, 0.75);
 }
 
 export function insuranceRatio(s: EngineState) {
@@ -120,7 +166,7 @@ export function rejectFuture(s: EngineState, side: FutSide, sizeEth: number, exp
   if (!(s.eth > 0) || !Number.isFinite(s.eth)) return "No ETH mark.";
   const notional = sizeEth * s.eth;
   if (!Number.isFinite(notional) || notional > 25_000_000) return "Notional exceeds house cap.";
-  const im = notional * FUT_IM;
+  const im = notional * imRate(s, sizeEth, "ETH"); // F12: gate at the ACTUAL charged IM (25–75%), not flat FUT_IM
   const fee = notional * DERIV_FEE;
   if (s.account.usdc + 1e-9 < im + fee) return "Not enough buying power for initial margin + fee.";
   const cap = remainingCap(s, side);

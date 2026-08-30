@@ -46,8 +46,9 @@ contract SystemTest {
         wpit.setMinter(address(this));
         wpit.mint(address(this), 1 ether);
         wpit.setMinter(address(farm));
-        farm.notify(100 ether, 4_000);
-        farm.accrue(address(this), 10_000);
+        farm.setShare(address(this), 10_000);
+        farm.notify(100 ether);
+        farm.accrue(address(this));
         (uint256 net, uint256 tax) = farm.harvest();
         require(tax * 99 == net, "1% tax");
         require(vault.insuranceWpit() == tax, "ins");
@@ -56,12 +57,16 @@ contract SystemTest {
     function testFarmNotifyIsOwnerOnly() public {
         wpit.setMinter(address(farm));
         vm.prank(address(0xBAD));
-        try farm.notify(1 ether, 4_000) {
+        try farm.notify(1 ether) {
             revert("expected NotOwner");
         } catch {}
         vm.prank(address(0xBAD));
-        try farm.accrue(address(0xBEEF), 5_000) {
+        try farm.accrue(address(0xBEEF)) {
             revert("expected NotOwner on accrue");
+        } catch {}
+        vm.prank(address(0xBAD));
+        try farm.setShare(address(0xBEEF), 5_000) {
+            revert("expected NotOwner on setShare");
         } catch {}
     }
 
@@ -75,6 +80,13 @@ contract SystemTest {
         uint256 sh = pairUsdc.add(1_000 ether, 1_000e6);
         require(sh > 0, "shares");
         pairUsdc.remove(sh);
+        // owner-only fee; non-owner cannot change it
+        vm.prank(address(0xBAD));
+        try pairUsdc.setFeeBps(10) {
+            revert("expected NotOwner on fee");
+        } catch {}
+        pairUsdc.setFeeBps(10);
+        require(pairUsdc.feeBps() == 10, "owner sets fee");
     }
 
     function testStakeRoundtrip() public {
@@ -91,5 +103,55 @@ contract SystemTest {
         try vault.writeCall(1 ether) {
             revert("expected halt");
         } catch {}
+    }
+    function testFarmAccrueDoesNotDoublePay() public {
+        wpit.setMinter(address(farm));
+        farm.setShare(address(this), 10_000);
+        farm.notify(100 ether);
+        farm.accrue(address(this));
+        require(farm.pending(address(this)) == 100 ether, "first accrual");
+        farm.notify(100 ether);
+        farm.accrue(address(this));
+        require(farm.pending(address(this)) == 200 ether, "second accrual adds once");
+        farm.accrue(address(this));
+        require(farm.pending(address(this)) == 200 ether, "no-op re-accrue");
+    }
+
+    /// F5: shareBps is capped at 10_000.
+    function testFarmShareBpsCap() public {
+        try farm.setShare(address(this), 10_001) {
+            revert("expected BadBps");
+        } catch {}
+    }
+
+    /// F5: an imbalanced add cannot mint shares off one leg and redeem
+    ///        them off both.
+    function testPairImbalancedAddCannotSteal() public {
+        wpit.setMinter(address(this));
+        wpit.mint(address(this), 100_000 ether);
+        wpit.approve(address(pairUsdc), type(uint256).max);
+        usdc.approve(address(pairUsdc), type(uint256).max);
+        pairUsdc.add(10_000 ether, 10_000e6); // balanced seed by this contract
+        uint256 a0 = pairUsdc.reserve0();
+        uint256 a1 = pairUsdc.reserve1();
+        // Attacker: tiny WPIT, huge USDC.
+        uint256 sh = pairUsdc.add(1 ether, 900_000e6);
+        uint256 back0 = (sh * pairUsdc.reserve0()) / pairUsdc.lpSupply();
+        require(back0 <= 2 ether, "cannot exit with more base than deposited");
+        require(sh < 100 ether, "shares priced off the small leg");
+        pairUsdc.remove(sh); // no reverts, no profit
+        require(pairUsdc.reserve0() > a0 / 2 && pairUsdc.reserve1() > a1 / 2, "seed intact");
+    }
+
+    /// F5: vault can actually draw the junior tranche now.
+    function testVaultSlashInsuranceCapsAtTotal() public {
+        wpit.setMinter(address(this));
+        wpit.mint(address(this), 50 ether);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(50 ether);
+        vault.setStake(address(stake));
+        vault.slashInsuranceJunior(1_000 ether); // capped at 50
+        require(vault.insuranceWpit() == 50 ether, "capped at stake total");
+        require(stake.total() == 0, "drained");
     }
 }

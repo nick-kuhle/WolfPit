@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { DesktopNav, PitDock } from "@/components/dock";
 import { WolfMark } from "@/components/mark";
 import { cn } from "@/lib/utils";
-import { chainLabel, chainMode } from "@/lib/wolfpit/chain";
+import { chainLabel, chainState } from "@/lib/wolfpit/chain";
 import { truncAddr, useWallet } from "@/lib/wallet/session";
 
 export function BrandLockup({ className, markClass }: { className?: string; markClass?: string }) {
@@ -16,7 +16,7 @@ export function BrandLockup({ className, markClass }: { className?: string; mark
 }
 
 export function ChainChip() {
-  const live = chainMode() === "base";
+  const live = chainState().live;
   return (
     <span
       className={cn(

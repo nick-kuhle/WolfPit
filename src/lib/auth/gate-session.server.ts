@@ -13,8 +13,9 @@ import {
   sessionBoundToGateIdentity,
 } from "./gate-identity.server";
 
-export const GATE_PROVIDER_ID = "grok-gate";
-const GATE_ACCOUNT_ISSUER = "https://grok.com";
+export const GATE_PROVIDER_ID = "wolfpit-gate";
+/** Issuer recorded on the linked account. Env-only: no hardcoded platform. */
+const GATE_ACCOUNT_ISSUER = process.env.WOLFPIT_GATE_ACCOUNT_ISSUER?.trim() || "";
 const LOG = "[gate-identity]";
 
 type GateAccount = Parameters<typeof handleOAuthUserInfo>[1]["account"];
@@ -150,7 +151,7 @@ function removeRequestCookie(headers: Headers, name: string): void {
 
 export function gateIdentitySessions() {
   return {
-    id: "grok-gate-identity",
+    id: "wolfpit-gate-identity",
     hooks: {
       before: [
         {
@@ -222,14 +223,14 @@ export function gateIdentitySessions() {
                 userInfo: {
                   id: identity.sub,
                   email: (
-                    identity.email ?? `${identity.sub}@viewer.grok.invalid`
+                    identity.email ?? `${identity.sub}@viewer.wolfpit.invalid`
                   ).toLowerCase(),
                   emailVerified: Boolean(identity.email),
-                  name: identity.name ?? "Grok user",
+                  name: identity.name ?? "OAuth user",
                 },
                 account: {
                   providerId: GATE_PROVIDER_ID,
-                  issuer: GATE_ACCOUNT_ISSUER,
+                  issuer: GATE_ACCOUNT_ISSUER || undefined,
                   accountId: identity.sub,
                 } as GateAccount,
               });

@@ -51,8 +51,8 @@ import {
 import { sanitizeState } from "./sanitize.ts";
 import { PIT_OPEN } from "./comp.ts";
 import { MAX_FARM_APY, MAX_LOT } from "./limits.ts";
-import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
-import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, hedgeError99, rejectFuture, rejectOption, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
+import { DERIV_FEE, FUT_IM, FUT_MM, MINI_ETH, UTIL_CAP } from "./types.ts";
+import { CALL_INV_VOL, CIRCUIT_MS, circuitActive, gammaCash1h, haltShortGamma, hedgeError99, rejectFuture, rejectOption, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
 
 const exp = expiries(initialState().clock)[0]!.at;
 
@@ -609,7 +609,7 @@ describe("risk audit", () => {
   });
 
   it("rejects derivatives on a self-priced junk ticker", () => {
-    let s = initialState();
+    const s = initialState();
     const made = createPool(s, "PEPE", "USDC", 1, 1);
     // no PEPE balance
     assert.equal(typeof made, "string");
@@ -636,7 +636,7 @@ describe("risk audit", () => {
   });
 
   it("oracle jump is clamped after the book is live", () => {
-    let s = applyLive(initialState(), {
+    const s = applyLive(initialState(), {
       eth: 2461,
       ethBid: 2460,
       ethAsk: 2462,
@@ -746,8 +746,133 @@ describe("P0/P1 fixes (2026-08-29 review)", () => {
     const skewed = { ...s, vault: { ...s.vault, eth: 240, usdc: 320_000 } }; // w = 0.75
     let next = skewed;
     for (let i = 0; i < 400; i++) next = arbToSpot(rebalanceWeights(next));
-    const w = (next.vault.eth * next.eth) / (next.vault.eth * next.eth + next.vault.usdc);
+    // LP.md weight uses the full NAV (incl. insurance) — same as rebalanceWeights.
+    const nav = vaultNav(next);
+    const w = (next.vault.eth * next.eth) / nav;
     assert.ok(w < 0.7, `moved ${w}`);
     assert.ok(w >= 0.4 && w <= 0.605, `inside band ${w}`);
+  });
+});
+
+describe("audit fixes (F7–F13 regression)", () => {
+  it("F7: arbToSpot re-pin conserves x·y=k and LP value (only the price move)", () => {
+    const s = initialState();
+    const pool0 = s.pools["ETH-USDC"]!;
+    const k0 = pool0.baseReserve * pool0.quoteReserve;
+    const moved = { ...s, eth: s.eth * 1.1 };
+    const repinned = arbToSpot(moved);
+    const pool1 = repinned.pools["ETH-USDC"]!;
+    const k1 = pool1.baseReserve * pool1.quoteReserve;
+    assert.ok(Math.abs(k1 - k0) / k0 < 1e-9, `k drifted by ${((k1 - k0) / k0).toFixed(9)}`);
+    // mark == new spot, and TVL equals the analytic CPMM value 2·√(k·p):
+    assert.ok(Math.abs(pool1.quoteReserve / pool1.baseReserve - moved.eth) / moved.eth < 1e-9);
+    const analytic = 2 * Math.sqrt(k0 * moved.eth);
+    const tvl = poolTvl(repinned, "ETH-USDC");
+    assert.ok(Math.abs(tvl - analytic) / analytic < 1e-9, `TVL ${tvl} vs analytic ${analytic}`);
+  });
+
+  it("F8: option premium reaches the vault; expiry payout debits the house", () => {
+    const s0 = initialState();
+    const v00 = s0.vault.usdc;
+    const a0 = s0.account.usdc;
+    const opened = buyOption(s0, "call", 4000, exp, 1);
+    assert.equal(typeof opened, "object", String(opened));
+    let s: typeof s0 = opened as typeof s0;
+    const pos = s.options[0]!;
+    const premium = pos.premium * pos.sizeEth;
+    const fee = premium * DERIV_FEE;
+    assert.ok(Math.abs(s.vault.usdc - v00 - (premium + fee * 0.5)) < 1e-6, "premium + half fee to vault");
+    assert.ok(Math.abs(s.account.usdc - a0 + premium + fee) < 1e-6, "trader debited premium + fee");
+    // Expire ITM: mark ETH up to 4200 (vs 4000 strike), then run the clock out.
+    s = setMark(s, 4200);
+    const spot = 4200;
+    const v0 = s0.vault.usdc + s0.vault.eth * spot; // pre-open vault value at spot
+    const s2 = advanceClock(s, pos.expiry - s.clock + 1);
+    assert.equal(s2.options.length, 0, "option settled");
+    const payoff = (spot - 4000) * pos.sizeEth;
+    assert.ok(Math.abs(s2.account.usdc - s.account.usdc - payoff) < 1e-6, "trader credited the payoff");
+    const dT = s2.account.usdc - a0;
+    const dV = s2.vault.usdc + s2.vault.eth * spot - v0;
+    const dI = s2.insuranceUsdc - s0.insuranceUsdc;
+    assert.ok(Math.abs(dT + dV + dI) < 1e-6, `conservation ΔT ${dT} ΔV ${dV} ΔI ${dI}`);
+    assert.ok(Math.abs(dI - fee * 0.5) < 1e-9, "insurance only got its fee half");
+  });
+
+  it("F9: flatten fill charges the trader — no minted fee", () => {
+    let s = initialState();
+    const opened = tradeFuture(s, "long", 1, exp);
+    assert.equal(typeof opened, "object", String(opened));
+    s = opened as typeof s;
+    const pos = s.futures[0]!;
+    const i0 = s.insuranceUsdc;
+    const r = tradeFuture(s, "short", 1, exp);
+    assert.equal(typeof r, "object", String(r));
+    const next = r as typeof s;
+    const fill = next.fills[0]!;
+    assert.equal(fill.note, "flatten");
+    assert.ok(fill.fee > 0, "fee charged");
+    assert.ok(Math.abs(next.insuranceUsdc - i0 - fill.fee * 0.5) < 1e-9, "insurance gets exactly half the fee");
+    const pnl = (fill.price - pos.entry) * pos.sizeEth;
+    const realizedDelta = next.account.realized - s.account.realized;
+    assert.ok(
+      Math.abs(realizedDelta - (pnl - fill.fee)) < 1e-6,
+      `realized Δ ${realizedDelta} vs pnl ${pnl} − fee ${fill.fee}`,
+    );
+  });
+
+  it("F11: liquidation pays the FULL remainder; insurance (negative) trips the circuit", () => {
+    let s = initialState();
+    const opened = tradeFuture(s, "long", 5, exp);
+    assert.equal(typeof opened, "object", String(opened));
+    s = opened as typeof s;
+    // Drain the vault's free USDC below the payout obligation.
+    s = { ...s, vault: { ...s.vault, usdc: 0 }, insuranceUsdc: 50 };
+    const crashed = setMark(s, 3200, { settle: false });
+    const pos = crashed.futures[0]!;
+    const eqTrue = pos.margin + (3200 - pos.entry) * pos.sizeEth;
+    assert.ok(eqTrue > 0, "equity positive");
+    const penalty = Math.min(eqTrue, 0.01 * pos.sizeEth * 3200);
+    const payout = eqTrue - penalty;
+    const after = settleNow(crashed);
+    assert.equal(after.futures.length, 0);
+    assert.ok(Math.abs(after.account.usdc - crashed.account.usdc - payout) < 1e-6, "full remainder paid");
+    assert.ok(after.insuranceUsdc < 0, `insurance ${after.insuranceUsdc}`);
+    assert.ok(after.circuitUntil > after.clock, "circuit set when insurance < 0");
+  });
+
+  it("F12: reject gate uses the IM slope actually charged (25→75%), not flat FUT_IM", () => {
+    const s = { ...initialState(), account: { ...initialState().account, usdc: 3_010 } };
+    const sizeEth = 3;
+    const rate = imRate(s, sizeEth, "ETH");
+    assert.ok(rate > FUT_IM + 1e-9, `slope ${rate} > flat ${FUT_IM}`);
+    assert.ok(sizeEth * s.eth * FUT_IM + sizeEth * s.eth * DERIV_FEE <= 3_010, "flat 25% would pass");
+    const why = rejectFuture(s, "long", sizeEth, exp);
+    assert.ok(why && /buying power/i.test(String(why)), String(why));
+  });
+
+  it("F13: sanitizeState cannot resurrect an over-reserved / inflated / time-travelling state", () => {
+    const s = initialState();
+    const bad = {
+      ...s,
+      clock: -5,
+      vault: {
+        ...s.vault,
+        reservedEth: s.vault.eth * 2,
+        reservedUsdc: s.vault.usdc * 2,
+        escrowUsdc: s.vault.usdc * 2,
+        hedgeEth: 1e9,
+      },
+      insuranceUsdc: 1e12,
+      circuitUntil: s.clock + 90 * 24 * 3600 * 1000,
+    };
+    const clean = sanitizeState(bad, s);
+    assert.ok(clean.vault.reservedEth <= clean.vault.eth * UTIL_CAP + 1e-9, "reservedEth ≤ α·ETH");
+    assert.ok(clean.vault.reservedUsdc <= clean.vault.usdc * UTIL_CAP + 1e-9, "reservedUsdc ≤ α·USDC");
+    assert.ok((clean.vault.escrowUsdc ?? 0) <= clean.vault.usdc - clean.vault.reservedUsdc + 1e-9, "escrow ≤ free");
+    assert.ok(Math.abs(clean.vault.hedgeEth) <= clean.vault.eth, "hedge bounded by vault ETH");
+    assert.ok(clean.insuranceUsdc <= Math.max(s.insuranceUsdc, (clean.vault.eth * clean.eth + clean.vault.usdc) * 0.5));
+    assert.ok(clean.clock >= 0, "clock never negative");
+    assert.ok(clean.circuitUntil <= clean.clock + 4 * CIRCUIT_MS, "circuit capped");
+    assert.ok(clean.liveAt <= clean.clock, "liveAt cannot predate clock");
   });
 });

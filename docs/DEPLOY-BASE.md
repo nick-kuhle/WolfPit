@@ -12,16 +12,28 @@ WETH/USDC pit pool is seeded (`VITE_MARKETS=spot,future,option`).
 
 - `DealerVault`: owner (multisig) + operator (keeper) roles on every sensitive
   entry point; `haltShortGamma()` is oracle-backed and **fail-closed** (zero
-  insurance, dead oracle, or insurance/NAV < 1% ⇒ halt); `openShort(size)`
-  marks at the **oracle**, not a caller print; dual-asset deposits are
-  **oracle-valued** (no 18-dec/6-dec unit mixing) with a $5k first-deposit
-  floor and a $1 virtual-share offset against inflation; `exec(target, data)`
-  lets the keeper route swaps through **owner-allowlisted aggregator routers**
-  with owner-set token allowances; 2-step ownership transfer.
+  insurance, dead oracle, or insurance/NAV < 1% ⇒ halt) and now gates BOTH
+  `writeCall` and `writePut` (short puts are short gamma too);
+  `openShort(size, router, data, minOutUsdc)` is **atomic** — the allowlisted
+  router swap executes in the same tx, the book is updated from the REAL
+  balance deltas, the reservation is marked at the **oracle**, and a bad fill
+  (`< minOutUsdc`) reverts the whole order (no un-booked drift);
+  `reconcileBalances()` re-syncs internal counters to real balances and
+  REVERTS (refusing to run) if real balances sit below reserved amounts;
+  dual-asset deposits are **oracle-valued** (no 18-dec/6-dec unit mixing) with
+  a $5k first-deposit floor and a $1 virtual-share offset against inflation;
+  `exec(target, data)` lets the keeper route swaps through
+  **owner-allowlisted aggregator routers** with owner-set token allowances;
+  `slashInsuranceJunior()` finally reaches the junior tranche (Stake.slash);
+  2-step ownership transfer. `DeployBase.s.sol` refuses to run on a chain that
+  is not Base mainnet (8453) unless `BASE_ALLOW_ANY_CHAIN=1` is set explicitly.
 - `ChainlinkOracle`: staleness (1h), positivity, and sanity-band checks; a bad
   feed reverts and the vault halts risk-taking rather than marking fantasy.
-- Keeper: reads `owner/operator/navUsdc/haltShortGamma()`, encodes
-  `exec(router, data)` envelopes, `WOLFPIT_CHAIN` env.
+- Keeper (F3): can now TRANSCAT — `WOLFPIT_KEEPER_KEY` signs as the operator
+  for `writeCall` / `writePut` / `openShort` (atomic swap) / `reconcileBalances`
+  / `pause` / `releaseCall`; a `monitor` loop reads
+  `owner/operator/navUsdc/haltShortGamma()` and FAILS CLOSED by pausing the
+  vault on-chain on halt/naked conditions. Without a key, it dry-run encodes.
 - Engine (paper/sim parity): liquidation conservation (trader gets equity −
   penalty, insurance is funded, holes pause the pit), 1×/10×/60× clock,
   day-PnL, MM.md spread/reservation/hedge-band/±0.40 option edge, LP.md weight
@@ -58,6 +70,7 @@ export BASE_RPC_URL=https://mainnet.base.org
 export BASE_ORACLE_AGG=0x...        # from data.chain.link, day-of
 export BASE_OWNER=0x...             # multisig
 export BASE_OPERATOR=0x...          # keeper hot key
+# export BASE_ALLOW_ANY_CHAIN=1    # ONLY for Sepolia dry-runs; mainnet script refuses non-8453
 
 forge script script/DeployBase.s.sol \
   --rpc-url $BASE_RPC_URL --broadcast \
@@ -69,9 +82,11 @@ Terminal prints `oracle=`, `vault=`, `usdc=`, `weth=`. Record them.
 **Immediately after deploy (from the OWNER multisig):**
 
 1. `vault.creditInsurance(<seed USDC>)` — fund insurance (target ≥ 1% of NAV;
-   the paper model seeds $25k against an $800k vault). NOTE: transfer the USDC
-   to the vault first if you want it backed 1:1 — `creditInsurance` is an
-   accounting credit; back it with treasury funds.
+   the paper model seeds $25k against an $800k vault). CRITICAL (F16): this is
+   an ACCOUNTING-ONLY credit — no USDC moves. Transfer the backing token to
+   the vault FIRST (before or after the credit) or the insurance fund is not
+   backed 1:1 and any liquidation/settlement that draws it will simply drain
+   the vault's real USDC. Back it with treasury funds.
 2. Seed the vault: `vault.deposit(<WETH>, <USDC>)` from the treasury (first
    deposit must be ≥ $5k of value). This is the dealing inventory.
 3. Allowlist the aggregator router(s): `vault.allowTarget(<router>, true)` and
@@ -86,12 +101,21 @@ cd crates/keeper
 export WOLFPIT_RPC=https://mainnet.base.org
 export WOLFPIT_VAULT=0x...
 export WOLFPIT_CHAIN=base
-cargo run -p wolfpit-keeper -- --rpc $WOLFPIT_RPC --vault $WOLFPIT_VAULT
+# read-only health (no key needed):
+cargo run -p wolfpit-keeper -- --rpc $WOLFPIT_RPC --vault $WOLFPIT_VAULT status
+# transacting (operator key — NEVER on the owner multisig):
+export WOLFPIT_KEEPER_KEY=0x...
+cargo run -p wolfpit-keeper -- --rpc $WOLFPIT_RPC --vault $WOLFPIT_VAULT write-put --size-eth 1 --strike-usdc 4000
+cargo run -p wolfpit-keeper -- --rpc $WOLFPIT_RPC --vault $WOLFPIT_VAULT open-short \
+  --size-eth 1 --router 0x... --min-out-usdc 3900 --data 0x...
+# fail-closed watcher: pauses the vault on-chain when haltShortGamma/naked trips
+cargo run -p wolfpit-keeper -- --rpc $WOLFPIT_RPC --vault $WOLFPIT_VAULT --interval 30 monitor
 ```
 
-The keeper prints `halt=` from the oracle-backed check. If `true`: do not write
-gamma. Hedging is executed as `exec(<allowlisted router>, <swap calldata>)`
-signed by the operator key.
+`status` prints the oracle-backed halt check (`halt=true` ⇒ do not write gamma).
+Any txn command without a key (or with `--rpc` unset) prints the calldata only —
+handy for a Safe/hardware signer. Hedging is `openShort`/`exec`
+(`<allowlisted router>`, `<swap calldata>`) signed by the operator key.
 
 ## Desk (frontend)
 

@@ -56,8 +56,12 @@ contract ChainlinkOracle {
     }
 
     function ethUsdc() external view returns (uint256) {
-        (, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = agg.latestRoundData();
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) =
+            agg.latestRoundData();
         if (answer <= 0 || answeredInRound == 0) revert BadRound();
+        // answeredInRound < roundId means the proxy served an OLD round (stale
+        // while the underlying feed is mid-update) — treat as no price.
+        if (answeredInRound < roundId) revert BadRound();
         if (block.timestamp - updatedAt > MAX_STALENESS) revert Stale();
         uint256 usdcPerEth = uint256(answer); // aggDecimals (8) → 6
         if (aggDecimals > 6) {

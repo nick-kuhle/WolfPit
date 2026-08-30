@@ -231,8 +231,30 @@ const globalBoot = globalThis as typeof globalThis & {
 };
 if (typeof window === "undefined" && dbSource === "pglite") {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().catch((err) => {
+    // Log and swallow: nothing awaits this eager-boot promise, so rethrowing
+    // becomes an UNHANDLED REJECTION that kills the serverless process (a
+    // bundled PGLite without a data dir, or a transient store outage, would
+    // take the whole app down). The slot is cleared above so the next call
+    // retries, and per-request callers of getSql() still receive the error —
+    // e.g. the auth rate-limit guard answers 503 (fail-closed) instead.
     globalBoot.__pgBootstrapPromise__ = undefined;
     console.error("[db] PGLite bootstrap failed:", err);
-    throw err;
   });
+
+  // PGLite's own async machinery (fs snapshot readers, watchers) can emit
+  // fire-and-forget rejections when its data dir is unavailable — e.g. inside
+  // a bundled serverless function without the package's `pglite.data` asset.
+  // Default Node semantics turn those into UNHANDLED REJECTIONS that kill the
+  // whole process, taking the app down for every route, not just the request
+  // that touched the DB. With the fallback backend in use, log instead of
+  // dying; per-request failures still surface to their callers (503 via the
+  // auth guard). Production (Neon, `DATABASE_URL` set) never installs this.
+  const guardKey = "__wolfpitPgUnhandledGuard__";
+  const guardScope = globalThis as typeof globalThis & { [guardKey]?: boolean };
+  if (typeof process !== "undefined" && !guardScope[guardKey]) {
+    guardScope[guardKey] = true;
+    process.on("unhandledRejection", (err) => {
+      console.error("[db] PGLite fallback unhandled rejection:", err);
+    });
+  }
 }

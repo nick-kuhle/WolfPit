@@ -1,10 +1,13 @@
 import { WPIT_PX_MAX, WPIT_PX_MIN } from "./limits";
-import type { EngineState, PoolState } from "./types";
+import { CIRCUIT_MS } from "./risk";
+import { UTIL_CAP, type EngineState, type PoolState } from "./types";
 
 export const ETH_MIN = 50;
 export const ETH_MAX = 250_000;
 export const ORACLE_JUMP = 0.12;
 const MAX_BAL = 1e12;
+// A restored state may not legally live in the future beyond real time + 1 day.
+const MAX_CLOCK_DRIFT = 24 * 3600 * 1000;
 
 function fin(n: unknown, fallback = 0): number {
   return typeof n === "number" && Number.isFinite(n) ? n : fallback;
@@ -32,6 +35,9 @@ function cleanPool(p: PoolState | undefined, id: string): PoolState | null {
   const baseReserve = nn(p.baseReserve);
   const quoteReserve = nn(p.quoteReserve);
   if (!(baseReserve > 0) || !(quoteReserve > 0)) return null;
+  // Hard sanity: reserves must stay finite and bounded (a corrupt cache can
+  // otherwise resurrect a 1e30 reserve and skew every mark/TVL off the pool).
+  if (baseReserve > MAX_BAL || quoteReserve > MAX_BAL) return null;
   return {
     id: String(p.id || id),
     base,
@@ -63,18 +69,23 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     }
   }
 
+  // F13: the inventory law (`reserved ≤ α·asset`, INV in LP.md) must hold on
+  // REHYDRATION, not just at fill time — a stale tab with a corrupt cache can
+  // otherwise resurrect an over-reserved book the engine happily keeps trading.
   const vaultIn = raw.vault ?? base.vault;
   const vault = {
-    eth: nn(vaultIn.eth, base.vault.eth),
-    usdc: nn(vaultIn.usdc, base.vault.usdc),
+    eth: Math.min(nn(vaultIn.eth, base.vault.eth), MAX_BAL),
+    usdc: Math.min(nn(vaultIn.usdc, base.vault.usdc), MAX_BAL),
     reservedEth: nn(vaultIn.reservedEth),
     reservedUsdc: nn(vaultIn.reservedUsdc),
     hedgeEth: fin(vaultIn.hedgeEth),
     escrowUsdc: nn(vaultIn.escrowUsdc),
   };
-  vault.reservedEth = Math.min(vault.reservedEth, vault.eth);
-  vault.reservedUsdc = Math.min(vault.reservedUsdc, vault.usdc);
+  vault.reservedEth = Math.min(vault.reservedEth, vault.eth * UTIL_CAP);
+  vault.reservedUsdc = Math.min(vault.reservedUsdc, vault.usdc * UTIL_CAP);
   vault.escrowUsdc = Math.min(vault.escrowUsdc, Math.max(0, vault.usdc - vault.reservedUsdc));
+  // The hedge can never exceed the vault's own ETH on either side of the book.
+  vault.hedgeEth = clamp(vault.hedgeEth, -vault.eth, vault.eth);
 
   const accIn = raw.account ?? base.account;
   const tokens: Record<string, number> = {};
@@ -125,6 +136,15 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
       costUsdc: nn(p.costUsdc),
     }));
 
+  const clock = clamp(
+    nn(raw.clock, base.clock),
+    0,
+    Math.max(base.clock, Date.now()) + MAX_CLOCK_DRIFT,
+  );
+  // circuitUntil may only be in the (recent) future: a corrupt cache can't
+  // freeze the market for weeks, and an expired circuit must clear to 0.
+  const circuitUntil = clamp(nn(raw.circuitUntil), 0, clock + 4 * CIRCUIT_MS);
+
   return {
     ...base,
     eth,
@@ -134,8 +154,9 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     btc: nn(raw.btc),
     iv: clamp(nn(raw.iv, base.iv), 0.1, 3),
     realizedVol: clamp(nn(raw.realizedVol, base.realizedVol), 0.1, 3),
-    clock: nn(raw.clock, base.clock),
-    liveAt: nn(raw.liveAt),
+    clock,
+    circuitUntil,
+    liveAt: Math.min(nn(raw.liveAt), clock),
     liveSource: typeof raw.liveSource === "string" ? raw.liveSource.slice(0, 40) : base.liveSource,
     account: {
       usdc: clamp(nn(accIn.usdc), 0, MAX_BAL),
@@ -148,7 +169,7 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     vault,
     pools,
     lp,
-    stake: { amount: nn(raw.stake?.amount), since: nn(raw.stake?.since, base.clock) },
+    stake: { amount: nn(raw.stake?.amount), since: Math.min(nn(raw.stake?.since, base.clock), clock) },
     futures,
     options,
     fills: Array.isArray(raw.fills)
@@ -161,8 +182,12 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     working: Array.isArray(raw.working) ? raw.working.slice(0, 40) : [],
     farmWpit: nn(raw.farmWpit),
     harvestedWpit: nn(raw.harvestedWpit),
-    insuranceUsdc: nn(raw.insuranceUsdc, base.insuranceUsdc),
-    circuitUntil: nn(raw.circuitUntil),
+    // Insurance is a FRACTION of the book; bound it against the restored NAV so
+    // a corrupt cache cannot inflate it (which would disarm the 1% halt).
+    insuranceUsdc: Math.min(
+      nn(raw.insuranceUsdc, base.insuranceUsdc),
+      Math.max(base.insuranceUsdc, (vault.eth * eth + vault.usdc) * 0.5),
+    ),
     simSpeed: raw.simSpeed === 10 || raw.simSpeed === 60 ? raw.simSpeed : 1,
     liquidations: nn(raw.liquidations),
     equityTape: Array.isArray(raw.equityTape) ? raw.equityTape.slice(-240) : base.equityTape,

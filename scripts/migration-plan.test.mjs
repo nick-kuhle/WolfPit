@@ -13,15 +13,23 @@ import { test } from "node:test";
 import { isMigrationFile, migrationName, pendingMigrations } from "./migration-plan.mjs";
 import { projectRoot } from "./with-app-env.mjs";
 
-const AUTH_MIGRATION = "0001_auth.sql";
+/**
+ * Every migration that ships under migrations/auth/ (the opt-in sign-in schema:
+ * Better Auth tables + the F14 rate-limit table). The auth-on copy must move
+ * ALL of them — copying only 0001 would silently skip wolfpit_rate_limit.
+ */
+function authMigrationNames() {
+  const dir = join(projectRoot(), "migrations/auth");
+  return readdirSync(dir).filter(isMigrationFile).sort();
+}
 
 /**
- * The auth-on copy of the Better Auth schema and its source, or null when the
- * app has not turned sign-in on (the shipped state).
+ * The auth-on copy of one auth migration and its source, or null when the app
+ * has not turned sign-in on (the shipped state).
  */
-function authSchemaCopy(root) {
-  const copy = join(root, "migrations", AUTH_MIGRATION);
-  const source = join(root, "migrations/auth", AUTH_MIGRATION);
+function authSchemaCopy(root, name) {
+  const copy = join(root, "migrations", name);
+  const source = join(root, "migrations/auth", name);
   if (!existsSync(copy) || !existsSync(source)) return null;
   return { copy: readFileSync(copy, "utf8"), source: readFileSync(source, "utf8") };
 }
@@ -59,32 +67,43 @@ test("non-.sql entries are dropped (readdir also yields the auth/ directory)", (
 test("the auth schema ships outside the globbed directory", () => {
   const migrationsDir = join(projectRoot(), "migrations");
   assert.deepEqual(pendingMigrations(readdirSync(migrationsDir), []), []);
-  assert.ok(readdirSync(join(migrationsDir, "auth")).includes("0001_auth.sql"));
+  const authNames = authMigrationNames();
+  // Both the Better Auth schema and the F14 rate-limit table must ship there —
+  // a missing 0002 means sign-in-on deployments never get wolfpit_rate_limit.
+  assert.ok(authNames.includes("0001_auth.sql"), "0001_auth.sql missing from migrations/auth/");
+  assert.ok(
+    authNames.includes("0002_wolfpit_rate_limit.sql"),
+    "0002_wolfpit_rate_limit.sql missing from migrations/auth/",
+  );
 });
 
-test("this workspace's auth schema copy is byte-identical to its source", () => {
+test("this workspace's auth schema copies are byte-identical to their sources", () => {
   // An edited copy diverges silently: basename keying skips it on a database
   // that already ran the original, and applies it on a fresh PGLite preview.
-  const pair = authSchemaCopy(projectRoot());
-  if (pair === null) return; // sign-in off — nothing has been copied up
-  assert.equal(
-    pair.copy,
-    pair.source,
-    "migrations/0001_auth.sql has been edited — it must stay a verbatim copy of migrations/auth/0001_auth.sql",
-  );
+  for (const name of authMigrationNames()) {
+    const pair = authSchemaCopy(projectRoot(), name);
+    if (pair === null) continue; // sign-in off — nothing has been copied up
+    assert.equal(
+      pair.copy,
+      pair.source,
+      `migrations/${name} has been edited — it must stay a verbatim copy of migrations/auth/${name}`,
+    );
+  }
 });
 
 test("the copy check reads both files and catches an edit", () => {
   const root = mkdtempSync(join(tmpdir(), "auth-schema-"));
   mkdirSync(join(root, "migrations/auth"), { recursive: true });
-  writeFileSync(join(root, "migrations/auth", AUTH_MIGRATION), "create table t ();\n");
-  assert.equal(authSchemaCopy(root), null);
+  for (const name of ["0001_auth.sql", "0002_wolfpit_rate_limit.sql"]) {
+    writeFileSync(join(root, "migrations/auth", name), "create table t ();\n");
+    assert.equal(authSchemaCopy(root, name), null);
 
-  writeFileSync(join(root, "migrations", AUTH_MIGRATION), "create table t ();\n");
-  const same = authSchemaCopy(root);
-  assert.equal(same.copy, same.source);
+    writeFileSync(join(root, "migrations", name), "create table t ();\n");
+    const same = authSchemaCopy(root, name);
+    assert.equal(same.copy, same.source);
 
-  writeFileSync(join(root, "migrations", AUTH_MIGRATION), "create table t (x int);\n");
-  const drifted = authSchemaCopy(root);
-  assert.notEqual(drifted.copy, drifted.source);
+    writeFileSync(join(root, "migrations", name), "create table t (x int);\n");
+    const drifted = authSchemaCopy(root, name);
+    assert.notEqual(drifted.copy, drifted.source);
+  }
 });

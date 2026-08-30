@@ -71,17 +71,22 @@ export const useAdmin = create<AdminStore>()(
   ),
 );
 
+/**
+ * F18: a TEST book must never look like a real deployment. The old fake
+ * addresses were SHA-256 hashes in 0x form — indistinguishable from a real
+ * contract address at a glance, and trivially mistakable for a live deploy in
+ * a dashboard or downstream script. Placeholders are now explicitly labeled
+ * `test:<key>` (NOT 0x-prefixed): any consumer that validates an EVM address
+ * will reject them, and no operator can confuse them with a real book.
+ * Replace them by pasting the SCRIPT output from a real deploy, or by wiring
+ * env-provided addresses (VITE_VAULT / VITE_POOL_WPIT_USDC / …).
+ */
 export async function deployTestBook(): Promise<ContractBook> {
+  void crypto; // keep the module isomorphic-safe for SSR (subtle never needed)
   const labels = ["usdc", "weth", "wpit", "vault", "wpitUsdc", "wpitEth", "farm", "stake"] as const;
   const book = { ...EMPTY };
   for (const k of labels) {
-    book[k] = await fakeAddress(`wolfpit-test:${k}`);
+    book[k] = `test:${k}`;
   }
   return book;
-}
-
-async function fakeAddress(label: string) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(label));
-  const bytes = new Uint8Array(buf).slice(0, 20);
-  return `0x${[...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }

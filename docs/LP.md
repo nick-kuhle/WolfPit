@@ -67,6 +67,14 @@ r_LP ≈ swap_fees
      − emissions_dilution (if they also farm)
 ```
 
+Ledger note (F8): `option_theta_captured` is realized in the sim as the option
+PREMIUM being credited to `vault.usdc` at write time and the expiry PAYOFF
+being debited from the vault (covering ETH converted at the settlement spot for
+calls; the cash-secure collateral released for puts). `vaultNav()` computes the
+full LP.md formula — `ETH·S + USDC + MTM(short options) − trader credits +
+insurance` — so the premium is visible in NAV immediately and the payout
+reduces it at settlement.
+
 If `r_LP` looks like long ETH, the risk engine is broken. Kill the tape, do not raise emissions.
 
 ### v1 sim numbers

@@ -46,7 +46,7 @@ export function RedirectToSignIn({ to = SIGN_IN_PATH }: { to?: string }) {
 
 /**
  * Minimal signed-in identity chip + sign-out. Restyle freely (see the
- * `design-ui` skill). Sign-out is only shown when auth is enabled (the
+ * design notes in `docs/`). Sign-out is only shown when auth is enabled (the
  * disabled-auth dev user has nothing to sign out of).
  */
 export function UserButton() {

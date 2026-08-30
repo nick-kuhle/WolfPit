@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {DealerVault, IERC20, IOracle} from "../src/DealerVault.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockOracle} from "../src/mocks/MockOracle.sol";
+import {WPIT} from "../src/WPIT.sol";
+import {Stake} from "../src/Stake.sol";
 
 contract CallRecorder {
     address public lastCaller;
@@ -12,6 +14,35 @@ contract CallRecorder {
     function ping(uint256 x) external {
         lastCaller = msg.sender;
         pad = x;
+    }
+}
+
+/// @notice Mock aggregator router: sells WETH for USDC at a settable price.
+///         `shortPay` simulates a bad fill (pays 99%).
+contract SwapRouter {
+    MockERC20 public immutable weth;
+    MockERC20 public immutable usdc;
+    uint256 public price = 4_000e6;
+    bool public shortPay;
+
+    constructor(MockERC20 w, MockERC20 u) {
+        weth = w;
+        usdc = u;
+    }
+
+    function setPrice(uint256 p) external {
+        price = p;
+    }
+
+    function setShortPay(bool v) external {
+        shortPay = v;
+    }
+
+    function sell(uint256 amt) external {
+        weth.transferFrom(msg.sender, address(this), amt);
+        uint256 pay = (amt * price) / 1e18;
+        if (shortPay) pay = (pay * 99) / 100;
+        usdc.transfer(msg.sender, pay);
     }
 }
 
@@ -72,8 +103,20 @@ contract DealerVaultTest {
     }
 
     function testWritePutCashSecured() public {
+        vault.creditInsurance(20_000e6); // short puts must pass the halt too
         vault.writePut(1 ether, 4000e6);
         require(vault.reservedUsdc() == 4000e6, "put lock");
+    }
+
+    /// F1 regression: writePut must fail closed with zero insurance —
+    ///        short puts are short gamma.
+    function testWritePutHaltsAtZeroInsurance() public {
+        try vault.writePut(1 ether, 4000e6) {
+            revert("expected InsuranceHalt");
+        } catch {}
+        vault.creditInsurance(20_000e6);
+        vault.writePut(1 ether, 4000e6);
+        require(vault.reservedUsdc() == 4000e6, "passes with cover");
     }
 
     function testWritePutNakedReverts() public {
@@ -136,16 +179,91 @@ contract DealerVaultTest {
         } catch {}
     }
 
-    function testOpenShortMarksAtOracleNotCallerPrint() public {
+    function _routerFixture() internal returns (SwapRouter router) {
+        router = new SwapRouter(weth, usdc);
+        usdc.mint(address(router), 10_000_000e6);
+        vault.allowTarget(address(router), true);
+        vault.setAllowance(IERC20(address(weth)), address(router), type(uint256).max);
+    }
+
+    /// Atomic openShort: router swap + booking in ONE tx, booked from
+    ///        real balance deltas, reservation at the ORACLE mark.
+    function testOpenShortAtomicSwapsThenBooks() public {
+        SwapRouter router = _routerFixture();
         uint256 e0 = vault.ethBal();
         uint256 u0 = vault.usdcBal();
-        vault.openShort(1 ether); // no spot argument anymore
+        bytes memory data = abi.encodeWithSignature("sell(uint256)", 1 ether);
+        vault.openShort(1 ether, address(router), data, 3_000e6);
         require(vault.ethBal() == e0 - 1 ether, "sold eth");
-        require(vault.usdcBal() == u0 + 4_000e6, "credited at oracle mark");
+        require(vault.usdcBal() == u0 + 4_000e6, "credited actual swap proceeds");
         require(vault.reservedUsdc() == 4_000e6, "locked at oracle mark");
         oracle.set(3_000e6);
-        vault.openShort(1 ether);
-        require(vault.usdcBal() == u0 + 4_000e6 + 3_000e6, "re-marks with oracle");
+        vault.openShort(1 ether, address(router), data, 3_000e6);
+        require(vault.reservedUsdc() == 4_000e6 + 3_000e6, "locks at new oracle mark");
+    }
+
+    /// A bad fill (99% payout) with a strict min-out reverts EVERYTHING.
+    function testOpenShortSlippageRevertsFully() public {
+        SwapRouter router = _routerFixture();
+        router.setShortPay(true);
+        bytes memory data = abi.encodeWithSignature("sell(uint256)", 1 ether);
+        try vault.openShort(1 ether, address(router), data, 4_000e6) {
+            revert("expected Slippage");
+        } catch {}
+        require(vault.ethBal() == 100 ether, "full rollback: eth");
+        require(vault.usdcBal() == 400_000e6, "full rollback: usdc");
+        require(vault.reservedUsdc() == 0, "full rollback: reservation");
+    }
+
+    function testOpenShortRequiresAllowlistedRouter() public {
+        SwapRouter router = _routerFixture();
+        bytes memory data = abi.encodeWithSignature("sell(uint256)", 1 ether);
+        vm.startPrank(ALICE);
+        usdc.mint(ALICE, 10_000_000e6);
+        vm.stopPrank();
+        SwapRouter rogue = new SwapRouter(weth, usdc);
+        try vault.openShort(1 ether, address(rogue), data, 0) {
+            revert("expected BadTarget");
+        } catch {}
+    }
+
+    /// Reconcile syncs counters up after an unbooked swap; a loss below
+    ///        reserved amounts cannot be reconciled (fail loud, never absorb).
+    function testReconcileBalances() public {
+        usdc.mint(address(vault), 123e6); // drift: tokens arrived outside ledger
+        vault.reconcileBalances();
+        require(vault.usdcBal() == 400_000e6 + 123e6, "synced up");
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(10 ether); // reserves 10 of the 100 WETH in the vault
+        vm.prank(address(vault));
+        weth.transfer(address(0xDEAD), 95 ether); // real ETH now 5 < 10 reserved
+        try vault.reconcileBalances() {
+            revert("expected UnreconciledLoss");
+        } catch {}
+    }
+
+    function testReconcileOnlyOperator() public {
+        vm.prank(ALICE);
+        try vault.reconcileBalances() {
+            revert("expected NotOperator");
+        } catch {}
+    }
+
+    /// Junior slash order is now reachable: vault pulls staked WPIT into
+    ///        insuranceWpit, capped at the stake contract's total.
+    function testSlashInsuranceJunior() public {
+        WPIT wpit = new WPIT(100_000_000 ether);
+        Stake stake = new Stake(wpit, vault);
+        vault.setStake(address(stake));
+        wpit.setMinter(address(this));
+        wpit.mint(address(this), 50 ether);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(50 ether);
+        vault.slashInsuranceJunior(20 ether);
+        require(vault.insuranceWpit() == 20 ether, "slashed into insurance");
+        vault.slashInsuranceJunior(1_000 ether); // capped at stake total (30 left)
+        require(vault.insuranceWpit() == 20 ether + 30 ether, "capped at total");
+        require(stake.total() == 0, "stake drained");
     }
 
     function testDepositSharesAreValueBasedNotUnitSummed() public {

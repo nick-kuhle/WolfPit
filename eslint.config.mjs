@@ -5,7 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-/** Flat ESLint config for the TanStack Start app-builder template. */
+/** Flat ESLint config for the WolfPit TanStack Start app. */
 export default tseslint.config(
   {
     ignores: [

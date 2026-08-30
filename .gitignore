@@ -3,17 +3,13 @@ node_modules/
 .output/
 dist/
 .tanstack/
-.grok/*
-!.grok/app-env.json
 artifacts/
 screenshots/
 .env
 .env.*
 *.log
 .node_modules.lock
-AGENTS.md
 contracts/out/
 contracts/cache/
 target/
 crates/**/target/
-

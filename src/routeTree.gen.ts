@@ -24,6 +24,7 @@ import { Route as TradeRouteImport } from './routes/trade'
 import { Route as WatchRouteImport } from './routes/watch'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AssetSymbolRouteImport } from './routes/asset.$symbol'
+import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -100,6 +101,11 @@ const AssetSymbolRoute = AssetSymbolRouteImport.update({
   path: '/asset/$symbol',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -117,6 +123,7 @@ export interface FileRoutesByFullPath {
   '/watch': typeof WatchRoute
   '/admin/login': typeof AdminLoginRoute
   '/asset/$symbol': typeof AssetSymbolRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/watch': typeof WatchRoute
   '/admin/login': typeof AdminLoginRoute
   '/asset/$symbol': typeof AssetSymbolRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -152,6 +160,7 @@ export interface FileRoutesById {
   '/watch': typeof WatchRoute
   '/admin/login': typeof AdminLoginRoute
   '/asset/$symbol': typeof AssetSymbolRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -171,6 +180,7 @@ export interface FileRouteTypes {
     | '/watch'
     | '/admin/login'
     | '/asset/$symbol'
+    | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -188,6 +198,7 @@ export interface FileRouteTypes {
     | '/watch'
     | '/admin/login'
     | '/asset/$symbol'
+    | '/api/auth/$'
   id:
     | '__root__'
     | '/'
@@ -205,6 +216,7 @@ export interface FileRouteTypes {
     | '/watch'
     | '/admin/login'
     | '/asset/$symbol'
+    | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -222,6 +234,7 @@ export interface RootRouteChildren {
   TradeRoute: typeof TradeRoute
   WatchRoute: typeof WatchRoute
   AssetSymbolRoute: typeof AssetSymbolRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -331,6 +344,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssetSymbolRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -359,6 +379,7 @@ const rootRouteChildren: RootRouteChildren = {
   TradeRoute: TradeRoute,
   WatchRoute: WatchRoute,
   AssetSymbolRoute: AssetSymbolRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

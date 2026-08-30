@@ -115,18 +115,28 @@ export function ivSmile(atm: number, S: number, K: number, T: number) {
   return clamp(atm * (1 - 0.18 * z), 0.2, 2);
 }
 
+/**
+ * Realized vol per MM.md: `RV_t = λ·RV_{t-1} + (1-λ)·|r_t|` with λ = 0.94 —
+ * an EWMA of ABSOLUTE log returns (RiskMetrics-style), not an equal-weighted
+ * sample stdev. Old vol decays geometrically so the dealer reacts to fresh
+ * vol shifts instead of averaging them away.
+ */
 export function ewmaRv(candles: { t: number; c: number }[]) {
   if (candles.length < 8) return 0.55;
-  const rets: number[] = [];
+  const lambda = 0.94;
+  let ewma = 0;
+  let n = 0;
   for (let i = 1; i < candles.length; i++) {
     const a = candles[i - 1]!.c;
     const b = candles[i]!.c;
-    if (a > 0 && b > 0) rets.push(Math.log(b / a));
+    if (a > 0 && b > 0) {
+      const r = Math.abs(Math.log(b / a));
+      ewma = n === 0 ? r : lambda * ewma + (1 - lambda) * r;
+      n++;
+    }
   }
-  const n = rets.length;
-  const mean = rets.reduce((x, y) => x + y, 0) / n;
-  const var_ = rets.reduce((x, y) => x + (y - mean) ** 2, 0) / Math.max(n - 1, 1);
+  if (n === 0) return 0.55;
   const barSec = Math.max(1, (candles[1]!.t - candles[0]!.t) / 1000);
-  const annual = Math.sqrt(var_ * ((365.25 * 24 * 3600) / barSec));
+  const annual = ewma * Math.sqrt((365.25 * 24 * 3600) / barSec);
   return Math.min(2, Math.max(0.15, annual));
 }

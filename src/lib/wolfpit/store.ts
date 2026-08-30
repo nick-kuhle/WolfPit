@@ -10,6 +10,7 @@ import {
   createPool as createPoolEngine,
   ensureListed,
   equity,
+  rebalanceWeights,
   harvestFarm,
   initialState,
   issueToken as issueTokenEngine,
@@ -191,13 +192,21 @@ export const useWolf = create<WolfStore>()(
       },
       seedVault: (eth, usdc) => {
         if (!Number.isFinite(eth) || !Number.isFinite(usdc) || eth < 0 || usdc < 0) return;
-        set({
-          vault: {
-            ...get().vault,
-            eth: Math.min(eth, 1_000_000),
-            usdc: Math.min(usdc, 1_000_000_000),
-          },
-        });
+        // F17: seeding must NOT mute the inventory/weight band. Run the same
+        // rebalanceWeights pass the engine applies after fills, so the seeded
+        // book is immediately subject to the w ∈ [0.40, 0.60] band (LP.md) —
+        // otherwise an operator seed of e.g. 240 ETH / 320k USDC leaves the
+        // vault at w = 0.75 with no rebalance until the next fill.
+        set((s) =>
+          rebalanceWeights({
+            ...s,
+            vault: {
+              ...s.vault,
+              eth: Math.min(eth, 1_000_000),
+              usdc: Math.min(usdc, 1_000_000_000),
+            },
+          }),
+        );
       },
       applyLive: (feed) =>
         set((s) => {

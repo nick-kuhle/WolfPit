@@ -29,10 +29,13 @@ contract Stake {
         wpit.transfer(msg.sender, amt);
     }
 
-    function slash(uint256 amt) external {
+    /// @notice Vault-only junior slash. Returns the amount actually taken
+    ///         (capped at `total`).
+    function slash(uint256 amt) external returns (uint256) {
         require(msg.sender == address(vault), "vault");
         if (amt > total) amt = total;
         total -= amt;
         wpit.transfer(address(vault), amt);
+        return amt;
     }
 }

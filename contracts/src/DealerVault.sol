@@ -5,6 +5,12 @@ interface IERC20 {
     function transfer(address to, uint256 amt) external returns (bool);
     function transferFrom(address from, address to, uint256 amt) external returns (bool);
     function approve(address spender, uint256 amt) external returns (bool);
+    function balanceOf(address who) external view returns (uint256);
+}
+
+/// @notice Minimal junior-tranche interface (Stake) the vault may slash.
+interface IStake {
+    function slash(uint256 amt) external returns (uint256);
 }
 
 /// @notice ETH/USD oracle. ethUsdc() returns the USDC price of 1e18 WETH,
@@ -45,6 +51,8 @@ contract DealerVault {
     address public operator;
     /// @notice Trusted WPIT insurance feeder (the Farm, when it exists).
     address public wpitFeeder;
+    /// @notice Junior-tranche WPIT stake contract (slashable on a vault hole).
+    address public stake;
 
     uint256 public ethBal;
     uint256 public usdcBal;
@@ -71,6 +79,9 @@ contract DealerVault {
     error BadTarget();
     error Reentrant();
     error FirstDepositTooSmall();
+    error SwapSize();
+    error Slippage();
+    error UnreconciledLoss();
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -151,6 +162,13 @@ contract DealerVault {
         emit PausedSet(v);
     }
 
+    /// @notice ACCOUNTING ONLY (F16): books `usdcAmt` into insuranceUsdc.
+    ///         No tokens move — the caller must transfer the backing USDC to
+    ///         this contract first (treasury top-up), or the number is a
+    ///         ledger entry and the fund is NOT actually 1:1 backed. Insurance
+    ///         is only drawn during liquidation/settlement paths that move
+    ///         real USDC, so an unbacked credit would make those paths fail
+    ///         (vault runs out of USDC) rather than silently mint.
     function creditInsurance(uint256 usdcAmt) external onlyOwner {
         insuranceUsdc += usdcAmt;
         emit InsuranceCredited(usdcAmt, 0);
@@ -166,6 +184,21 @@ contract DealerVault {
         if (msg.sender != owner && msg.sender != wpitFeeder) revert NotOwner();
         insuranceWpit += amt;
         emit InsuranceCredited(0, amt);
+    }
+
+    /// @notice Point the vault at the junior stake contract (slash recipient).
+    function setStake(address stake_) external onlyOwner {
+        stake = stake_;
+    }
+
+    /// @notice Slash order (RISK.md): insurance USDC -> staked WPIT -> pause.
+    ///         Owner calls this when a vault hole exceeds insurance; the stake
+    ///         contract transfers WPIT here and it is credited to insuranceWpit.
+    function slashInsuranceJunior(uint256 amt) external onlyOwner {
+        if (stake == address(0) || amt == 0) revert Zero();
+        uint256 slashed = IStake(stake).slash(amt);
+        insuranceWpit += slashed; // stake caps at its own total
+        emit InsuranceCredited(0, slashed);
     }
 
     // --------------------------------------------------- aggregator spot route
@@ -284,6 +317,9 @@ contract DealerVault {
 
     function writePut(uint256 size, uint256 strike) external live onlyOperator {
         if (size == 0) revert Zero();
+        // Short puts are short gamma: the same insurance halt as writeCall.
+        // Fail-closed with zero insurance / dead oracle / insurance < 1% NAV.
+        if (haltShortGamma()) revert InsuranceHalt();
         uint256 lock = (size * strike) / WAD;
         if (lock > freeUsdc()) revert NakedPut();
         reservedUsdc += lock;
@@ -298,18 +334,56 @@ contract DealerVault {
         emit RiskOpened(this.openLong.selector, size, 0);
     }
 
-    /// @notice Open covered short. Marked at the ORACLE, never a caller-supplied
-    ///         print. Vault sells the covering ETH into the hedge route.
-    function openShort(uint256 size) external live onlyOperator {
+    /// @notice Open a covered short as ONE atomic operation: the allowlisted
+    ///         router swap executes first, then the book is updated from the
+    ///         REAL balance deltas. Reverts (full rollback — the order does not
+    ///         exist) unless exactly `size` WETH left the vault and at least
+    ///         `minOutUsdc` USDC arrived. No second tx, no un-reconciled drift.
+    ///
+    ///         `data` is the router call; the router must pull WETH through the
+    ///         allowance set via `setAllowance` (value is not attached).
+    function openShort(uint256 size, address router, bytes calldata data, uint256 minOutUsdc)
+        external
+        live
+        onlyOperator
+        nonReentrant
+    {
         if (size == 0) revert Zero();
-        uint256 p = spot();
-        uint256 lock = (size * p) / WAD;
-        reservedUsdc += lock;
+        if (!allowedTarget[router]) revert BadTarget();
+        uint256 p = spot(); // marks at the ORACLE, never a caller print
         if (ethBal < size) revert NakedCall();
+        uint256 lock = (size * p) / WAD;
+        reservedUsdc += lock; // reserved first so a reentrant call sees it
+
+        uint256 wethBefore = weth.balanceOf(address(this));
+        uint256 usdcBefore = usdc.balanceOf(address(this));
+        (bool ok, bytes memory ret) = router.call(data);
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+        uint256 wethSpent = wethBefore - weth.balanceOf(address(this));
+        uint256 usdcReceived = usdc.balanceOf(address(this)) - usdcBefore;
+        if (wethSpent != size) revert SwapSize();
+        if (usdcReceived < minOutUsdc) revert Slippage();
+
         ethBal -= size;
-        usdcBal += lock;
+        usdcBal += usdcReceived;
         if (reservedUsdc * 10_000 > usdcBal * ALPHA_BPS) revert UtilCap();
         emit RiskOpened(this.openShort.selector, size, p);
+    }
+
+    /// @notice Reconcile internal counters with real token balances after an
+    ///         `exec` swap that the vault did not book itself. Reverts when
+    ///         real balances are below reserved amounts — a loss must be
+    ///         investigated, never silently absorbed into the ledger.
+    function reconcileBalances() external onlyOperator {
+        uint256 e = weth.balanceOf(address(this));
+        uint256 u = usdc.balanceOf(address(this));
+        if (e < reservedEth || u < reservedUsdc) revert UnreconciledLoss();
+        ethBal = e;
+        usdcBal = u;
     }
 
     function releaseCall(uint256 size) external live onlyOperator {
