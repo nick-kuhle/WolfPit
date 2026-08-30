@@ -64,9 +64,25 @@ test("non-.sql entries are dropped (readdir also yields the auth/ directory)", (
   assert.deepEqual(pendingMigrations(["auth", "README.md"], []), []);
 });
 
-test("the auth schema ships outside the globbed directory", () => {
+test("the sign-in schema ships outside the globbed directory (throttle is always-on)", () => {
   const migrationsDir = join(projectRoot(), "migrations");
-  assert.deepEqual(pendingMigrations(readdirSync(migrationsDir), []), []);
+  const rootFiles = readdirSync(migrationsDir).filter(isMigrationFile);
+  // The Better Auth sign-in schema is OPT-IN: nothing but the always-on
+  // throttle table may ship at the migrations/ root, or the glob would apply
+  // sign-in tables to apps that never asked for them.
+  assert.deepEqual(
+    rootFiles.filter((f) => f !== "0002_wolfpit_rate_limit.sql"),
+    [],
+    "unexpected non-throttle migration at migrations/ root",
+  );
+  // The throttle table ships at BOTH paths by design: the root copy is always
+  // applied (the ADMIN login throttle needs it with sign-in off too), and the
+  // auth/ copy keeps the auth-on step uniform — basename keying makes that
+  // copy a dedup no-op. The byte-identity is asserted by the test below.
+  assert.ok(
+    rootFiles.includes("0002_wolfpit_rate_limit.sql"),
+    "always-on throttle migration missing at migrations/ root",
+  );
   const authNames = authMigrationNames();
   // Both the Better Auth schema and the F14 rate-limit table must ship there —
   // a missing 0002 means sign-in-on deployments never get wolfpit_rate_limit.

@@ -17,7 +17,10 @@ const outDir = new URL("../../../docs/drills/", import.meta.url);
 
 function writeReport(name: string, body: string) {
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(new URL(name, outDir), body);
+  // Stamp every report so staleness is detectable: these files are generator
+  // output, re-written by each `npm run test:engine` run.
+  const stamp = `> Generated ${new Date().toISOString().slice(0, 10)} by \`npm run test:engine\`. Re-run to refresh after engine changes.\n\n`;
+  writeFileSync(new URL(name, outDir), body.replace("\n\n", `\n\n${stamp}`));
 }
 
 function expOf(s: EngineState) {

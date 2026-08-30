@@ -95,31 +95,8 @@ export function clearAdminCookie() {
 }
 
 // ---------------------------------------------------------------- rate limit
-// In-memory login throttle: 5 failures per (ip, user) locks the key 15 min.
-// Single-process (this app runs one node). Reset on success.
-
-type Attempt = { fails: number; lockedUntil: number };
-const attempts = new Map<string, Attempt>();
-const MAX_FAILS = 5;
-const LOCK_MS = 15 * 60 * 1000;
-
-/** Seconds remaining on a lock, 0 when the key may try again. */
-export function loginBlocked(key: string, now = Date.now()): number {
-  const a = attempts.get(key);
-  if (!a || a.lockedUntil <= now) return 0;
-  return Math.ceil((a.lockedUntil - now) / 1000);
-}
-
-export function recordLogin(key: string, ok: boolean, now = Date.now()) {
-  if (ok) {
-    attempts.delete(key);
-    return;
-  }
-  const a = attempts.get(key) ?? { fails: 0, lockedUntil: 0 };
-  a.fails += 1;
-  if (a.fails >= MAX_FAILS) {
-    a.lockedUntil = now + LOCK_MS;
-    a.fails = 0;
-  }
-  attempts.set(key, a);
-}
+// The login throttle is DB-backed and shared across instances: see
+// `guardAdminLogin` in ../auth/rate-limit.server.ts (same
+// wolfpit_rate_limit table as the /api/auth/* guard). Fail-closed on store
+// errors. The previous in-memory per-process counter allowed N×5 attempts
+// across N serverless instances and lived here; it was removed.

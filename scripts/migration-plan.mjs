@@ -12,6 +12,11 @@
  * Auth schema `0001_auth.sql` AND the F14 throttle `0002_wolfpit_rate_limit.sql`
  * — copying only the schema would silently skip the rate-limit table).
  *
+ * The throttle table ALSO ships at the migrations/ root (canonical copy):
+ * the admin-panel login throttle needs it even when the opt-in sign-in schema
+ * is never copied up. Basename keying makes the auth-on copy of that one file
+ * a dedup no-op.
+ *
  * Neither applier descends into subdirectories, so `migrations/auth/*.sql` is
  * out of scope for both until it is copied up.
  */

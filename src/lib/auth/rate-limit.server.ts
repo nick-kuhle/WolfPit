@@ -46,7 +46,7 @@ function clientIp(request: Request): string | undefined {
   return request.headers.get("cf-connecting-ip")?.trim() || undefined;
 }
 
-async function bump(id: string, kind: "ip" | "acct" | "pair", key: string, max: number) {
+async function bump(id: string, kind: "ip" | "acct" | "pair" | "admin-user", key: string, max: number) {
   const { getSql } = await import("../db");
   const sql = await getSql();
   const bucket = Math.floor(Date.now() / 1000 / RL_WINDOW_SEC);
@@ -131,4 +131,41 @@ export async function throttledByIp(request: Request): Promise<boolean> {
 /** The caller's IP, or null when unknown (for logging/audit). */
 export function callerIp(request: Request): string | undefined {
   return clientIp(request);
+}
+
+// ─────────────────────────────── Admin panel ────────────────────────────────
+// The admin login previously kept an in-memory per-process counter, so N
+// serverless instances allowed N×5 attempts per account. Same fixed-window
+// table as above, hence shared across every instance.
+//
+// Attempt-based (successes count too): 5 attempts / 15 min per username.
+// Per-user only — this TanStack Start server-fn surface exposes no request
+// headers (no getWebRequest in this version), so there is no IP dimension
+// here; the /api/auth/* guard above covers IP for credential auth.
+
+export const ADMIN_RL_MAX_USER = 5;
+
+export type AdminThrottle =
+  | { blocked: true; retryAfterSec: number }
+  | { blocked: false }
+  | { storeError: true };
+
+/** Seconds left in the current fixed window (used for the retry message). */
+function windowRemainingSec(): number {
+  return RL_WINDOW_SEC - (Math.floor(Date.now() / 1000) % RL_WINDOW_SEC);
+}
+
+/**
+ * Shared, DB-backed attempt counter for the admin panel login.
+ * Fail-closed: a store error is reported, never bypassed.
+ */
+export async function guardAdminLogin(user: string): Promise<AdminThrottle> {
+  try {
+    if (await bump("admin-user", "admin-user", user, ADMIN_RL_MAX_USER)) {
+      return { blocked: true, retryAfterSec: windowRemainingSec() };
+    }
+    return { blocked: false };
+  } catch {
+    return { storeError: true };
+  }
 }
