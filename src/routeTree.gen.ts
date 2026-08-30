@@ -13,12 +13,14 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BookRouteImport } from './routes/book'
 import { Route as GamesRouteImport } from './routes/games'
+import { Route as InfoRouteImport } from './routes/info'
 import { Route as LearnRouteImport } from './routes/learn'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as PlanRouteImport } from './routes/plan'
 import { Route as PoolsRouteImport } from './routes/pools'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as StakeRouteImport } from './routes/stake'
+import { Route as SwapRouteImport } from './routes/swap'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TradeRouteImport } from './routes/trade'
 import { Route as WatchRouteImport } from './routes/watch'
@@ -44,6 +46,11 @@ const BookRoute = BookRouteImport.update({
 const GamesRoute = GamesRouteImport.update({
   id: '/games',
   path: '/games',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InfoRoute = InfoRouteImport.update({
+  id: '/info',
+  path: '/info',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LearnRoute = LearnRouteImport.update({
@@ -74,6 +81,11 @@ const ProfileRoute = ProfileRouteImport.update({
 const StakeRoute = StakeRouteImport.update({
   id: '/stake',
   path: '/stake',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SwapRoute = SwapRouteImport.update({
+  id: '/swap',
+  path: '/swap',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsRoute = TermsRouteImport.update({
@@ -112,12 +124,14 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/book': typeof BookRoute
   '/games': typeof GamesRoute
+  '/info': typeof InfoRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/profile': typeof ProfileRoute
   '/stake': typeof StakeRoute
+  '/swap': typeof SwapRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
   '/watch': typeof WatchRoute
@@ -130,12 +144,14 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRouteWithChildren
   '/book': typeof BookRoute
   '/games': typeof GamesRoute
+  '/info': typeof InfoRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/profile': typeof ProfileRoute
   '/stake': typeof StakeRoute
+  '/swap': typeof SwapRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
   '/watch': typeof WatchRoute
@@ -149,12 +165,14 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteWithChildren
   '/book': typeof BookRoute
   '/games': typeof GamesRoute
+  '/info': typeof InfoRoute
   '/learn': typeof LearnRoute
   '/orders': typeof OrdersRoute
   '/plan': typeof PlanRoute
   '/pools': typeof PoolsRoute
   '/profile': typeof ProfileRoute
   '/stake': typeof StakeRoute
+  '/swap': typeof SwapRoute
   '/terms': typeof TermsRoute
   '/trade': typeof TradeRoute
   '/watch': typeof WatchRoute
@@ -169,12 +187,14 @@ export interface FileRouteTypes {
     | '/admin'
     | '/book'
     | '/games'
+    | '/info'
     | '/learn'
     | '/orders'
     | '/plan'
     | '/pools'
     | '/profile'
     | '/stake'
+    | '/swap'
     | '/terms'
     | '/trade'
     | '/watch'
@@ -187,12 +207,14 @@ export interface FileRouteTypes {
     | '/admin'
     | '/book'
     | '/games'
+    | '/info'
     | '/learn'
     | '/orders'
     | '/plan'
     | '/pools'
     | '/profile'
     | '/stake'
+    | '/swap'
     | '/terms'
     | '/trade'
     | '/watch'
@@ -205,12 +227,14 @@ export interface FileRouteTypes {
     | '/admin'
     | '/book'
     | '/games'
+    | '/info'
     | '/learn'
     | '/orders'
     | '/plan'
     | '/pools'
     | '/profile'
     | '/stake'
+    | '/swap'
     | '/terms'
     | '/trade'
     | '/watch'
@@ -224,12 +248,14 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   BookRoute: typeof BookRoute
   GamesRoute: typeof GamesRoute
+  InfoRoute: typeof InfoRoute
   LearnRoute: typeof LearnRoute
   OrdersRoute: typeof OrdersRoute
   PlanRoute: typeof PlanRoute
   PoolsRoute: typeof PoolsRoute
   ProfileRoute: typeof ProfileRoute
   StakeRoute: typeof StakeRoute
+  SwapRoute: typeof SwapRoute
   TermsRoute: typeof TermsRoute
   TradeRoute: typeof TradeRoute
   WatchRoute: typeof WatchRoute
@@ -265,6 +291,13 @@ declare module '@tanstack/react-router' {
       path: '/games'
       fullPath: '/games'
       preLoaderRoute: typeof GamesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/info': {
+      id: '/info'
+      path: '/info'
+      fullPath: '/info'
+      preLoaderRoute: typeof InfoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/learn': {
@@ -307,6 +340,13 @@ declare module '@tanstack/react-router' {
       path: '/stake'
       fullPath: '/stake'
       preLoaderRoute: typeof StakeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/swap': {
+      id: '/swap'
+      path: '/swap'
+      fullPath: '/swap'
+      preLoaderRoute: typeof SwapRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms': {
@@ -369,12 +409,14 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   BookRoute: BookRoute,
   GamesRoute: GamesRoute,
+  InfoRoute: InfoRoute,
   LearnRoute: LearnRoute,
   OrdersRoute: OrdersRoute,
   PlanRoute: PlanRoute,
   PoolsRoute: PoolsRoute,
   ProfileRoute: ProfileRoute,
   StakeRoute: StakeRoute,
+  SwapRoute: SwapRoute,
   TermsRoute: TermsRoute,
   TradeRoute: TradeRoute,
   WatchRoute: WatchRoute,

@@ -7,6 +7,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { ConfirmSheet, type Confirm } from "@/components/confirm-sheet";
 import { insuranceRatio } from "@/lib/wolfpit/risk";
+import { STAKE_APR } from "@/lib/wolfpit/types";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtUsd } from "@/lib/utils";
 
@@ -86,8 +87,8 @@ function StakePage() {
                       { k: "Amount", v: `${amtN.toLocaleString("en-US")} WPIT`, tone: "brass" },
                       { k: "Mark", v: fmtUsd(s.wpit, 4) },
                       { k: "Value staked", v: fmtUsd(amtN * s.wpit) },
-                      { k: "Rate", v: "12% APR · paid in WPIT" },
-                      { k: "Est. 30-day yield", v: `${((amtN * 0.12 * 30) / 365).toFixed(2)} WPIT`, tone: "up" },
+                      { k: "Rate", v: `${(STAKE_APR * 100).toFixed(0)}% APR · paid in WPIT` },
+                      { k: "Est. 30-day yield", v: `${((amtN * STAKE_APR * 30) / 365).toFixed(2)} WPIT`, tone: "up" },
                       { k: "Staked after", v: `${(s.stake.amount + amtN).toFixed(2)} WPIT` },
                       { k: "Wallet WPIT after", v: `${(s.account.wpit - amtN).toFixed(2)}` },
                       { k: "Risk", v: "First-loss if the pit has a bad day" },

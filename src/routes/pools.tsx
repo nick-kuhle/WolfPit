@@ -6,7 +6,7 @@ import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { ConfirmSheet, type Confirm } from "@/components/confirm-sheet";
-import { farmApy, farmPending, harvestDue, lpPnl, lpValue, poolMark, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
+import { farmApy, farmPending, farmShare, harvestDue, lpPnl, lpValue, poolMark, poolTvl, tokenBal, tokenPx } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { cn, fmtPct, fmtUsd } from "@/lib/utils";
 
@@ -209,8 +209,8 @@ function PoolsPage() {
                   {open ? (
                     <div className="sheet-in border-t border-border bg-surface px-4 py-4">
                       <p className="text-xs text-muted">
-                        Existing pool. Both legs lock to the live mark ({p.base} {fmtUsd(mark, 4)}). You cannot set a
-                        custom print here.
+                        Existing pool. Both legs lock to the live mark (1 {p.base} = {fmtAmt(mark)} {p.quote}). You cannot
+                        set a custom print here.
                       </p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <Amt label={p.base} value={baseAmt} wallet={tokenBal(s.account, p.base)} onChange={setBaseAmt} />
@@ -226,6 +226,7 @@ function PoolsPage() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
+                          disabled={needQuote <= 0 || needQuote > tokenBal(s.account, p.quote)}
                           onClick={() => {
                             const lpEst = p.quoteReserve > 0 ? (needQuote / p.quoteReserve) * p.lpSupply : 0;
                             setPending({
@@ -235,11 +236,11 @@ function PoolsPage() {
                               rows: [
                                 { k: `Leg ${p.base}`, v: `${baseAmt || "0"} ${p.base}` },
                                 { k: `Leg ${p.quote} (required)`, v: `${fmtAmt(needQuote)} ${p.quote}` },
-                                { k: "Live mark", v: fmtUsd(mark, 4) },
-                                { k: "Total deposit", v: fmtUsd(needQuote), tone: "brass" },
+                                { k: "Live mark", v: `${fmtAmt(mark)} ${p.quote}/${p.base}` },
+                                { k: "Total deposit", v: fmtUsd(needQuote * tokenPx(s, p.quote)), tone: "brass" },
                                 { k: "LP tokens (est.)", v: lpEst.toPrecision(6) },
                                 { k: "Fee tier", v: `${p.feeBps / 100}%` },
-                                { k: "Pool TVL after (est.)", v: fmtUsd(tvl + needQuote) },
+                                { k: "Pool TVL after (est.)", v: fmtUsd(tvl + needQuote * tokenPx(s, p.quote)) },
                                 { k: "Farm APY", v: fmtPct(apy), tone: "up" },
                                 { k: `Wallet ${p.quote} after`, v: fmtAmt(tokenBal(s.account, p.quote) - needQuote) },
                               ],
@@ -321,6 +322,7 @@ function PoolsPage() {
             <div className="mt-4">
               {exists ? (
                 <Button
+                  disabled={(Number(baseAmt) || 0) <= 0}
                   onClick={() => {
                     const mark = poolMark(s, s.pools[pairId]!);
                     const qAmt = (Number(baseAmt) || 0) * mark;
@@ -332,8 +334,8 @@ function PoolsPage() {
                       rows: [
                         { k: `Leg ${base}`, v: `${baseAmt || "0"} ${base}` },
                         { k: `Leg ${quote} (required)`, v: `${fmtAmt(qAmt)} ${quote}` },
-                        { k: "Live mark", v: fmtUsd(mark, 4) },
-                        { k: "Total deposit", v: fmtUsd(qAmt), tone: "brass" },
+                        { k: "Live mark", v: `${fmtAmt(mark)} ${quote}/${base}` },
+                        { k: "Total deposit", v: fmtUsd(qAmt * tokenPx(s, quote)), tone: "brass" },
                         { k: "LP tokens (est.)", v: (pool.quoteReserve > 0 ? (qAmt / pool.quoteReserve) * pool.lpSupply : 0).toPrecision(6) },
                         { k: "Fee tier", v: `${pool.feeBps / 100}%` },
                         { k: "Farm APY", v: fmtPct(farmApy(s, pairId)), tone: "up" },
@@ -363,10 +365,16 @@ function PoolsPage() {
                         { k: `Seed ${quote}`, v: `${q} ${quote}` },
                         { k: "Opening print", v: `1 ${base} = ${(q / Math.max(b, 1e-12)).toPrecision(6)} ${quote}`, tone: "brass" },
                         { k: "LP tokens minted", v: Math.sqrt(b * q).toPrecision(6) },
-                        { k: "Pool value at open", v: fmtUsd(q * 2, 4) },
+                        { k: "Pool value at open", v: fmtUsd(b * tokenPx(s, base) + q * tokenPx(s, quote), 2) },
                         { k: "Your share at open", v: "100%", tone: "up" },
                         { k: "Fee tier", v: "0.30%" },
-                        { k: "Farms", v: "WPIT emissions start immediately" },
+                        {
+                          k: "Farms",
+                          v:
+                            farmShare(s, pair) > 0
+                              ? `WPIT emissions on (gauge ${(farmShare(s, pair) * 100).toFixed(0)}%)`
+                              : "No WPIT emissions (only WPIT/USDC + WPIT/ETH gauges earn)",
+                        },
                       ],
                       note: "First print on this pair — futures and options unlock once the pool exists. Paper funds only.",
                       confirmLabel: "Create pool",

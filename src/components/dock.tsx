@@ -11,7 +11,7 @@ import { useWallet, truncAddr } from "@/lib/wallet/session";
 const TABS = [
   { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
   { to: "/games" as const, label: "The Ranch", Icon: IconRanch, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games" },
-  { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p.startsWith("/asset") },
+  { to: "/swap" as const, label: "Spot", Icon: IconTrade, match: (p: string) => p === "/swap" || p === "/trade" || p.startsWith("/asset") },
   { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book" },
 ] as const;
 
@@ -105,7 +105,7 @@ function MoreSheet({ open, onClose, onExited }: { open: boolean; onClose: () => 
     return () => window.clearTimeout(t);
   }, [closing, onExited]);
 
-  function go(to: "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch" | "/profile" | "/games") {
+  function go(to: "/swap" | "/pools" | "/stake" | "/orders" | "/learn" | "/terms" | "/plan" | "/admin" | "/watch" | "/profile" | "/games" | "/info") {
     onClose();
     window.setTimeout(() => {
       void nav({ to });
@@ -156,11 +156,13 @@ function MoreSheet({ open, onClose, onExited }: { open: boolean; onClose: () => 
             Pit
           </p>
           <Row icon="☻" label="Profile" hint={wallet.address ? truncAddr(wallet.address) : "Connect wallet to trade"} onClick={() => go("/profile")} delay={90} />
+          <Row icon="⇄" label="Spot" hint="Live swaps on Base" onClick={() => go("/swap")} delay={105} />
           <Row icon="♞" label="Racetrack" hint="Horses · dogs · every 2 minutes" onClick={() => go("/games")} delay={120} />
           <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} delay={150} />
           <Row icon="◎" label="Pools" hint="12% APR junior" onClick={() => go("/stake")} delay={180} />
           <Row icon="▣" label="Farms" hint="Cut the yield" onClick={() => go("/pools")} delay={200} />
           <Row icon="☰" label="Fills" hint={`${s.fills.length} on the tape`} onClick={() => go("/orders")} delay={210} />
+          <Row icon="ⓘ" label="Fees & info" hint="Fees · routing · what's live" onClick={() => go("/info")} delay={225} />
           <Row icon="?" label="Learn" hint="Pit school" onClick={() => go("/learn")} delay={240} />
           <Row icon="⌘" label="Plan" hint="Roadmap" onClick={() => go("/plan")} delay={270} />
         </div>
@@ -288,11 +290,13 @@ export function DesktopNav({ pathname }: { pathname: string }) {
             {(
               [
                 ["/profile", "Profile"],
+                ["/swap", "Spot"],
                 ["/games", "The Ranch"],
                 ["/pools", "Farms"],
                 ["/stake", "Pools"],
                 ["/watch", "Watch"],
                 ["/orders", "Fills"],
+                ["/info", "Fees & info"],
                 ["/learn", "Learn"],
                 ["/plan", "Plan"],
                 ["/terms", "Terms"],

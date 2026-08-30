@@ -1,11 +1,15 @@
 /**
  * Launch market gates.
  *
- * Base launch shape (see docs/DEPLOY-BASE.md): no WPIT token, no house
- * liquidity pool. Spot is live and routes through the DEX aggregator against
- * external WETH/USDC liquidity. Futures and options stay closed until the
+ * Base launch shape (see docs/DEPLOY-BASE.md): no house liquidity pool. Spot is
+ * live and routes through the DEX aggregator against external WETH/USDC/ETH
+ * liquidity (see src/lib/swap/*). Futures and options stay closed until the
  * WETH/USDC pit pool is seeded — the engines behind them are complete and
  * volatility/IV-safe (MM.md), they are launch-gated only.
+ *
+ * WPIT itself is not required for spot to work, but once it lists it grants a
+ * 50% trading-fee discount (src/lib/swap/config.ts). The discount is dormant
+ * (every wallet pays full fee) until VITE_WPIT points at a live token.
  *
  * Override for sim/demo/drills with `VITE_MARKETS=spot,future,option`
  * (comma-separated; default `spot`). This is a product gate, not a risk
