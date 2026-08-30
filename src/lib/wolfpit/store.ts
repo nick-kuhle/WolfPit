@@ -43,7 +43,7 @@ function announceSettled(prev: EngineState, next: EngineState) {
   for (const f of fresh.slice(0, 8)) {
     if (f.side === "win") {
       const profit = typeof f.pnl === "number" ? f.pnl : f.size;
-      ping(`Won +${profit.toFixed(2)} WPIT · ${f.symbol}`, "up", true);
+      ping(`Won +${profit.toFixed(2)} WPIT · ${f.symbol}`, "up", true, "Winner");
     } else if (f.side === "lose") ping(`Ticket lost · ${f.symbol}`, "down");
   }
   const prevMeet = prev.games?.meets[0]?.raceId;
@@ -105,7 +105,7 @@ function apply(result: EngineState | string, set: (p: Partial<WolfStore>) => voi
     set({ lastError: result });
     return;
   }
-  if (sent) ping("Order sent", "brass", true);
+  if (sent) ping("Order sent", "brass", true, "Sent");
   const fill = result.fills[0];
   const prev = useWolf.getState().fills[0]?.id;
   if (fill && fill.id !== prev) {
@@ -130,7 +130,7 @@ export const useWolf = create<WolfStore>()(
             const board = compBoard(Date.now(), { name: "You", equity: equity(next), joined: true });
             const you = board.find((r) => r.you);
             next = payCompPrize(next, you?.place ?? 99);
-            if ((you?.place ?? 99) <= 3) ping(`Pit Open prize · ${you?.place}`, "brass");
+            if ((you?.place ?? 99) <= 3) ping(`Pit Open prize · ${you?.place}`, "brass", true, "Prize");
           }
           announceSettled(s, next);
           const prevFill = s.fills[0]?.id;
@@ -156,11 +156,11 @@ export const useWolf = create<WolfStore>()(
       },
       closeFut: (id) => {
         apply(closeFuture(get(), id), set);
-        if (!get().lastError) ping("Mini closed", "brass");
+        if (!get().lastError) ping("Mini closed", "brass", true, "Fill");
       },
       closeOpt: (id) => {
         apply(closeOption(get(), id), set);
-        if (!get().lastError) ping("Option closed", "brass");
+        if (!get().lastError) ping("Option closed", "brass", true, "Fill");
       },
       openOpt: (type, strike, expiry, contracts) => {
         const g = gated() ?? marketClosedReason("option");
@@ -174,20 +174,28 @@ export const useWolf = create<WolfStore>()(
       lpAdd: (pool, usd) => {
         const r = addLiquidity(get(), pool, usd);
         apply(r, set);
-        if (typeof r !== "string") ping(`Liquidity added · ${pool}`, "up");
+        if (typeof r !== "string") ping(`Liquidity added · ${pretty(pool)}`, "up", true, "LP");
       },
       lpRemove: (pool, shares) => {
         const r = removeLiquidity(get(), pool, shares);
         apply(r, set);
-        if (typeof r !== "string") ping(`Liquidity removed · ${pool}`, "brass");
+        if (typeof r !== "string") ping(`Liquidity removed · ${pretty(pool)}`, "brass", true, "LP");
       },
-      lockStake: (amt) => apply(stakeWpit(get(), amt), set),
-      unstake: () => set(unstakeWpit(get())),
+      lockStake: (amt) => {
+        const before = get().stake.amount;
+        apply(stakeWpit(get(), amt), set);
+        if (get().stake.amount > before) ping(`Staked ${amt.toLocaleString("en-US")} WPIT`, "up", true, "Stake");
+      },
+      unstake: () => {
+        const amt = get().stake.amount;
+        set(unstakeWpit(get()));
+        if (amt > 0) ping(`Unstaked ${amt.toFixed(2)} WPIT`, "brass", true, "Stake");
+      },
       harvest: () => {
         const before = get().harvestedWpit ?? 0;
         const next = harvestFarm(get());
         set(next);
-        if ((next.harvestedWpit ?? 0) > before) ping("Harvested WPIT", "up");
+        if ((next.harvestedWpit ?? 0) > before) ping("Harvested WPIT", "up", true, "Harvest");
         else ping("Nothing ripe. Add LP first.", "brass");
       },
       seedVault: (eth, usdc) => {
@@ -217,9 +225,12 @@ export const useWolf = create<WolfStore>()(
       createPool: (base, quote, baseAmt, quoteAmt) => {
         const r = createPoolEngine(get(), base, quote, baseAmt, quoteAmt);
         apply(r, set);
-        if (typeof r !== "string") ping(`Pool created · ${base}-${quote}`, "up");
+        if (typeof r !== "string") ping(`Pool created · ${base} / ${quote}`, "up", true, "Pool");
       },
-      issueToken: (sym, amt) => apply(issueTokenEngine(get(), sym, amt), set),
+      issueToken: (sym, amt) => {
+        apply(issueTokenEngine(get(), sym, amt), set);
+        if (!get().lastError) ping(`Minted ${amt.toLocaleString("en-US")} ${sym.toUpperCase()}`, "up", true, "Mint");
+      },
       sendOrder: (o) => {
         if (useAdmin.getState().listingsPaused) {
           ping("Listings paused by pit ops.", "down");
@@ -253,7 +264,7 @@ export const useWolf = create<WolfStore>()(
           ping("Connect a wallet to enter the Pit Open.", "brass");
           return;
         }
-        ping("You're in the Pit Open. $100k paper. Go shout.", "brass");
+        ping("You're in the Pit Open. $100k paper. Go shout.", "brass", true, "Pit Open");
         set({ ...joinCompEngine(get()), lastError: null });
       },
       placeRaceBet: (kind, picks, stake, market = "win") => {
@@ -264,7 +275,7 @@ export const useWolf = create<WolfStore>()(
             return { lastError: r };
           }
           const n = r.games?.bets.filter((b) => b.status === "open" && b.placedAt >= Date.now() - 2000).length ?? 1;
-          ping(`Ticket${n > 1 ? "s" : ""} · ${market.toUpperCase()} · ${stake} WPIT`, "brass", true);
+          ping(`Ticket${n > 1 ? "s" : ""} · ${market.toUpperCase()} · ${stake} WPIT`, "brass", true, "Ticket");
           return { ...r, lastError: null };
         });
       },
@@ -326,4 +337,9 @@ export const useWolf = create<WolfStore>()(
 
 export function useEquity() {
   return useWolf(equity);
+}
+
+/** "WPIT-USDC-TEST" → "WPIT / USDC" for ticket copy. */
+function pretty(poolId: string) {
+  return poolId.replace(/-TEST$/, "").replace("-", " / ");
 }

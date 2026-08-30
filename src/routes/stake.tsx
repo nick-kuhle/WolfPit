@@ -5,6 +5,7 @@ import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet, type Confirm } from "@/components/confirm-sheet";
 import { insuranceRatio } from "@/lib/wolfpit/risk";
 import { useWolf } from "@/lib/wolfpit/store";
 import { fmtUsd } from "@/lib/utils";
@@ -17,6 +18,8 @@ function StakePage() {
   const unstake = useWolf((st) => st.unstake);
   const err = useWolf((st) => st.lastError);
   const [amt, setAmt] = useState("1000");
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const amtN = Number(amt) || 0;
   return (
     <Shell>
       <ProductGate product="stake">
@@ -71,16 +74,62 @@ function StakePage() {
               />
             </label>
             <div className="mt-4 flex gap-2">
-              <Button className="flex-1" onClick={() => lockStake(Number(amt) || 0)}>
+              <Button
+                className="flex-1"
+                disabled={amtN <= 0}
+                onClick={() =>
+                  setConfirm({
+                    kicker: "Confirm stake",
+                    title: `Stake ${amtN.toLocaleString("en-US")} WPIT`,
+                    sub: "The Ranch · junior to insurance",
+                    rows: [
+                      { k: "Amount", v: `${amtN.toLocaleString("en-US")} WPIT`, tone: "brass" },
+                      { k: "Mark", v: fmtUsd(s.wpit, 4) },
+                      { k: "Value staked", v: fmtUsd(amtN * s.wpit) },
+                      { k: "Rate", v: "12% APR · paid in WPIT" },
+                      { k: "Est. 30-day yield", v: `${((amtN * 0.12 * 30) / 365).toFixed(2)} WPIT`, tone: "up" },
+                      { k: "Staked after", v: `${(s.stake.amount + amtN).toFixed(2)} WPIT` },
+                      { k: "Wallet WPIT after", v: `${(s.account.wpit - amtN).toFixed(2)}` },
+                      { k: "Risk", v: "First-loss if the pit has a bad day" },
+                    ],
+                    note: "Paper lockup — simulated, not a deposit. Nothing leaves the sim until you confirm.",
+                    confirmLabel: "Stake",
+                    confirmTone: "up",
+                    run: () => lockStake(amtN),
+                  })
+                }
+              >
                 Stake
               </Button>
-              <Button className="flex-1" variant="outline" disabled={s.stake.amount <= 0} onClick={unstake}>
+              <Button
+                className="flex-1"
+                variant="outline"
+                disabled={s.stake.amount <= 0}
+                onClick={() =>
+                  setConfirm({
+                    kicker: "Confirm unstake",
+                    title: `Unstake ${s.stake.amount.toFixed(2)} WPIT`,
+                    sub: "Full unlock — instant in the sim",
+                    rows: [
+                      { k: "Amount", v: `${s.stake.amount.toFixed(2)} WPIT`, tone: "brass" },
+                      { k: "Mark", v: fmtUsd(s.wpit, 4) },
+                      { k: "Value returned", v: fmtUsd(s.stake.amount * s.wpit) },
+                      { k: "Wallet WPIT after", v: `${(s.account.wpit + s.stake.amount).toFixed(2)}` },
+                      { k: "Staked after", v: "0 WPIT" },
+                    ],
+                    note: "Paper lockup — simulated, not a deposit. Nothing leaves the sim until you confirm.",
+                    confirmLabel: "Unstake all",
+                    run: () => unstake(),
+                  })
+                }
+              >
                 Unstake all
               </Button>
             </div>
             {err ? <p className="mt-3 text-sm text-down">{err}</p> : null}
           </div>
         </main>
+        <ConfirmSheet confirm={confirm} onClose={() => setConfirm(null)} />
         <SiteFooter />
       </ProductGate>
     </Shell>

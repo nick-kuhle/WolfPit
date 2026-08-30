@@ -72,7 +72,7 @@ export const useDesk = create<DeskUi>((set) => ({
   focus: ETH_LISTING,
   universe: [],
   chainTape: [],
-  chainId: "eth",
+  chainId: "base",
   query: "",
   cardOpen: false,
   expanded: false,

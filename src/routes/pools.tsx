@@ -5,6 +5,7 @@ import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
+import { ConfirmSheet, type Confirm } from "@/components/confirm-sheet";
 import { farmApy, farmPending, harvestDue, lpPnl, lpValue, poolMark, poolTvl, tokenBal } from "@/lib/wolfpit/engine";
 import { useWolf } from "@/lib/wolfpit/store";
 import { cn, fmtPct, fmtUsd } from "@/lib/utils";
@@ -25,7 +26,7 @@ function PoolsPage() {
   const [baseAmt, setBaseAmt] = useState("1");
   const [quoteAmt, setQuoteAmt] = useState("4000");
   const [custom, setCustom] = useState("");
-  const [pending, setPending] = useState<null | { title: string; body: string; run: () => void }>(null);
+  const [pending, setPending] = useState<Confirm | null>(null);
   const ids = Object.keys(s.pools);
   const pair = `${base}-${quote}`;
   const pairId = s.pools[pair] ? pair : s.pools[`${pair}-TEST`] ? `${pair}-TEST` : pair;
@@ -79,8 +80,19 @@ function PoolsPage() {
               className="h-12 px-6"
               onClick={() =>
                 setPending({
+                  kicker: "Confirm harvest",
                   title: "Harvest WPIT",
-                  body: `Collect ${ripeAmt.toFixed(2)} WPIT (your share of emissions). 1% tax to insurance.`,
+                  sub: "Your share of farm emissions",
+                  rows: [
+                    { k: "Ripe", v: `${ripeAmt.toFixed(2)} WPIT`, tone: "brass" },
+                    { k: "Insurance tax (1%)", v: `${tax.toFixed(2)} WPIT` },
+                    { k: "You receive", v: `${(ripeAmt - tax).toFixed(2)} WPIT`, tone: "up" },
+                    { k: "Wallet WPIT after", v: (s.account.wpit + ripeAmt - tax).toFixed(2) },
+                    { k: "Est. value", v: fmtUsd((ripeAmt - tax) * s.wpit, 4) },
+                  ],
+                  note: "Paper emissions. Nothing leaves the sim until you confirm.",
+                  confirmLabel: "Harvest",
+                  confirmTone: "up",
                   run: () => harvest(),
                 })
               }
@@ -125,13 +137,30 @@ function PoolsPage() {
                             key={pct}
                             size="sm"
                             variant={pct === 1 ? "outline" : "ghost"}
-                            onClick={() =>
+                            onClick={() => {
+                              const sh = pos.shares * pct;
+                              const frac = p ? sh / p.lpSupply : 0;
                               setPending({
-                                title: `Remove ${(pct * 100).toFixed(0)}% from ${prettyPool(pos.poolId)}`,
-                                body: `Pull ${(pos.shares * pct).toPrecision(4)} LP tokens (${fmtUsd(val * pct)}). Legs return to your wallet.`,
-                                run: () => remove(pos.poolId, pos.shares * pct),
-                              })
-                            }
+                                kicker: "Confirm liquidity remove",
+                                title: `Remove ${(pct * 100).toFixed(0)}% · ${prettyPool(pos.poolId)}`,
+                                sub: "Both legs return to your wallet at the live mark",
+                                rows: [
+                                  { k: "LP tokens", v: `${sh.toPrecision(4)} of ${pos.shares.toPrecision(4)}` },
+                                  ...(p
+                                    ? [
+                                        { k: `${p.base} out (est.)`, v: `${fmtAmt(frac * p.baseReserve)} ${p.base}` },
+                                        { k: `${p.quote} out (est.)`, v: `${fmtAmt(frac * p.quoteReserve)} ${p.quote}` },
+                                      ]
+                                    : []),
+                                  { k: "Est. value", v: fmtUsd(val * pct), tone: "brass" },
+                                  { k: "Position P/L", v: fmtUsd(pnl), tone: pnl >= 0 ? ("up" as const) : ("down" as const) },
+                                  { k: "Your share after", v: p ? `${(((pos.shares - sh) / p.lpSupply) * 100).toFixed(2)}%` : "—" },
+                                ],
+                                note: "Paper pool. Nothing leaves the sim until you confirm.",
+                                confirmLabel: `Remove ${(pct * 100).toFixed(0)}%`,
+                                run: () => remove(pos.poolId, sh),
+                              });
+                            }}
                           >
                             Remove {(pct * 100).toFixed(0)}%
                           </Button>
@@ -197,13 +226,29 @@ function PoolsPage() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
-                          onClick={() =>
+                          onClick={() => {
+                            const lpEst = p.quoteReserve > 0 ? (needQuote / p.quoteReserve) * p.lpSupply : 0;
                             setPending({
+                              kicker: "Confirm liquidity add",
                               title: `Add to ${prettyPool(id)}`,
-                              body: `Deposit ${baseAmt} ${p.base} and ${needQuote.toPrecision(6)} ${p.quote} at the live mark.`,
+                              sub: `Both legs at the live ${p.base} / ${p.quote} mark`,
+                              rows: [
+                                { k: `Leg ${p.base}`, v: `${baseAmt || "0"} ${p.base}` },
+                                { k: `Leg ${p.quote} (required)`, v: `${fmtAmt(needQuote)} ${p.quote}` },
+                                { k: "Live mark", v: fmtUsd(mark, 4) },
+                                { k: "Total deposit", v: fmtUsd(needQuote), tone: "brass" },
+                                { k: "LP tokens (est.)", v: lpEst.toPrecision(6) },
+                                { k: "Fee tier", v: `${p.feeBps / 100}%` },
+                                { k: "Pool TVL after (est.)", v: fmtUsd(tvl + needQuote) },
+                                { k: "Farm APY", v: fmtPct(apy), tone: "up" },
+                                { k: `Wallet ${p.quote} after`, v: fmtAmt(tokenBal(s.account, p.quote) - needQuote) },
+                              ],
+                              note: "Deposits lock to the live mark — no custom print on an existing pool. Paper funds only.",
+                              confirmLabel: "Add liquidity",
+                              confirmTone: "up",
                               run: () => add(id, needQuote),
-                            })
-                          }
+                            });
+                          }}
                         >
                           Add liquidity
                         </Button>
@@ -212,13 +257,25 @@ function PoolsPage() {
                               <Button
                                 key={pct}
                                 variant="outline"
-                                onClick={() =>
+                                onClick={() => {
+                                  const sh = mine.shares * pct;
+                                  const frac = sh / p.lpSupply;
                                   setPending({
-                                    title: `Remove ${(pct * 100).toFixed(0)}%`,
-                                    body: `Pull ${(mine.shares * pct).toPrecision(4)} LP from ${prettyPool(id)} (${fmtUsd(lpValue(s, id, mine.shares) * pct)}).`,
-                                    run: () => remove(id, mine.shares * pct),
-                                  })
-                                }
+                                    kicker: "Confirm liquidity remove",
+                                    title: `Remove ${(pct * 100).toFixed(0)}% · ${prettyPool(id)}`,
+                                    sub: "Both legs return to your wallet at the live mark",
+                                    rows: [
+                                      { k: "LP tokens", v: `${sh.toPrecision(4)} of ${mine.shares.toPrecision(4)}` },
+                                      { k: `${p.base} out (est.)`, v: `${fmtAmt(frac * p.baseReserve)} ${p.base}` },
+                                      { k: `${p.quote} out (est.)`, v: `${fmtAmt(frac * p.quoteReserve)} ${p.quote}` },
+                                      { k: "Est. value", v: fmtUsd(lpValue(s, id, mine.shares) * pct), tone: "brass" },
+                                      { k: "Your share after", v: `${(((mine.shares - sh) / p.lpSupply) * 100).toFixed(2)}%` },
+                                    ],
+                                    note: "Paper pool. Nothing leaves the sim until you confirm.",
+                                    confirmLabel: `Remove ${(pct * 100).toFixed(0)}%`,
+                                    run: () => remove(id, sh),
+                                  });
+                                }}
                               >
                                 Remove {(pct * 100).toFixed(0)}%
                               </Button>
@@ -267,9 +324,24 @@ function PoolsPage() {
                   onClick={() => {
                     const mark = poolMark(s, s.pools[pairId]!);
                     const qAmt = (Number(baseAmt) || 0) * mark;
+                    const pool = s.pools[pairId]!;
                     setPending({
+                      kicker: "Confirm liquidity add",
                       title: `Add to ${prettyPool(pairId)}`,
-                      body: `Deposit ${baseAmt} ${base} and ${qAmt.toPrecision(6)} ${quote} at the live mark.`,
+                      sub: `Both legs at the live ${base} / ${quote} mark`,
+                      rows: [
+                        { k: `Leg ${base}`, v: `${baseAmt || "0"} ${base}` },
+                        { k: `Leg ${quote} (required)`, v: `${fmtAmt(qAmt)} ${quote}` },
+                        { k: "Live mark", v: fmtUsd(mark, 4) },
+                        { k: "Total deposit", v: fmtUsd(qAmt), tone: "brass" },
+                        { k: "LP tokens (est.)", v: (pool.quoteReserve > 0 ? (qAmt / pool.quoteReserve) * pool.lpSupply : 0).toPrecision(6) },
+                        { k: "Fee tier", v: `${pool.feeBps / 100}%` },
+                        { k: "Farm APY", v: fmtPct(farmApy(s, pairId)), tone: "up" },
+                        { k: `Wallet ${quote} after`, v: fmtAmt(tokenBal(s.account, quote) - qAmt) },
+                      ],
+                      note: "Deposits lock to the live mark — no custom print on an existing pool. Paper funds only.",
+                      confirmLabel: "Add liquidity",
+                      confirmTone: "up",
                       run: () => add(pairId, qAmt),
                     });
                     setOpenId(pairId);
@@ -279,13 +351,29 @@ function PoolsPage() {
                 </Button>
               ) : (
                 <Button
-                  onClick={() =>
+                  onClick={() => {
+                    const b = Number(baseAmt) || 0;
+                    const q = Number(quoteAmt) || 0;
                     setPending({
+                      kicker: "Confirm new pool",
                       title: `Create ${prettyPool(pair)}`,
-                      body: `Seed ${baseAmt} ${base} and ${quoteAmt} ${quote}. Implied 1 ${base} = ${(Number(quoteAmt) / Math.max(Number(baseAmt), 1e-12)).toPrecision(6)} ${quote}.`,
-                      run: () => create(base, quote, Number(baseAmt) || 0, Number(quoteAmt) || 0),
-                    })
-                  }
+                      sub: "Your seed sets the opening print",
+                      rows: [
+                        { k: `Seed ${base}`, v: `${b} ${base}` },
+                        { k: `Seed ${quote}`, v: `${q} ${quote}` },
+                        { k: "Opening print", v: `1 ${base} = ${(q / Math.max(b, 1e-12)).toPrecision(6)} ${quote}`, tone: "brass" },
+                        { k: "LP tokens minted", v: Math.sqrt(b * q).toPrecision(6) },
+                        { k: "Pool value at open", v: fmtUsd(q * 2, 4) },
+                        { k: "Your share at open", v: "100%", tone: "up" },
+                        { k: "Fee tier", v: "0.30%" },
+                        { k: "Farms", v: "WPIT emissions start immediately" },
+                      ],
+                      note: "First print on this pair — futures and options unlock once the pool exists. Paper funds only.",
+                      confirmLabel: "Create pool",
+                      confirmTone: "up",
+                      run: () => create(base, quote, b, q),
+                    });
+                  }}
                 >
                   Create {prettyPool(pair)}
                 </Button>
@@ -298,35 +386,36 @@ function PoolsPage() {
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
               />
-              <Button variant="outline" onClick={() => issue(custom, 1_000_000)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const sym = custom.trim().toUpperCase();
+                  if (!sym) return;
+                  setPending({
+                    kicker: "Confirm paper mint",
+                    title: `Mint 1,000,000 ${sym}`,
+                    sub: "Paper ticker — no real token, no pool yet",
+                    rows: [
+                      { k: "Ticker", v: sym, tone: "brass" },
+                      { k: "Amount", v: "1,000,000" },
+                      { k: "Wallet after", v: `${fmtAmt(tokenBal(s.account, sym) + 1_000_000)} ${sym}` },
+                      { k: "Value", v: "$0 — no pool yet" },
+                      { k: "Next step", v: `Open a ${sym} / ETH or USDC pool to set a print` },
+                    ],
+                    note: "Prints paper into your wallet only. Paper funds, no real token.",
+                    confirmLabel: "Mint 1M",
+                    confirmTone: "up",
+                    run: () => issue(custom, 1_000_000),
+                  });
+                }}
+              >
                 Mint 1M
               </Button>
             </div>
           </section>
           {err ? <p className="mt-4 text-sm text-down">{err}</p> : null}
         </main>
-        {pending ? (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
-            <div className="sheet-in w-full max-w-sm rounded-[var(--radius-xl)] border border-border bg-panel p-5">
-              <p className="font-mono text-[11px] uppercase tracking-wider text-brass">Confirm</p>
-              <h3 className="mt-2 font-display text-2xl font-medium">{pending.title}</h3>
-              <p className="mt-2 text-sm text-muted">{pending.body}</p>
-              <div className="mt-5 grid grid-cols-2 gap-2">
-                <Button variant="outline" onClick={() => setPending(null)}>
-                  Back
-                </Button>
-                <Button
-                  onClick={() => {
-                    pending.run();
-                    setPending(null);
-                  }}
-                >
-                  Confirm
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        <ConfirmSheet confirm={pending} onClose={() => setPending(null)} />
         <SiteFooter />
       </ProductGate>
     </Shell>

@@ -239,11 +239,56 @@ export const getChainTape = createServerFn({ method: "GET" })
     return geckoTerminalTape(data.network);
   });
 
+/**
+ * Base-first default tape. WolfPit deploys on Base, so the hot / gainers /
+ * losers tabs lead with Base tokens: GeckoTerminal trending Base pools first,
+ * then global CoinGecko volume, then Binance tickers, and finally a static
+ * Base roster so the desk still shows a Base tape when every feed is down.
+ */
 export const getUniverse = createServerFn({ method: "GET" }).handler(async (): Promise<Listing[]> => {
-  const cg = await geckoMarkets();
-  if (cg.length) return cg;
-  return binanceTickers();
+  try {
+    const base = await geckoTerminalTape("base");
+    if (base.length) return base;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const cg = await geckoMarkets();
+    if (cg.length) return cg;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const bin = await binanceTickers();
+    if (bin.length) return bin;
+  } catch {
+    /* fall through */
+  }
+  return BASE_ROSTER;
 });
+
+/** Offline fallback tape — Base blue chips (no live prices until a feed returns). */
+const BASE_ROSTER: Listing[] = (
+  [
+    ["ETH", "Ether"],
+    ["USDC", "USD Coin"],
+    ["cbBTC", "Coinbase Wrapped BTC"],
+    ["AERO", "Aerodrome"],
+    ["VIRTUAL", "Virtuals Protocol"],
+    ["DEGEN", "Degen"],
+    ["TOSHI", "Toshi"],
+    ["BRETT", "Brett"],
+    ["ZORA", "Zora"],
+  ] as const
+).map(([symbol, name]) => ({
+  symbol,
+  name,
+  price: 0,
+  change24: 0,
+  volume24: 0,
+  chain: "Base",
+  network: "base",
+}));
 
 
 export const searchTokens = createServerFn({ method: "GET" })
