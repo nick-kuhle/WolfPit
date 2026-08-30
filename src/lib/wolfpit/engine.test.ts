@@ -8,13 +8,20 @@ import {
   closeFuture,
   closeOption,
   createPool,
+  dayPnl,
+  equity,
   farmApy,
+  farmPending,
+  farmShare,
   poolTvl,
   poolMark,
   expiries,
   harvestFarm,
   harvestDue,
   initialState,
+  pushEquity,
+  rebalanceWeights,
+  reservationPx,
   removeLiquidity,
   setMark,
   settleNow,
@@ -45,7 +52,7 @@ import { sanitizeState } from "./sanitize.ts";
 import { PIT_OPEN } from "./comp.ts";
 import { MAX_FARM_APY, MAX_LOT } from "./limits.ts";
 import { FUT_IM, FUT_MM, MINI_ETH } from "./types.ts";
-import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, rejectFuture, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
+import { CALL_INV_VOL, circuitActive, gammaCash1h, haltShortGamma, hedgeError99, rejectFuture, rejectOption, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
 
 const exp = expiries(initialState().clock)[0]!.at;
 
@@ -211,7 +218,13 @@ describe("W1-02 risk limits", () => {
 
   it("harvest 1% tax → insurance, only LP share", () => {
     let s = initialState();
-    const added = addLiquidity(s, "ETH-USDC", 4_000);
+    // FARM.md: ETH/USDC earns 0% (unfarmed); WPIT/USDC-TEST is the 20% gauge.
+    const unfarmed = addLiquidity(s, "ETH-USDC", 4_000);
+    assert.equal(typeof unfarmed, "object", String(unfarmed));
+    const s0 = unfarmed as typeof s;
+    assert.equal(farmPending(s0, "ETH-USDC"), 0);
+    s = { ...s0, farmWpit: 0 };
+    const added = addLiquidity(s, "WPIT-USDC-TEST", 4_000);
     assert.equal(typeof added, "object", String(added));
     s = added as typeof s;
     s = { ...s, farmWpit: 100, wpit: 2 };
@@ -350,7 +363,9 @@ describe("cover, delta, liq", () => {
     assert.equal(typeof r, "object", String(r));
     const next = r as typeof s;
     assert.ok(next.vault.reservedEth >= 0.2 - 1e-9);
-    assert.ok(Math.abs(residualDelta(next)) < 0.08);
+    // MM.md: after a legal fill |Δ_unhedged| ≤ band = max(0.05·vault.ETH, 0.02·NAV/S).
+    const band = Math.max(0.05 * next.vault.eth, (0.02 * vaultNav(next)) / next.eth);
+    assert.ok(Math.abs(residualDelta(next)) <= band + 1e-9, `residual ${residualDelta(next)} band ${band}`);
     assert.ok(next.insuranceUsdc >= s.insuranceUsdc);
   });
 
@@ -640,5 +655,99 @@ describe("risk audit", () => {
     });
     assert.ok(spiked.eth > 2000, `clamped to ${spiked.eth}`);
     assert.ok(spiked.circuitUntil > s.circuitUntil);
+  });
+});
+
+describe("P0/P1 fixes (2026-08-29 review)", () => {
+  it("sim clock advances 1×/10×/60× (was clamped to 2s per tick)", () => {
+    const s = initialState();
+    assert.ok(Math.abs(tick(s, 1).clock - s.clock - 1_000) < 1, "1×");
+    assert.ok(Math.abs(tick(s, 10).clock - s.clock - 10_000) < 1, "10×");
+    assert.ok(Math.abs(tick(s, 60).clock - s.clock - 60_000) < 1, "60×");
+    assert.ok(Math.abs(tick(s, 600).clock - s.clock - 120_000) < 1, "capped at 120s");
+  });
+
+  it("dayPnl uses the day's FIRST candle, not its latest", () => {
+    const base = initialState();
+    const eq0 = equity(base);
+    const dayStart = Math.floor(base.clock / 86_400_000) * 86_400_000;
+    let s: typeof base = { ...base, equityTape: [{ t: dayStart, o: eq0, h: eq0, l: eq0, c: eq0, v: 1 }] };
+    s = pushEquity({ ...s, clock: dayStart + 3 * 3_600_000, account: { ...s.account, usdc: s.account.usdc + 500 } });
+    const pnl = dayPnl(s);
+    assert.ok(Math.abs(pnl - 500) < 1e-6, `dayPnl ${pnl}`);
+  });
+
+  it("farm gauges match FARM.md: WPIT pools 20/10, ETH-USDC unfarmed", () => {
+    const s = initialState();
+    assert.equal(farmShare(s, "ETH-USDC"), 0);
+    assert.equal(farmShare(s, "WPIT-USDC-TEST"), 0.2);
+    assert.equal(farmShare(s, "WPIT-ETH-TEST"), 0.1);
+  });
+
+  it("spread follows the MM.md stack 8 + 80·util + 40·(IV−0.40) + 25·|Δ|/vault.ETH", () => {
+    const s = initialState();
+    const inv = Math.abs(bookGreeks(s).delta) / s.vault.eth;
+    const expect = Math.min(280, Math.max(8, 8 + 80 * (s.vault.reservedEth / s.vault.eth) + 40 * (s.iv - 0.4) + 25 * inv));
+    assert.ok(Math.abs(spreadBps(s) - expect) < 1e-9);
+    assert.ok(spreadBps({ ...s, iv: 1.2 }) > spreadBps(s));
+  });
+
+  it("reservation is A-S: flat at zero inventory, skews against inventory", () => {
+    const s = initialState();
+    assert.ok(Math.abs(reservationPx(s) - s.eth) < 1e-9, "flat book ⇒ mid");
+    const long = tradeFuture(s, "long", 5, expiries(s.clock)[0]!.at) as typeof s;
+    assert.ok(reservationPx(long) > s.eth, "vault short inventory ⇒ quote skews up");
+  });
+
+  it("liquidation conserves USDC: trader gets equity − penalty, insurance +penalty", () => {
+    let s = initialState();
+    s = tradeFuture(s, "long", 5, expiries(s.clock)[0]!.at) as typeof s;
+    const crashed = setMark(s, 3200, { settle: false });
+    const pos = crashed.futures[0]!;
+    const mark = crashed.eth;
+    const pnl = (mark - pos.entry) * pos.sizeEth;
+    const eqTrue = pos.margin + pnl;
+    const penalty = Math.min(Math.max(eqTrue, 0), 0.01 * pos.sizeEth * mark);
+    const t0 = crashed.account.usdc;
+    const i0 = crashed.insuranceUsdc;
+    const v0 = crashed.vault.usdc + crashed.vault.eth * crashed.eth;
+    const after = settleNow(crashed);
+    const dT = after.account.usdc - t0;
+    const dI = after.insuranceUsdc - i0;
+    const dV = after.vault.usdc + after.vault.eth * after.eth - v0;
+    assert.equal(after.futures.length, 0);
+    assert.ok(Math.abs(dT - (eqTrue - penalty)) < 1e-6, `trader Δ ${dT} vs ${eqTrue - penalty}`);
+    assert.ok(Math.abs(dI - penalty) < 1e-6, `insurance Δ ${dI} vs ${penalty}`);
+    assert.ok(Math.abs(dT + dI + dV) < 1e-6, `conservation: ΔT ${dT} ΔI ${dI} ΔV ${dV}`);
+  });
+
+  it("equity ≤ 0: trader wiped, insurance eats the hole, pit pauses if insurance < 0", () => {
+    let s = initialState();
+    s = tradeFuture(s, "long", 5, expiries(s.clock)[0]!.at) as typeof s;
+    s = { ...s, insuranceUsdc: 10 };
+    const crashed = setMark(s, 2900, { settle: false });
+    const after = settleNow(crashed);
+    assert.equal(after.futures.length, 0);
+    assert.equal(after.account.usdc, crashed.account.usdc, "trader gets nothing");
+    assert.ok(after.insuranceUsdc < 0, `insurance ${after.insuranceUsdc}`);
+    assert.ok(after.circuitUntil > after.clock, "circuit set when insurance < 0");
+  });
+
+  it("options writing halts when insurance cannot cover 99th-pct 1h HE at 80% vol", () => {
+    const s = { ...initialState(), insuranceUsdc: 40_000 }; // 5% of NAV — above the 1% floor
+    const e = expiries(s.clock)[0]!.at;
+    assert.ok(hedgeError99(s.eth, 20) > 40_000, "synthetic gamma stresses insurance");
+    const why = rejectOption(s, "call", s.eth, e, MINI_ETH, 20, 0);
+    assert.ok(typeof why === "string" && why.includes("hedge error"), String(why));
+  });
+
+  it("vault ETH weight rebalances toward the band when outside [0.40, 0.60] (LP.md)", () => {
+    const s = initialState();
+    const skewed = { ...s, vault: { ...s.vault, eth: 240, usdc: 320_000 } }; // w = 0.75
+    let next = skewed;
+    for (let i = 0; i < 400; i++) next = arbToSpot(rebalanceWeights(next));
+    const w = (next.vault.eth * next.eth) / (next.vault.eth * next.eth + next.vault.usdc);
+    assert.ok(w < 0.7, `moved ${w}`);
+    assert.ok(w >= 0.4 && w <= 0.605, `inside band ${w}`);
   });
 });

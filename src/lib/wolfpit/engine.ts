@@ -39,12 +39,12 @@ import {
 } from "./math";
 import {
   maybeCircuit,
+  CIRCUIT_MS,
   maxFillEth,
   rejectFuture,
   rejectOption,
   smileVol,
   spotFeeBps,
-  gammaCash1h,
   vaultNav,
 } from "./risk";
 import {
@@ -116,9 +116,11 @@ export function initialState(now = T0): EngineState {
         id: "ETH-USDC",
         base: "ETH",
         quote: "USDC",
-        baseReserve: 250,
-        quoteReserve: 250 * eth,
-        lpSupply: 1000,
+        // Depth models the *aggregated* external WETH/USDC book the desk routes
+        // to (DEX aggregator), not house liquidity. House liquidity = 0 at launch.
+        baseReserve: 2_500,
+        quoteReserve: 2_500 * eth,
+        lpSupply: 2_500,
         feeBps: 30,
       },
       "WPIT-USDC-TEST": {
@@ -196,7 +198,10 @@ function moonWpit(px: number, clock: number, dtSec: number) {
 }
 
 export function tick(s: EngineState, dtSec: number): EngineState {
-  const dt = clamp(dtSec, 0, 2);
+  // Clock advances by the full simulated step (1×/10×/60×), capped at 120s per
+  // tick so a stalled tab cannot teleport the sim. Stochastic per-step moves
+  // (moonWpit) scale internally with sqrt(dt), so only the clock needs the cap.
+  const dt = clamp(dtSec, 0, 120);
   const next = { ...s, account: { ...s.account }, vault: { ...s.vault }, pools: { ...s.pools } };
   next.clock = s.liveAt > 0 ? Date.now() : s.clock + dt * 1000;
   next.wpit = moonWpit(s.wpit, next.clock, dt);
@@ -224,7 +229,7 @@ export function tick(s: EngineState, dtSec: number): EngineState {
       wpit: next.account.wpit + (s.stake.amount * STAKE_APR * dt) / (365.25 * 24 * 3600),
     };
   }
-  return matchWorking(pushEquity(arbToSpot(hedgeDelta(settleAndLiq(maybeCircuit(settleGames(ensureRaces(next))))))));
+  return matchWorking(pushEquity(arbToSpot(hedgeDelta(rebalanceWeights(settleAndLiq(maybeCircuit(settleGames(ensureRaces(next)))))))));
 }
 
 export function applyLive(
@@ -269,7 +274,7 @@ export function applyLive(
       startEquity: s.liveAt === 0 ? START_USDC + START_ETH * eth : s.account.startEquity,
     },
   };
-  return matchWorking(pushEquity(arbToSpot(refreshQuotes(settleAndLiq(maybeCircuit(next))))));
+  return matchWorking(pushEquity(arbToSpot(hedgeDelta(rebalanceWeights(refreshQuotes(settleAndLiq(maybeCircuit(next))))))));
 }
 
 function pushCandle(candles: EngineState["candles"], t: number, px: number) {
@@ -353,7 +358,9 @@ export function dayPnl(s: EngineState) {
   day.setUTCHours(0, 0, 0, 0);
   const start = day.getTime();
   const tape = s.equityTape ?? [];
-  const first = [...tape].reverse().find((c) => c.t <= start + 86_400_000 && c.t >= start) ?? tape[0];
+  // First candle recorded at/after the UTC day boundary is the day's opening
+  // equity. (tape is chronological; scanning forward from the front is correct.)
+  const first = tape.find((c) => c.t >= start) ?? tape[0];
   if (!first) return eq - s.account.startEquity;
   return eq - first.c;
 }
@@ -471,13 +478,13 @@ export function lpPnl(s: EngineState, pos: EngineState["lp"][number]) {
 }
 
 export function farmShare(s: EngineState, id: PoolId) {
+  // FARM.md gauge table: dealer vault 70% (not an AMM gauge — accrues to vault
+  // LPs), WPIT/USDC 20%, WPIT/ETH 10%, ETH/USDC 0% ("already paid in swap
+  // fees; do not bribe directional ETH"). Custom pools earn nothing in v1.
+  void s;
   if (id === "WPIT-USDC" || id === "WPIT-USDC-TEST") return 0.2;
   if (id === "WPIT-ETH" || id === "WPIT-ETH-TEST") return 0.1;
-  if (id === "ETH-USDC") return 0.55;
-  const custom = Object.keys(s.pools).filter(
-    (k) => k !== "ETH-USDC" && !k.startsWith("WPIT-USDC") && !k.startsWith("WPIT-ETH"),
-  );
-  return custom.length ? 0.15 / custom.length : 0;
+  return 0;
 }
 
 export function farmApy(s: EngineState, id: PoolId) {
@@ -557,24 +564,23 @@ export function maxNetShortEth(s: EngineState) {
 }
 
 export function spreadBps(s: EngineState) {
-  const g = bookGreeks(s);
-  const nav = Math.max(vaultNav(s), 1);
-  const inv = Math.abs(g.delta) / Math.max(s.vault.eth, 1e-6);
-  const gCash = gammaCash1h(Math.abs(g.gamma), s.eth, s.iv) / nav;
-  const vega = Math.abs(g.vega) / nav;
-  const pool = s.pools["ETH-USDC"];
-  const depth = pool?.baseReserve ?? 1;
-  const thin = clamp(50 / Math.max(depth, 1), 0, 50);
-  const vol = Math.max(s.realizedVol, s.iv);
-  return clamp(8 + utilEth(s) * 70 + Math.max(0, vol - 0.4) * 90 + inv * 45 + gCash * 220 + vega * 90 + thin, 8, 280);
+  // MM.md futures quote stack:
+  //   s_bps = 8 + 80·util + 40·(IV − 0.40) + 25·|Δ_book| / vault.ETH
+  const inv = Math.abs(bookGreeks(s).delta) / Math.max(s.vault.eth, 1e-6);
+  return clamp(8 + 80 * utilEth(s) + 40 * (s.iv - 0.4) + 25 * inv, 8, 280);
 }
 
 export function reservationPx(s: EngineState) {
-  const q = clamp(bookGreeks(s).delta / Math.max(s.vault.eth, 1), -2, 2);
-  const gamma = 0.08;
-  const tau = 1 / 24;
-  const shift = clamp(q * gamma * s.realizedVol * s.realizedVol * tau, -0.003, 0.003);
-  return s.eth * (1 - shift);
+  // Avellaneda–Stoikov, discrete (MM.md): r = F − q·γ·σ²·τ with
+  // γ = 0.1 / vault.ETH (smaller vault → wider shift), τ = 2 minutes,
+  // σ = RV annualized in *dollars* per ETH. Inventory q is the vault's signed
+  // book delta in ETH (unnormalized), so the shift scales with absolute risk.
+  const q = bookGreeks(s).delta;
+  const gamma = 0.1 / Math.max(s.vault.eth, 1e-6);
+  const tau = 2 / (365.25 * 24 * 60);
+  const sigmaUsd = Math.max(s.realizedVol, 0.05) * s.eth;
+  const shift = clamp(q * gamma * sigmaUsd * sigmaUsd * tau, -s.eth * 0.005, s.eth * 0.005);
+  return s.eth - shift;
 }
 
 export function refreshQuotes(s: EngineState): EngineState {
@@ -584,29 +590,22 @@ export function refreshQuotes(s: EngineState): EngineState {
   return { ...s, ethBid: Math.max(0.01, mid + skew - half), ethAsk: mid + skew + half };
 }
 
-/** Keep the ETH/USDC pool on the live oracle (simulated CEX arb). */
+/**
+ * Keep the ETH/USDC depth model pinned to the live oracle mark. In aggregator
+ * mode this pool models *external* routed liquidity (no house pool at launch):
+ * third-party arbitrageurs re-price it to the oracle, so the vault takes no
+ * arb flows here — it is a pricing model, not a house position.
+ */
 export function arbToSpot(s: EngineState): EngineState {
   const pool0 = s.pools["ETH-USDC"];
   if (!pool0 || pool0.baseReserve <= 1e-9 || pool0.quoteReserve <= 1e-9) return s;
   const spot = Math.max(s.eth, 1e-9);
   const mark = pool0.quoteReserve / pool0.baseReserve;
   if (Math.abs(mark - spot) / spot < 0.0004) return s;
-  const k = pool0.baseReserve * pool0.quoteReserve;
-  const x = Math.sqrt(k / spot);
-  const y = k / x;
-  const vault = {
-    ...s.vault,
-    eth: s.vault.eth - (x - pool0.baseReserve),
-    usdc: s.vault.usdc - (y - pool0.quoteReserve),
+  return {
+    ...s,
+    pools: { ...s.pools, "ETH-USDC": { ...pool0, quoteReserve: pool0.baseReserve * spot } },
   };
-  const pools = { ...s.pools, "ETH-USDC": { ...pool0, baseReserve: x, quoteReserve: y } };
-  if (vault.eth < 0 || vault.usdc < 0) {
-    return {
-      ...s,
-      pools: { ...s.pools, "ETH-USDC": { ...pool0, quoteReserve: pool0.baseReserve * spot } },
-    };
-  }
-  return { ...s, vault, pools };
 }
 
 export function quoteInForBaseOut(pool: EngineState["pools"][string], baseOut: number) {
@@ -888,26 +887,43 @@ function takeFee(s: EngineState, fee: number): EngineState {
 
 export function hedgeDelta(s: EngineState): EngineState {
   const gap = residualDelta(s);
-  if (Math.abs(gap) < 0.005) return arbToSpot(refreshQuotes(s));
+  // MM.md rung 1: band = max(0.05 · vault.ETH, 0.02 · NAV / S). Inside the band
+  // do nothing; outside it, trade down to |Δ| ≤ band/2, capped at one band per
+  // step so the hedge cannot run over the book.
+  const navEth = vaultNav(s) / Math.max(s.eth, 1e-9);
+  const band = Math.max(0.05 * s.vault.eth, 0.02 * navEth);
+  if (Math.abs(gap) <= band) return arbToSpot(refreshQuotes(s));
   const pool0 = s.pools["ETH-USDC"];
   if (!pool0) return arbToSpot(refreshQuotes(s));
   const vault = { ...s.vault, hedgeEth: s.vault.hedgeEth ?? 0 };
   const pool = { ...pool0 };
-  const band = pool.baseReserve * 0.08;
+  const halfSpreadBps = spreadBps(s) / 2; // spread_captured / 2
+  // Emergency: risk-first — if we are > 2 bands off, hedge even through ugly
+  // slippage rather than sit on an unhedged book.
+  const urgent = Math.abs(gap) > 2 * band;
+  const step = Math.min(Math.abs(gap) - band / 2, band);
   if (gap > 0) {
-    const sell = Math.min(gap, band, Math.max(0, vault.eth - vault.reservedEth));
+    const sell = Math.min(step, Math.max(0, vault.eth - vault.reservedEth));
     if (sell < 0.005) return arbToSpot(refreshQuotes({ ...s, vault }));
     const out = ammOut(sell, pool.baseReserve, pool.quoteReserve, pool.feeBps);
+    const slipBps = Math.abs(out / sell / Math.max(s.eth, 1e-9) - 1) * 10_000;
+    if (!urgent && slipBps > Math.max(halfSpreadBps, 5)) {
+      return arbToSpot(refreshQuotes({ ...s, vault })); // MM.md: slippage > 0.5·spread ⇒ don't trade that size
+    }
     vault.eth -= sell;
     vault.usdc += out;
     vault.hedgeEth -= sell;
     pool.baseReserve += sell;
     pool.quoteReserve -= out;
   } else {
-    const want = Math.min(-gap, band);
+    const want = Math.min(step, pool.baseReserve * MAX_POOL_FRAC);
     const cost = quoteInForBaseOut(pool, want);
     const freeUsdc = Math.max(0, vault.usdc - vault.reservedUsdc);
     if (!Number.isFinite(cost) || cost > freeUsdc || want < 0.005) return arbToSpot(refreshQuotes({ ...s, vault }));
+    const slipBps = Math.abs(cost / want / Math.max(s.eth, 1e-9) - 1) * 10_000;
+    if (!urgent && slipBps > Math.max(halfSpreadBps, 5)) {
+      return arbToSpot(refreshQuotes({ ...s, vault }));
+    }
     const got = ammOut(cost, pool.quoteReserve, pool.baseReserve, pool.feeBps);
     vault.usdc -= cost;
     vault.eth += got;
@@ -916,6 +932,53 @@ export function hedgeDelta(s: EngineState): EngineState {
     pool.baseReserve -= got;
   }
   return arbToSpot(refreshQuotes({ ...s, vault, pools: { ...s.pools, "ETH-USDC": pool } }));
+}
+
+/**
+ * LP.md inventory law: ETH weight w = vault.ETH·S / NAV with target w ∈
+ * [0.45, 0.55]; when w drifts outside [0.40, 0.60], rebalance via spot toward
+ * 0.50 — never by quoting worse options. Trades are capped at 2% of routed
+ * depth per step and skipped when all-in slippage (incl. fees) exceeds 30 bps.
+ */
+export function rebalanceWeights(s: EngineState): EngineState {
+  const nav = vaultNav(s);
+  if (!(nav > 0) || !(s.eth > 0)) return s;
+  const w = (s.vault.eth * s.eth) / nav;
+  if (w >= 0.4 && w <= 0.6) return s;
+  const pool0 = s.pools["ETH-USDC"];
+  if (!pool0 || pool0.baseReserve <= 0 || pool0.quoteReserve <= 0) return s;
+  const vault = { ...s.vault };
+  const pool = { ...pool0 };
+  const targetEth = (0.5 * nav) / s.eth;
+  const want = targetEth - s.vault.eth; // >0 buy ETH, <0 sell ETH
+  // Size each step to the slippage budget (~0.3% of routed depth), not to a
+  // fixed fraction — a CPMM step of x against depth D costs ≈ x/D in bps.
+  const stepCap = pool.baseReserve * 0.003;
+  if (want < 0) {
+    const sell = Math.min(-want, Math.max(0, vault.eth - vault.reservedEth), stepCap);
+    if (sell < 0.005) return s;
+    const out = ammOut(sell, pool.baseReserve, pool.quoteReserve, pool.feeBps);
+    // Budget is 30 bps of *impact* on top of the routed fee.
+    const slipBps = Math.abs(out / sell / s.eth - 1) * 10_000;
+    if (slipBps > pool.feeBps + 30) return s;
+    vault.eth -= sell;
+    vault.usdc += out;
+    pool.baseReserve += sell;
+    pool.quoteReserve -= out;
+  } else {
+    const buy = Math.min(want, stepCap);
+    const cost = quoteInForBaseOut(pool, buy);
+    const free = Math.max(0, vault.usdc - vault.reservedUsdc - (vault.escrowUsdc ?? 0));
+    if (!Number.isFinite(cost) || cost > free || buy < 0.005) return s;
+    const slipBps = Math.abs(cost / buy / s.eth - 1) * 10_000;
+    if (slipBps > pool.feeBps + 30) return s;
+    const got = ammOut(cost, pool.quoteReserve, pool.baseReserve, pool.feeBps);
+    vault.usdc -= cost;
+    vault.eth += got;
+    pool.quoteReserve += cost;
+    pool.baseReserve -= got;
+  }
+  return { ...s, vault, pools: { ...s.pools, "ETH-USDC": pool } };
 }
 
 function cashShot(s: EngineState) {
@@ -1306,7 +1369,7 @@ export function buyOption(s: EngineState, type: OptType, strike: number, expiry:
   const vol = smileVol(s, type, strike, T);
   const mid = type === "call" ? bsCall(s.eth, strike, T, 0.03, vol) : bsPut(s.eth, strike, T, 0.03, vol);
   const bps = spreadBps(s);
-  const px = mid * (1 + bps / 10_000) + 0.5;
+  const px = mid * (1 + bps / 10_000) + 0.4; // MM.md: ask = mid·(1+s_bps/1e4) + 0.40 USDC
   const premium = px * sizeEth;
   const fee = premium * DERIV_FEE;
   if (s.account.usdc < premium + fee) return "Insufficient USDC for premium.";
@@ -1331,24 +1394,59 @@ export function buyOption(s: EngineState, type: OptType, strike: number, expiry:
   return commitOption(s, pos, premium, fee, vault, true);
 }
 
+/**
+ * Liquidate one isolated futures position (RISK.md):
+ *   equity  = margin + signed PnL; liquidate when equity < maintenance
+ *   penalty = min(max(equity,0), 1% · size · mark) → insurance
+ *   remainder (equity − penalty) → trader
+ *   if equity ≤ 0: trader wiped, insurance eats the hole; pause if insurance < 0
+ * Conservation on every path: trader payout + insurance Δ + vault Δ = 0.
+ */
+function liquidateFuture(s: EngineState, pos: EngineState["futures"][number], mark: number): EngineState {
+  const pnl = futPnl(pos, mark);
+  const eq = pos.margin + pnl;
+  const penalty = Math.min(Math.max(eq, 0), 0.01 * pos.sizeEth * mark);
+  const vault = applyVaultClose(s.vault, pos, pos.sizeEth, mark);
+  vault.escrowUsdc = Math.max(0, (s.vault.escrowUsdc ?? 0) - pos.margin);
+  let insurance = s.insuranceUsdc;
+  let paid = 0;
+  if (eq > 0) {
+    const payout = eq - penalty; // remainder to trader
+    insurance += penalty;
+    const floor = vault.reservedUsdc + (vault.escrowUsdc ?? 0);
+    const free = Math.max(0, vault.usdc - floor);
+    const take = Math.min(Math.max(0, payout - free), Math.max(0, insurance));
+    insurance -= take;
+    paid = Math.min(payout, free + take);
+    vault.usdc -= paid + penalty; // trader payout + penalty funding (no printed USDC)
+  } else {
+    insurance += eq; // ≤ 0: insurance covers the trader's debt to the vault
+    vault.usdc += -eq;
+  }
+  const circuitUntil =
+    insurance < 0 ? Math.max(s.circuitUntil ?? 0, s.clock + CIRCUIT_MS) : (s.circuitUntil ?? 0);
+  return {
+    ...s,
+    account: { ...s.account, usdc: s.account.usdc + paid, realized: s.account.realized + pnl },
+    vault,
+    insuranceUsdc: insurance,
+    circuitUntil,
+    futures: s.futures.filter((p) => p.id !== pos.id),
+    liquidations: (s.liquidations ?? 0) + 1,
+  };
+}
+
 function settleAndLiq(s: EngineState): EngineState {
   let next = s;
   for (const p of s.futures) {
     const mark = markOf(next, p.under ?? "ETH");
     const eq = p.margin + futPnl(p, mark);
     const maint = futMaint(p, mark);
-    if (eq < maint || s.clock >= p.expiry) {
+    if (eq < maint) {
+      next = liquidateFuture(next, p, mark);
+    } else if (next.clock >= p.expiry) {
       const closed = closeFuture(next, p.id);
-      if (typeof closed !== "string") {
-        next = {
-          ...closed,
-          liquidations: eq < maint ? next.liquidations + 1 : next.liquidations,
-          insuranceUsdc:
-            eq < maint
-              ? next.insuranceUsdc + Math.min(Math.max(eq, 0), 0.01 * p.sizeEth * mark)
-              : next.insuranceUsdc,
-        };
-      }
+      if (typeof closed !== "string") next = closed;
     }
   }
   const remaining: EngineState["options"] = [];
@@ -1366,7 +1464,7 @@ function settleAndLiq(s: EngineState): EngineState {
     vault.reservedEth = Math.max(0, vault.reservedEth - (p.securedEth ?? ((p.under ?? "ETH") === "ETH" && p.type === "call" ? p.sizeEth : 0)));
     vault.reservedUsdc = Math.max(0, vault.reservedUsdc - (p.securedUsdc ?? (p.type === "put" ? p.strike * p.sizeEth : 0)));
   }
-  return hedgeDelta({ ...next, options: remaining, vault, account: acc });
+  return hedgeDelta(rebalanceWeights({ ...next, options: remaining, vault, account: acc }));
 }
 
 export function settleNow(s: EngineState): EngineState {
@@ -1553,7 +1651,9 @@ export function closeOption(s: EngineState, id: string): EngineState | string {
   const mid = optMark(s, pos);
   const bps = spreadBps(s);
   const tick = quoteTick(markOf(s, pos.under ?? "ETH"));
-  const px = Math.max(tick, mid * (1 - bps / 10_000));
+  // MM.md close concession: mid·(1−s_bps) − 0.40 for an ETH mini (quoteTick at
+  // ETH prices = 0.40); scaled by tick for non-ETH underliers.
+  const px = Math.max(Math.min(0.05, tick), mid * (1 - bps / 10_000) - tick);
   const credit = px * pos.sizeEth;
   const vault = { ...s.vault };
   vault.reservedEth = Math.max(0, vault.reservedEth - (pos.securedEth ?? ((pos.under ?? "ETH") === "ETH" && pos.type === "call" ? pos.sizeEth : 0)));
@@ -1662,7 +1762,7 @@ export function optionQuote(s: EngineState, type: OptType, strike: number, expir
         ? "Not enough USDC to cash-secure."
         : null;
   const ask = mid * (1 + bps / 10_000) + tick;
-  const bid = Math.max(tick * 0.25, mid * (1 - bps / 10_000) - tick);
+  const bid = Math.max(Math.min(0.05, tick), mid * (1 - bps / 10_000) - tick);
   return { T, mid, bid: why ? 0 : bid, ask: why ? 0 : ask, delta: d, iv: vol, blank: why };
 }
 

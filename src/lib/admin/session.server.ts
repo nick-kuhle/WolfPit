@@ -1,29 +1,58 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getCookie, setCookie } from "@tanstack/react-start/server";
 
 const COOKIE = "wp_admin";
 const MAX_AGE = 12 * 60 * 60;
+const SECRET_MIN_LEN = 32;
+const DEV_SECRET = "wolfpit-dev-admin-secret-not-for-prod";
 
-function secret() {
-  return process.env.ADMIN_SESSION_SECRET ?? "wolfpit-dev-admin-secret-not-for-prod";
+const isProd = () => process.env.NODE_ENV === "production";
+
+/**
+ * Session signing secret. Fail-closed in production: the env var must be set,
+ * ≥32 chars, and must not be the shipped dev default. In dev an ephemeral
+ * per-process random secret is used (admin sessions reset on restart) so a
+ * forgotten env var can never mint forgeable tokens in prod.
+ */
+let devSecret: string | null = null;
+function secret(): string {
+  const s = process.env.ADMIN_SESSION_SECRET;
+  if (s && s.length >= SECRET_MIN_LEN && s !== DEV_SECRET) return s;
+  if (isProd()) {
+    throw new Error(
+      "ADMIN_SESSION_SECRET must be set (>= 32 chars, not the dev default) when NODE_ENV=production.",
+    );
+  }
+  devSecret ??= randomBytes(32).toString("hex");
+  return devSecret;
 }
 
 export function adminCredentials() {
-  return {
-    user: process.env.ADMIN_USER ?? "admin",
-    pass: process.env.ADMIN_PASS ?? "admin",
-  };
+  const user = process.env.ADMIN_USER;
+  const pass = process.env.ADMIN_PASS;
+  if (isProd()) {
+    if (!user || !pass) {
+      throw new Error("ADMIN_USER and ADMIN_PASS must be set when NODE_ENV=production.");
+    }
+    return { user, pass };
+  }
+  if (!user || !pass) {
+    // Dev convenience only — never reachable in production.
+    console.warn("[admin] ADMIN_USER/ADMIN_PASS unset in dev — using admin/admin.");
+    return { user: user ?? "admin", pass: pass ?? "admin" };
+  }
+  return { user, pass };
 }
 
 function hmac(payload: string) {
   return createHmac("sha256", secret()).update(payload).digest("hex");
 }
 
+/** Constant-time equality of sha256 digests (length-independent). */
 function eq(a: string, b: string) {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) return false;
-  return timingSafeEqual(ba, bb);
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb);
 }
 
 export function verifyPassword(user: string, pass: string) {
@@ -63,4 +92,34 @@ export function setAdminCookie(user: string) {
 
 export function clearAdminCookie() {
   setCookie(COOKIE, "", { path: "/", httpOnly: true, sameSite: "lax", maxAge: 0 });
+}
+
+// ---------------------------------------------------------------- rate limit
+// In-memory login throttle: 5 failures per (ip, user) locks the key 15 min.
+// Single-process (this app runs one node). Reset on success.
+
+type Attempt = { fails: number; lockedUntil: number };
+const attempts = new Map<string, Attempt>();
+const MAX_FAILS = 5;
+const LOCK_MS = 15 * 60 * 1000;
+
+/** Seconds remaining on a lock, 0 when the key may try again. */
+export function loginBlocked(key: string, now = Date.now()): number {
+  const a = attempts.get(key);
+  if (!a || a.lockedUntil <= now) return 0;
+  return Math.ceil((a.lockedUntil - now) / 1000);
+}
+
+export function recordLogin(key: string, ok: boolean, now = Date.now()) {
+  if (ok) {
+    attempts.delete(key);
+    return;
+  }
+  const a = attempts.get(key) ?? { fails: 0, lockedUntil: 0 };
+  a.fails += 1;
+  if (a.fails >= MAX_FAILS) {
+    a.lockedUntil = now + LOCK_MS;
+    a.fails = 0;
+  }
+  attempts.set(key, a);
 }

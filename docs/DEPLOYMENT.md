@@ -2,7 +2,7 @@
 
 ## This preview
 
-`npm run dev`. Paper. localStorage `wolfpit-sim-v4`.
+`npm run dev`. Paper. localStorage `wolfpit-sim-v12`.
 
 ## Vercel
 

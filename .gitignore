@@ -3,7 +3,8 @@ node_modules/
 .output/
 dist/
 .tanstack/
-.grok/
+.grok/*
+!.grok/app-env.json
 artifacts/
 screenshots/
 .env

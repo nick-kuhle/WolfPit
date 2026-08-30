@@ -17,8 +17,11 @@
  * broker env var and this constant together.
  */
 export const PREVIEW_CLIENT_ID = "grok_preview";
+// SECURITY: not committed. From env only; if absent, federated preview sign-in
+// stays off (fail-closed — see authConfigured in server.ts). The previous
+// committed secret is COMPROMISED and must be rotated on the broker.
 export const PREVIEW_CLIENT_SECRET =
-  "8bcdb7fc5a33874ad933ca568918d5790388a0795e44c4d1dea691f801b17ec5";
+  process.env.GROK_PREVIEW_CLIENT_SECRET?.trim() || "";
 
 /** The shared auth broker issuer (OIDC discovery lives under it). */
 export const GROK_ISSUER_DEFAULT = "https://auth.grok.me";

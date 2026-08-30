@@ -53,6 +53,20 @@ export function gammaCash1h(gammaAbs: number, spot: number, iv: number) {
   return Math.abs(gammaAbs) * spot * spot * iv * iv * DT_1H;
 }
 
+/** Stress vol for the insurance-vs-hedge-error test (MM.md: "under 80% ETH vol"). */
+export const HE_STRESS_VOL = 0.8;
+export const Z99 = 2.326;
+
+/**
+ * 99th-percentile 1-hour hedge error at the stress vol (MM.md):
+ *   HE ≈ 0.5 · |Γ| · (ΔS)²,  ΔS = S · σ_stress · √(1h) · z99
+ * Insurance must cover this or the desk stops writing gamma.
+ */
+export function hedgeError99(spot: number, gammaAbs: number) {
+  const dS = spot * HE_STRESS_VOL * Math.sqrt(DT_1H) * Z99;
+  return 0.5 * Math.abs(gammaAbs) * dS * dS;
+}
+
 export function oiExpiry(s: EngineState, expiry: number) {
   let n = 0;
   for (const p of s.options) if (p.expiry === expiry) n += p.sizeEth;
@@ -160,6 +174,11 @@ export function rejectOption(
   if (gammaCash1h(g, s.eth, s.iv) > GAMMA_NAV * nav) return "Gamma cash cap. Stop writing ATM.";
   const v = Math.abs(bookVega + projectedOptionVega(s, type, strike, expiry, sizeEth));
   if (v > VEGA_NAV * nav) return "Vega cap. Stop writing.";
+  // MM.md / RISK.md: insurance must cover the 99th-pct 1h hedge error at 80%
+  // ETH vol. If it cannot, cut Γ — stop writing.
+  if (hedgeError99(s.eth, g) > (s.insuranceUsdc ?? 0)) {
+    return "Insurance below 99th-pct 1h hedge error (80% vol). Short gamma halted.";
+  }
   return null;
 }
 

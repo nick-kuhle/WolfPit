@@ -30,6 +30,7 @@ import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
 import { sanitizeState } from "./sanitize";
 import { useWallet } from "@/lib/wallet/session";
+import { marketClosedReason } from "./features";
 
 function announceSettled(prev: EngineState, next: EngineState) {
   const prevFill = prev.fills[0]?.id;
@@ -144,9 +145,10 @@ export const useWolf = create<WolfStore>()(
       buySpot: (pool, usd) => apply(tradeSpot(get(), pool, "buy", usd), set),
       sellSpot: (pool, baseAmt) => apply(tradeSpot(get(), pool, "sell", baseAmt), set),
       openFut: (side, contracts, expiry) => {
-        const g = gated();
+        const g = gated() ?? marketClosedReason("future");
         if (g) {
           set({ lastError: g });
+          ping(g, "down");
           return;
         }
         apply(tradeFuture(get(), side, contracts, expiry), set);
@@ -160,9 +162,10 @@ export const useWolf = create<WolfStore>()(
         if (!get().lastError) ping("Option closed", "brass");
       },
       openOpt: (type, strike, expiry, contracts) => {
-        const g = gated();
+        const g = gated() ?? marketClosedReason("option");
         if (g) {
           set({ lastError: g });
+          ping(g, "down");
           return;
         }
         apply(buyOption(get(), type, strike, expiry, contracts), set);
@@ -217,6 +220,12 @@ export const useWolf = create<WolfStore>()(
         if ((o.product === "future" || o.product === "option") && useAdmin.getState().geoFenceUs) {
           ping("US geo-fence on. Futures and options hidden.", "down");
           set({ lastError: "US geo-fence on. Futures and options hidden." });
+          return;
+        }
+        const closed = marketClosedReason(o.product);
+        if (closed) {
+          ping(closed, "down");
+          set({ lastError: closed });
           return;
         }
         apply(placeDeskOrder(get(), o), set, true);

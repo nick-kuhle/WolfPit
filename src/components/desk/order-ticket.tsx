@@ -18,6 +18,7 @@ import {
   usedMargin,
 } from "@/lib/wolfpit/engine";
 import { MAX_LOT } from "@/lib/wolfpit/limits";
+import { MARKET_LAUNCH, marketOpen } from "@/lib/wolfpit/features";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { DeskSide, OrderKind, OptType, PoolId, Product, Tif } from "@/lib/wolfpit/types";
 import { useAdmin } from "@/lib/admin/config";
@@ -86,7 +87,9 @@ export function OrderTicket({
   const k = strike || grid[Math.floor(grid.length / 2)] || spot;
   const rawN = Number(qty);
   const n = Number.isFinite(rawN) && rawN > 0 ? rawN : 0;
-  const products: Product[] = geo ? ["spot"] : ["spot", "future", "option"];
+  const products: Product[] = (geo ? (["spot"] as Product[]) : (["spot", "future", "option"] as Product[])).filter(
+    (p) => marketOpen(p),
+  );
   const futSide = side === "buy" ? "long" : "short";
   const size = n * miniQty(under);
   const rate = imRate(s, Math.max(size, miniQty(under)), under);
@@ -207,6 +210,11 @@ export function OrderTicket({
           </button>
         ))}
       </div>
+      {!MARKET_LAUNCH.futuresOpen && !MARKET_LAUNCH.optionsOpen ? (
+        <div className="border-b border-border bg-panel2 px-3 py-1.5 text-[10px] leading-snug text-subtle">
+          Spot routes via the DEX aggregator. Perps &amp; options unlock when the WETH/USDC pit pool is seeded.
+        </div>
+      ) : null}
 
       <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
         {product === "option" && !sheet ? (
