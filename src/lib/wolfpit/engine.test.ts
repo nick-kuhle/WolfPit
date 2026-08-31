@@ -5,6 +5,7 @@ import {
   advanceClock,
   bookGreeks,
   buyOption,
+  closeFuture,
   closeOption,
   createPool,
   dayPnl,
@@ -872,5 +873,71 @@ describe("audit fixes (F7–F13 regression)", () => {
     assert.ok(clean.clock >= 0, "clock never negative");
     assert.ok(clean.circuitUntil <= clean.clock + 4 * CIRCUIT_MS, "circuit capped");
     assert.ok(clean.liveAt <= clean.clock, "liveAt cannot predate clock");
+  });
+});
+
+describe("audit fixes 2026-08-31", () => {
+  it("closeFuture crosses the spread: long exits at the bid, short at the ask", () => {
+    const s0 = initialState();
+    const openedLong = tradeFuture(s0, "long", 2, exp);
+    assert.equal(typeof openedLong, "object", String(openedLong));
+    const sL = openedLong as typeof s0;
+    const markL = markOf(sL, "ETH");
+    const bpsL = spreadBps(sL);
+    const closedLong = closeFuture(sL, sL.futures[0]!.id);
+    assert.equal(typeof closedLong, "object", String(closedLong));
+    const fillL = (closedLong as typeof s0).fills[0]!;
+    const bid = markL * (1 - bpsL / 10_000);
+    assert.ok(Math.abs(fillL.price - bid) / markL < 1e-9, "long closes at the bid");
+    assert.ok(fillL.price < markL, "house keeps the spread");
+
+    const openedShort = tradeFuture(s0, "short", 2, exp);
+    assert.equal(typeof openedShort, "object", String(openedShort));
+    const sS = openedShort as typeof s0;
+    const markS = markOf(sS, "ETH");
+    const bpsS = spreadBps(sS);
+    const closedShort = closeFuture(sS, sS.futures[0]!.id);
+    assert.equal(typeof closedShort, "object", String(closedShort));
+    const fillS = (closedShort as typeof s0).fills[0]!;
+    const ask = markS * (1 + bpsS / 10_000);
+    assert.ok(Math.abs(fillS.price - ask) / markS < 1e-9, "short buys back at the ask");
+  });
+
+  it("closeFuture settlement prints at the mark (expiry has no spread)", () => {
+    const s0 = initialState();
+    const opened = tradeFuture(s0, "long", 2, exp);
+    assert.equal(typeof opened, "object", String(opened));
+    const s = opened as typeof s0;
+    const mark = markOf(s, "ETH");
+    const settled = closeFuture(s, s.futures[0]!.id, true);
+    assert.equal(typeof settled, "object", String(settled));
+    const fill = (settled as typeof s0).fills[0]!;
+    assert.ok(Math.abs(fill.price - mark) / mark < 1e-12, "settlement uses the mark");
+  });
+
+  it("addLiquidity re-anchors k-conservingly (no LP value minted or burned)", () => {
+    let s = initialState();
+    s.account.eth = 100;
+    s.account.usdc = 1_000_000;
+    const seeded = addLiquidity(s, "ETH-USDC", 40_000);
+    assert.equal(typeof seeded, "object", String(seeded));
+    s = seeded as typeof s;
+    const pool0 = s.pools["ETH-USDC"]!;
+    const k0 = pool0.baseReserve * pool0.quoteReserve;
+    // Move the mark +10% WITHOUT ticking, so the add itself must re-anchor.
+    s = { ...s, eth: s.eth * 1.1 };
+    const px = s.eth;
+    const added = addLiquidity(s, "ETH-USDC", 4_400);
+    assert.equal(typeof added, "object", String(added));
+    const p1 = (added as typeof s).pools["ETH-USDC"]!;
+    // Expected: repin along x·y = k to the new price, then add both legs.
+    const expectBase = Math.sqrt(k0 / px) + 4_400 / px;
+    const expectQuote = Math.sqrt(k0 * px) + 4_400;
+    assert.ok(Math.abs(p1.baseReserve - expectBase) / expectBase < 1e-9, "base = repinned + deposit");
+    assert.ok(Math.abs(p1.quoteReserve - expectQuote) / expectQuote < 1e-9, "quote = repinned + deposit");
+    assert.ok(Math.abs(p1.quoteReserve / p1.baseReserve - px) / px < 1e-9, "pool sits at the live mark");
+    // The old destructive re-anchor (quote = base·mark) would have minted ~10% k.
+    const destructiveK = pool0.baseReserve * (pool0.baseReserve * px);
+    assert.ok(destructiveK > k0 * 1.05, "old path minted k; repin conserves it");
   });
 });

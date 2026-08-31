@@ -309,4 +309,140 @@ contract DealerVaultTest {
         require(rec.pad() == 7, "exec ran");
         require(rec.lastCaller() == address(vault), "vault is msg.sender");
     }
+
+    /// Regression (audit A, HIGH): openShort must only spend FREE ETH.
+    ///        Before the fix it checked raw ethBal, so a hedge-sell could
+    ///        consume collateral reserved by writeCall and leave the vault
+    ///        naked (ethBal < reservedEth).
+    function testOpenShortCannotSpendCallCollateral() public {
+        SwapRouter router = _routerFixture();
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(40 ether); // reservedEth = 40, freeEth = 60
+        bytes memory data = abi.encodeWithSignature("sell(uint256)", 65 ether);
+        try vault.openShort(65 ether, address(router), data, 0) {
+            revert("expected NakedCall: 65 > freeEth 60");
+        } catch {}
+        require(vault.ethBal() == 100 ether, "rollback intact");
+        // Selling exactly the free inventory is still allowed...
+        data = abi.encodeWithSignature("sell(uint256)", 60 ether);
+        vault.openShort(60 ether, address(router), data, 230_000e6);
+        // ...and the covered-call invariant survives: ethBal >= reservedEth.
+        require(vault.ethBal() == 40 ether, "sold only free eth");
+        require(vault.ethBal() >= vault.reservedEth(), "calls stay covered");
+    }
+
+    /// Regression (audit, F16 follow-up): creditInsurance pulls REAL USDC and
+    ///        keeps it on a segregated ledger — no unbacked entries, and
+    ///        reconcile must not fold insurance into the trading balance.
+    function testCreditInsuranceIsTokenBackedAndSegregated() public {
+        uint256 balBefore = usdc.balanceOf(address(vault));
+        uint256 mineBefore = usdc.balanceOf(address(this));
+        vault.creditInsurance(20_000e6);
+        require(usdc.balanceOf(address(vault)) == balBefore + 20_000e6, "tokens moved in");
+        require(usdc.balanceOf(address(this)) == mineBefore - 20_000e6, "pulled from owner");
+        require(vault.insuranceUsdc() == 20_000e6, "ledger credited");
+        require(vault.usdcBal() == 400_000e6, "trading ledger untouched");
+        vault.reconcileBalances();
+        require(vault.usdcBal() == 400_000e6, "reconcile excludes insurance");
+        try vault.creditInsurance(0) {
+            revert("expected Zero");
+        } catch {}
+    }
+
+    /// Regression: LP withdraw path — pro-rata both legs, vault-favoring
+    ///        rounding via the virtual-share offset.
+    function testWithdrawProRataBothLegs() public {
+        uint256 my = vault.shareOf(address(this));
+        uint256 e0 = weth.balanceOf(address(this));
+        uint256 u0 = usdc.balanceOf(address(this));
+        vault.withdraw(my / 2);
+        uint256 ethOut = weth.balanceOf(address(this)) - e0;
+        uint256 usdcOut = usdc.balanceOf(address(this)) - u0;
+        // ~50 ETH / ~200k USDC, shaved slightly by the virtual-share offset.
+        require(ethOut > 49.99 ether && ethOut <= 50 ether, "eth leg pro-rata");
+        require(usdcOut > 199_900e6 && usdcOut <= 200_000e6, "usdc leg pro-rata");
+        require(vault.shareOf(address(this)) == my - my / 2, "shares burned");
+        try vault.withdraw(my) {
+            revert("expected InsufficientShares");
+        } catch {}
+    }
+
+    /// Withdrawals must not break the inventory law: with reservations at the
+    ///        α-cap, any exit that shrinks the backing balance reverts.
+    function testWithdrawBlockedWhenItWouldStrandReserves() public {
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(40 ether); // exactly at α = 40% of 100 ETH
+        uint256 my = vault.shareOf(address(this));
+        try vault.withdraw(my / 8) {
+            revert("expected UtilCap");
+        } catch {}
+        // Releasing the reservation frees the exit.
+        vault.releaseCall(40 ether);
+        vault.withdraw(my / 8);
+    }
+
+    /// Regression (audit B, MEDIUM): slash is pro-rata across stakers. Before
+    ///        the fix only `total` was reduced: the first unstaker exited at
+    ///        full pre-slash size and the second was bricked by underflow.
+    function testStakeSlashIsProRata() public {
+        WPIT wpit = new WPIT(100_000_000 ether);
+        Stake stake = new Stake(wpit, vault);
+        vault.setStake(address(stake));
+        wpit.setMinter(address(this));
+        wpit.acceptMinter();
+        wpit.mint(address(this), 1_000 ether);
+        wpit.mint(ALICE, 1_000 ether);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(1_000 ether);
+        vm.startPrank(ALICE);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(1_000 ether);
+        vm.stopPrank();
+        require(stake.total() == 2_000 ether, "both staked");
+
+        vault.slashInsuranceJunior(1_000 ether); // 50% of the pool
+        require(stake.total() == 1_000 ether, "half slashed");
+        require(stake.staked(address(this)) == 500 ether, "loss lands pro-rata (me)");
+        require(stake.staked(ALICE) == 500 ether, "loss lands pro-rata (alice)");
+
+        // Neither staker can exit at pre-slash size.
+        try stake.unstake(1_000 ether) {
+            revert("expected bal revert at pre-slash size");
+        } catch {}
+        // Both can exit their post-slash balance — nobody is bricked.
+        stake.unstake(500 ether);
+        vm.prank(ALICE);
+        stake.unstake(500 ether);
+        require(stake.total() == 0, "pool empty");
+        require(wpit.balanceOf(address(stake)) == 0, "no stranded tokens");
+    }
+
+    /// A 100% slash wipes the share ledger; a fresh epoch starts clean and
+    ///        wiped stakers cannot claim against new deposits.
+    function testStakeFullSlashStartsCleanEpoch() public {
+        WPIT wpit = new WPIT(100_000_000 ether);
+        Stake stake = new Stake(wpit, vault);
+        vault.setStake(address(stake));
+        wpit.setMinter(address(this));
+        wpit.acceptMinter();
+        wpit.mint(address(this), 1_000 ether);
+        wpit.mint(ALICE, 1_000 ether);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(1_000 ether);
+        vault.slashInsuranceJunior(10_000 ether); // caps at 1_000: pool -> 0
+        require(stake.total() == 0, "fully drained");
+        require(stake.staked(address(this)) == 0, "old shares worthless");
+        // A new staker gets a clean pool, not diluted by wiped shares.
+        vm.startPrank(ALICE);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(1_000 ether);
+        require(stake.staked(ALICE) == 1_000 ether, "fresh epoch is 1:1");
+        stake.unstake(1_000 ether);
+        require(wpit.balanceOf(ALICE) == 1_000 ether, "full exit");
+        vm.stopPrank();
+        // The wiped staker still cannot withdraw anything.
+        try stake.unstake(1 ether) {
+            revert("expected bal revert for wiped staker");
+        } catch {}
+    }
 }

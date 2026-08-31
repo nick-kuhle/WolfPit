@@ -56,7 +56,7 @@ export function vaultNav(s: EngineState) {
 
 
 /** Total inventory the pit can post, including already-reserved. Used for IM slope. */
-export function grossCover(s: EngineState, under: string, side: FutSide): number {
+function grossCover(s: EngineState, under: string, side: FutSide): number {
   if (under === "ETH") {
     if (side === "long") return Math.max(0, s.vault.eth * UTIL_CAP);
     return Math.max(0, (s.vault.usdc * UTIL_CAP) / Math.max(s.eth, 1e-9));
@@ -202,9 +202,6 @@ function remainingCap(s: EngineState, side: FutSide) {
   return Math.max(0, (s.vault.usdc * UTIL_CAP) / s.eth - s.vault.reservedUsdc / s.eth);
 }
 
-export function maxFillEth(s: EngineState, side: FutSide) {
-  return remainingCap(s, side) * FILL_BAND;
-}
 
 function projectedOptionGamma(s: EngineState, type: OptType, strike: number, expiry: number, sizeEth: number) {
   const T = yearsTo(expiry, s.clock);

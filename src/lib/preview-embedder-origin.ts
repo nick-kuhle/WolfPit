@@ -1,4 +1,4 @@
-export function isPreviewEmbedderOrigin(origin: string, allow: readonly string[] = []): boolean {
+function isPreviewEmbedderOrigin(origin: string, allow: readonly string[] = []): boolean {
   try {
     const url = new URL(origin);
     if (url.protocol !== "https:" && url.protocol !== "http:") return false;

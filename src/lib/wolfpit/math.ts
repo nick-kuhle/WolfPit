@@ -2,13 +2,6 @@ export function clamp(n: number, a: number, b: number) {
   return Math.min(b, Math.max(a, n));
 }
 
-export function randn() {
-  let u = 0;
-  let v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
-  return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-}
 
 function normCdf(x: number) {
   const a1 = 0.254829592;

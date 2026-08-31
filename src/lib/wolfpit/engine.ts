@@ -1248,15 +1248,22 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
   return under === "ETH" ? hedgeDelta(filled) : filled;
 }
 
-export function closeFuture(s: EngineState, id: string): EngineState | string {
+export function closeFuture(s: EngineState, id: string, settlement = false): EngineState | string {
   const pos = s.futures.find((p) => p.id === id);
   if (!pos) return "Position not found.";
   const under = pos.under ?? "ETH";
   const mark = markOf(s, under);
   if (!(mark > 0) || !Number.isFinite(mark)) return `No mark for ${under}.`;
-  const reduced = reduceFuture(s, pos, pos.sizeEth, mark);
+  // Early closes CROSS THE SPREAD like any taker (audit §3.8): a long sells
+  // back at the bid, a short buys back at the ask — the house keeps the
+  // spread it quotes, same as the tradeFuture flatten path. Expiry
+  // settlement (settlement=true) stays at the mark: settlement prints have
+  // no spread.
+  const bps = spreadBps(s);
+  const px = settlement ? mark : pos.side === "long" ? mark * (1 - bps / 10_000) : mark * (1 + bps / 10_000);
+  const reduced = reduceFuture(s, pos, pos.sizeEth, px);
   if (typeof reduced === "string") return reduced;
-  const pnl = futPnl(pos, mark);
+  const pnl = futPnl(pos, px);
   const filled = pushFill(reduced, {
     id: uid("f"),
     t: s.clock,
@@ -1264,7 +1271,7 @@ export function closeFuture(s: EngineState, id: string): EngineState | string {
     symbol: `${under} mini close`,
     side: pos.side === "long" ? "sell" : "buy",
     size: pos.sizeEth,
-    price: mark,
+    price: px,
     fee: 0,
     note: `PnL ${pnl.toFixed(2)}`,
   }, cashShot(s));
@@ -1453,7 +1460,7 @@ function settleAndLiq(s: EngineState): EngineState {
     if (eq < maint) {
       next = liquidateFuture(next, p, mark);
     } else if (next.clock >= p.expiry) {
-      const closed = closeFuture(next, p.id);
+      const closed = closeFuture(next, p.id, true); // settlement print: no spread
       if (typeof closed !== "string") next = closed;
     }
   }
@@ -1546,14 +1553,20 @@ export function addLiquidity(s: EngineState, poolId: PoolId, quoteAmt: number): 
   if (quoteAmt <= 0) return "Size must be positive.";
   const pool = s.pools[poolId];
   if (!pool) return "Unknown pool.";
-  const copy = { ...pool };
-  if (copy.base === "ETH" && copy.quote === "USDC") {
-    copy.quoteReserve = copy.baseReserve * s.eth;
-  } else if (copy.base === "WPIT" && copy.quote === "USDC") {
-    copy.quoteReserve = copy.baseReserve * s.wpit;
-  } else if (copy.base === "WPIT" && copy.quote === "ETH") {
-    copy.quoteReserve = (copy.baseReserve * s.wpit) / Math.max(s.eth, 1e-9);
+  // Re-anchor to the live mark K-CONSERVINGLY (same repin as `tick`, F7): the
+  // old `quoteReserve = baseReserve · mark` rewrite destroyed/minted pool
+  // value for existing LPs on every add (audit §3.7). repinPool trades both
+  // reserves along x·y = k, exactly like the arbitrageur who would have
+  // aligned the pool already.
+  let target = 0;
+  if (pool.base === "ETH" && pool.quote === "USDC") {
+    target = s.eth;
+  } else if (pool.base === "WPIT" && pool.quote === "USDC") {
+    target = s.wpit;
+  } else if (pool.base === "WPIT" && pool.quote === "ETH") {
+    target = s.wpit / Math.max(s.eth, 1e-9);
   }
+  const copy = { ...(target > 0 ? repinPool(pool, target) : pool) };
   const px = copy.quoteReserve / copy.baseReserve;
   const baseIn = quoteAmt / px;
   if (tokenBal(s.account, copy.quote) < quoteAmt || tokenBal(s.account, copy.base) < baseIn) {
@@ -1790,11 +1803,6 @@ export function fmtExpiry(at: number) {
   return `${wd} ${d.getUTCDate()} ${mon} ${hh}:${mm} UTC`;
 }
 
-export function strikes(spot: number) {
-  const g = strikeGrid(spot);
-  const mid = Math.floor(g.length / 2);
-  return g.slice(Math.max(0, mid - 2), mid + 3);
-}
 
 export function optionQuote(s: EngineState, type: OptType, strike: number, expiry: number, under = "ETH") {
   const spot = markOf(s, under);

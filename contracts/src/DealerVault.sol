@@ -82,6 +82,7 @@ contract DealerVault {
     error SwapSize();
     error Slippage();
     error UnreconciledLoss();
+    error InsufficientShares();
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -90,6 +91,7 @@ contract DealerVault {
     event TargetAllowed(address indexed target, bool allowed);
     event AllowanceSet(address indexed token, address indexed spender, uint256 amount);
     event Deposit(address indexed who, uint256 ethAmt, uint256 usdcAmt, uint256 minted);
+    event Withdraw(address indexed who, uint256 ethAmt, uint256 usdcAmt, uint256 burned);
     event PausedSet(bool v);
     event InsuranceCredited(uint256 usdcAmt, uint256 wpitAmt);
     event RiskOpened(bytes4 indexed sig, uint256 a, uint256 b);
@@ -162,14 +164,15 @@ contract DealerVault {
         emit PausedSet(v);
     }
 
-    /// @notice ACCOUNTING ONLY (F16): books `usdcAmt` into insuranceUsdc.
-    ///         No tokens move — the caller must transfer the backing USDC to
-    ///         this contract first (treasury top-up), or the number is a
-    ///         ledger entry and the fund is NOT actually 1:1 backed. Insurance
-    ///         is only drawn during liquidation/settlement paths that move
-    ///         real USDC, so an unbacked credit would make those paths fail
-    ///         (vault runs out of USDC) rather than silently mint.
+    /// @notice Fund the insurance ledger with REAL USDC. Pulls `usdcAmt` from
+    ///         the caller so `insuranceUsdc` is 1:1 token-backed by
+    ///         construction — an unbacked ledger entry could silently disarm
+    ///         the `haltShortGamma` 1%-of-NAV check while the fund holds
+    ///         nothing. Insurance USDC is segregated from the trading ledger:
+    ///         it is NOT added to `usdcBal` and does not mint shares.
     function creditInsurance(uint256 usdcAmt) external onlyOwner {
+        if (usdcAmt == 0) revert Zero();
+        usdc.transferFrom(msg.sender, address(this), usdcAmt);
         insuranceUsdc += usdcAmt;
         emit InsuranceCredited(usdcAmt, 0);
     }
@@ -285,6 +288,37 @@ contract DealerVault {
         emit Deposit(msg.sender, ethAmt, usdcAmt, minted);
     }
 
+    /// @notice Preview the two-leg payout for burning `shareAmt` shares.
+    ///         Pro-rata on raw balances with the virtual-share offset in the
+    ///         denominator (rounds in the vault's favor, mirroring deposit).
+    function previewWithdraw(uint256 shareAmt) public view returns (uint256 ethOut, uint256 usdcOut) {
+        uint256 denom = shares + VIRTUAL_SHARES;
+        ethOut = (ethBal * shareAmt) / denom;
+        usdcOut = (usdcBal * shareAmt) / denom;
+    }
+
+    /// @notice Burn shares for a pro-rata slice of BOTH legs. The inventory
+    ///         law (reserved ≤ α·balance) must survive the exit: withdrawals
+    ///         that would push utilisation over α revert, so LP exits can
+    ///         never strand written options without collateral. Insurance
+    ///         USDC is segregated (not in `usdcBal`) and cannot be withdrawn.
+    ///         State is settled before tokens move (nonReentrant + CEI).
+    function withdraw(uint256 shareAmt) external live nonReentrant {
+        if (shareAmt == 0) revert Zero();
+        if (shareOf[msg.sender] < shareAmt) revert InsufficientShares();
+        (uint256 ethOut, uint256 usdcOut) = previewWithdraw(shareAmt);
+        shareOf[msg.sender] -= shareAmt;
+        shares -= shareAmt;
+        ethBal -= ethOut;
+        usdcBal -= usdcOut;
+        // Inventory law: remaining balances must still cover reserves at α.
+        if (reservedEth * 10_000 > ethBal * ALPHA_BPS) revert UtilCap();
+        if (reservedUsdc * 10_000 > usdcBal * ALPHA_BPS) revert UtilCap();
+        if (ethOut > 0) weth.transfer(msg.sender, ethOut);
+        if (usdcOut > 0) usdc.transfer(msg.sender, usdcOut);
+        emit Withdraw(msg.sender, ethOut, usdcOut, shareAmt);
+    }
+
     // ------------------------------------------------------------------ risk
 
     function freeEth() public view returns (uint256) {
@@ -357,7 +391,9 @@ contract DealerVault {
         if (size == 0) revert Zero();
         if (!allowedTarget[router]) revert BadTarget();
         uint256 p = spot(); // marks at the ORACLE, never a caller print
-        if (ethBal < size) revert NakedCall();
+        // Only UNRESERVED ETH may be sold: hedge-selling collateral that
+        // backs written calls would leave ethBal < reservedEth (naked calls).
+        if (size > freeEth()) revert NakedCall();
         uint256 lock = (size * p) / WAD;
         reservedUsdc += lock; // reserved first so a reentrant call sees it
 
@@ -381,12 +417,16 @@ contract DealerVault {
     }
 
     /// @notice Reconcile internal counters with real token balances after an
-    ///         `exec` swap that the vault did not book itself. Reverts when
-    ///         real balances are below reserved amounts — a loss must be
+    ///         `exec` swap that the vault did not book itself. Insurance USDC
+    ///         lives in the same contract but is a segregated ledger, so it is
+    ///         excluded from the trading balance. Reverts when real balances
+    ///         are below reserved + insurance amounts — a loss must be
     ///         investigated, never silently absorbed into the ledger.
     function reconcileBalances() external onlyOperator {
         uint256 e = weth.balanceOf(address(this));
         uint256 u = usdc.balanceOf(address(this));
+        if (u < insuranceUsdc) revert UnreconciledLoss();
+        u -= insuranceUsdc; // trading USDC only
         if (e < reservedEth || u < reservedUsdc) revert UnreconciledLoss();
         ethBal = e;
         usdcBal = u;

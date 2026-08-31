@@ -268,6 +268,14 @@ export const useWolf = create<WolfStore>()(
         set({ ...joinCompEngine(get()), lastError: null });
       },
       placeRaceBet: (kind, picks, stake, market = "win") => {
+        // Race betting is gambling-shaped: it must sit behind the same US
+        // geo-fence as futures/options, not bypass it (audit §3.6).
+        if (useAdmin.getState().geoFenceUs) {
+          const msg = "US geo-fence on. Race betting unavailable.";
+          ping(msg, "down");
+          set({ lastError: msg });
+          return;
+        }
         set((s) => {
           const r = placeTickets(s, kind, picks, stake, Date.now(), market);
           if (typeof r === "string") {

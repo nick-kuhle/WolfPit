@@ -6,6 +6,34 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — audit round-3 fixes (external review)
+
+- HIGH (contracts): `openShort` checked raw `ethBal`, not `freeEth()` — a
+  hedge-sell could spend collateral reserved by `writeCall` and leave the
+  vault naked (`ethBal < reservedEth`). PoC-confirmed, fixed to
+  `size > freeEth() → NakedCall`, regression test added.
+- MEDIUM (contracts): `Stake.slash` cut only `total`, not per-user balances —
+  first unstaker exited at full pre-slash size, everyone behind was bricked
+  by underflow. Rewritten to share-based accounting: slashes land pro-rata
+  (as FARM.md always promised), full-slash starts a clean epoch, ABI
+  unchanged. Regression tests cover the two-staker slash and the 100%-slash
+  epoch reset.
+- `creditInsurance` now PULLS real USDC (`transferFrom`) onto a segregated
+  ledger — no more unbacked entries that could disarm the 1%-of-NAV halt.
+  `reconcileBalances` excludes insurance from the trading balance.
+- LP exit path shipped: `withdraw(shares)` burns pro-rata into BOTH legs,
+  vault-favoring rounding via the virtual-share offset, and refuses exits
+  that would push utilisation past α (reserves can never be stranded).
+- Engine: `closeFuture` now crosses the spread (long exits at bid, short at
+  ask) like the flatten path — expiry settlement still prints at the mark.
+  `addLiquidity` re-anchors k-conservingly via `repinPool` (the old
+  `quote = base·mark` rewrite minted/destroyed pool value for existing LPs).
+- Store: `placeRaceBet` now sits behind the US geo-fence like futures and
+  options (it previously bypassed `gated()` entirely).
+- Dead code: `strikes()`, `randn()`, `maxFillEth()`, `SPOT_FEE` deleted;
+  internal-only exports un-exported (swap config, risk, engine types,
+  preview-origin helper). Planned auth modules kept intact, as before.
+
 ## 2026-08-30 (Sun) — audit fixes (external review)
 
 - CRITICAL: option buy-back now paid FROM the house (vault free USDC →

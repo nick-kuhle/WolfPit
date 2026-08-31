@@ -20,7 +20,7 @@
 export const BASE_CHAIN_ID = 8453;
 
 /** Canonical Base token addresses (public; verify against docs at deploy). */
-export const BASE_TOKENS = {
+const BASE_TOKENS = {
   ETH: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
   WETH: "0x4200000000000000000000000000000000000006",
   USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -60,7 +60,7 @@ export const SWAP_FEE_BPS = Math.round(numEnv("VITE_SWAP_FEE_BPS", 50, 0, 1000))
  * The WPIT-holder discount: the fee is cut by this fraction (0.5 = 50% off) for
  * any wallet that holds WPIT. Default 0.5. Override with VITE_SWAP_FEE_DISCOUNT.
  */
-export const SWAP_FEE_DISCOUNT = numEnv("VITE_SWAP_FEE_DISCOUNT", 0.5, 0, 1);
+const SWAP_FEE_DISCOUNT = numEnv("VITE_SWAP_FEE_DISCOUNT", 0.5, 0, 1);
 
 /** Discounted fee in bps, rounded to the nearest integer bps (0x takes ints). */
 export const SWAP_FEE_BPS_DISCOUNTED = Math.round(SWAP_FEE_BPS * (1 - SWAP_FEE_DISCOUNT));
@@ -90,7 +90,7 @@ export const FEE_RECIPIENT = envVar("VITE_FEE_RECIPIENT");
  * extends this list (review fix F7).
  * Override with VITE_FEE_CHAINS (comma-separated chain ids, e.g. "8453,1").
  */
-export function feeChains(): Set<number> {
+function feeChains(): Set<number> {
   const raw = envVar("VITE_FEE_CHAINS");
   const out = new Set<number>([BASE_CHAIN_ID]);
   if (!raw) return out;
@@ -121,7 +121,7 @@ export const WPIT_LIVE = isEvmAddress(WPIT_TOKEN);
  * @param holdsWpit whether the connected wallet currently holds any WPIT.
  */
 /** Whether a non-zero discount is even configured. */
-export const DISCOUNT_CONFIGURED = SWAP_FEE_DISCOUNT > 0 && SWAP_FEE_BPS_DISCOUNTED < SWAP_FEE_BPS;
+const DISCOUNT_CONFIGURED = SWAP_FEE_DISCOUNT > 0 && SWAP_FEE_BPS_DISCOUNTED < SWAP_FEE_BPS;
 
 export function feeFor(holdsWpit: boolean): {
   bps: number;

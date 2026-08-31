@@ -151,7 +151,12 @@ contract ReentrancyGuardTest {
         require(!router.openLongReentered(), "openLong re-entered the vault");
 
         // And the ledger matches the real balances exactly (no inflation).
-        require(vault.usdcBal() == usdc.balanceOf(address(vault)), "usdcBal drifted from real balance");
+        // Insurance USDC is real tokens held in the vault but on a segregated
+        // ledger, so trading usdcBal + insuranceUsdc == the token balance.
+        require(
+            vault.usdcBal() + vault.insuranceUsdc() == usdc.balanceOf(address(vault)),
+            "usdcBal drifted from real balance"
+        );
         require(vault.ethBal() == weth.balanceOf(address(vault)), "ethBal drifted from real balance");
     }
 

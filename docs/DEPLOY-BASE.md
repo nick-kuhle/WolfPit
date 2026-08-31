@@ -85,11 +85,11 @@ Terminal prints `oracle=`, `vault=`, `usdc=`, `weth=`. Record them.
 **Immediately after deploy (from the OWNER multisig):**
 
 1. `vault.creditInsurance(<seed USDC>)` — fund insurance (target ≥ 1% of NAV;
-   the paper model seeds $25k against an $800k vault). CRITICAL (F16): this is
-   an ACCOUNTING-ONLY credit — no USDC moves. Transfer the backing token to
-   the vault FIRST (before or after the credit) or the insurance fund is not
-   backed 1:1 and any liquidation/settlement that draws it will simply drain
-   the vault's real USDC. Back it with treasury funds.
+   the paper model seeds $25k against an $800k vault). The credit PULLS REAL
+   USDC from the caller (`transferFrom`), so approve the vault first from the
+   multisig. The insurance fund is 1:1 token-backed by construction and is
+   held on a segregated ledger (never mixed into the trading `usdcBal`, never
+   folded in by `reconcileBalances`).
 2. Seed the vault: `vault.deposit(<WETH>, <USDC>)` from the treasury (first
    deposit must be ≥ $5k of value). This is the dealing inventory.
 3. Allowlist the aggregator router(s): `vault.allowTarget(<router>, true)` and
@@ -144,15 +144,14 @@ fails closed without real credentials.
 
 ## Known launch limitations (read before deploying)
 
-- **Deposit-only vault**: there is no `redeem/withdraw` yet (v1 scope — epoch
-  accounting arrives with the share-price oracle cadence). Seed with treasury
-  funds you will not need to pull quickly.
+- **Withdrawals are instant, not epoch-batched**: `withdraw(shares)` pays a
+  pro-rata slice of BOTH legs and refuses any exit that would push
+  utilisation past α (reserved collateral can never be stranded). Epoch
+  accounting / exit queues arrive with the share-price oracle cadence.
 - **Oracle is single-source Chainlink** with sanity bands; the RISK.md
   "Chainlink + TWAP, take the less aggressive" median is the v1.1 upgrade.
 - **`setAllowance` uses a raw `approve`** — fine for USDC/WETH (no
   fee-on-transfer); re-audit if you allowlist exotic tokens.
-- **Insurance credit is accounting** — back it with real funds moved to the
-  vault treasury, tracked off-chain, until the insurance escrow module lands.
 - The paper sim models aggregator depth as a 2,500 ETH external book
   (`engine.ts` initialState); real routing depth must be monitored via the
   aggregator API before enabling large sizes.

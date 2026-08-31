@@ -12,7 +12,7 @@ export type Candle = {
   v: number;
 };
 
-export type FuturePos = {
+type FuturePos = {
   id: string;
   side: FutSide;
   sizeEth: number;
@@ -23,7 +23,7 @@ export type FuturePos = {
   under?: string;
 };
 
-export type OptionPos = {
+type OptionPos = {
   id: string;
   type: OptType;
   strike: number;
@@ -58,7 +58,7 @@ export type CashShot = {
   wpit: number;
 };
 
-export type VaultState = {
+type VaultState = {
   eth: number;
   usdc: number;
   reservedEth: number;
@@ -77,18 +77,18 @@ export type PoolState = {
   feeBps: number;
 };
 
-export type LpPosition = {
+type LpPosition = {
   poolId: PoolId;
   shares: number;
   costUsdc?: number;
 };
 
-export type StakePos = {
+type StakePos = {
   amount: number;
   since: number;
 };
 
-export type PaperAccount = {
+type PaperAccount = {
   usdc: number;
   eth: number;
   wpit: number;
@@ -203,7 +203,6 @@ export const START_WPIT = 100_000;
 export const MINI_ETH = 0.1;
 export const FUT_IM = 0.25;
 export const FUT_MM = 0.125;
-export const SPOT_FEE = 0.003;
 export const DERIV_FEE = 0.0005;
 export const UTIL_CAP = 0.4;
 export const WPIT_EMIT_PER_SEC = 0.08;
