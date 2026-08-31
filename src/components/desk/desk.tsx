@@ -11,7 +11,7 @@ import { BAR_MS, dayPnl, equity, liqHealth, markOf, synthCandles, usedMargin } f
 import { loadSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
 import { useWolf } from "@/lib/wolfpit/store";
 import type { Candle } from "@/lib/wolfpit/types";
-import { cn, fmtPct, fmtPx, fmtUsd } from "@/lib/utils";
+import { cn, fmtPx, fmtUsd } from "@/lib/utils";
 
 type Tab = "list" | "trade" | "pos";
 
@@ -158,6 +158,8 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
           <div className="shrink-0 border-b border-border px-3 py-1.5">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
+                {/* Price / change / name live on the chart card header now —
+                    the strip keeps only the star, the symbol, and the CTAs. */}
                 <div className="flex items-baseline gap-2">
                   <button
                     type="button"
@@ -168,12 +170,7 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
                     {saved.includes(under) ? "★" : "☆"}
                   </button>
                   <h1 className="font-display text-xl font-medium leading-none">{under}</h1>
-                  <span className={cn("font-mono text-lg tabular-nums", chg >= 0 ? "text-up" : "text-down")}>
-                    {spot ? fmtPx(spot) : "—"}
-                  </span>
-                  <span className={cn("font-mono text-[11px]", chg >= 0 ? "text-up" : "text-down")}>{fmtPct(chg)}</span>
                 </div>
-                <p className="truncate text-[11px] text-muted">{focus.name}</p>
               </div>
               <div className="flex gap-1.5">
                 <button
@@ -207,9 +204,15 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
           <div className="shrink-0 p-3">
             <ChartCard
               symbol={under}
+              quoteSymbol="USD"
               name={focus.name}
               price={spot}
               changePct={chg}
+              tag={
+                <span className="rounded bg-brass/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-brass">
+                  paper · sim
+                </span>
+              }
               candles={bars}
               interval={interval}
               status={status}
