@@ -166,9 +166,11 @@ inside `afterSwap`:
 
 ```
 RV_t       = λ_eff · RV_{t-1} + (1 − λ_eff) · |ln(P_t / P_{t-1})|
-λ_eff      = λ^(Δt / τ),  λ = 0.94,  τ = 60 s   (RiskMetrics EWMA, per math.ts)
+λ_eff      = λ^(Δt / τ),  λ = 0.9971161,  τ = 60 s   (half-life 4 h, per math.ts)
+λ          = 0.5^(τ / halfLife),  halfLife = 14400 s  →  0.9971161
 P_t        = sqrt-price at the tick of the current observation
-RV_annual  = clamp(RV_t · √(365.25·24·3600 / τ), 0.15, 2)   (= RV_t · √525960)
+RV_annual  = clamp(RV_t · √(π/2) · √(365.25·24·3600 / τ), 0.15, 2)
+           = clamp(RV_t · 1.2533141 · √525960, 0.15, 2)
 ```
 
 - Each `afterSwap` records the new observation **only after** the pool state is final
@@ -180,6 +182,22 @@ RV_annual  = clamp(RV_t · √(365.25·24·3600 / τ), 0.15, 2)   (= RV_t · √
   `ewmaRv` exactly; dense swapping decays the accumulator faster and quiet periods
   slower, so swap cadence can never inflate RV. Annualization is always `√525960`
   (the 60 s reference bar), matching `ewmaRv`'s per-bar basis.
+- **The `√(π/2)` factor is load-bearing, not cosmetic.** The accumulator holds `|ln(P/P)|`,
+  whose expectation is `E|r| = σ·√(2/π) ≈ 0.7979σ`, **not** σ. Annualizing it directly
+  under-reports vol by 20.2%, which makes `IV_atm = 1.08·RV` a 13.8% *discount* on a
+  structurally short-gamma book. Multiply by `√(π/2) ≈ 1.2533141` before annualizing, or
+  fold the two constants into one (`√(π/2)·√525960 ≈ 908.9423`). This is the same
+  correction as issue #20 / M-01 in `math.ts` — the hook and the sim must agree, and
+  the sim is the reference. Measured: raw accumulator reads `0.7992σ`; after the factor,
+  `1.0017σ`.
+- **λ is derived from a stated half-life, not inherited from `RiskMetrics`.** The
+  `0.94` daily-bar constant is a 17-minute memory on 60 s observations — it has no
+  usable history. `λ = 0.5^(τ/halfLife)` with a 4 h half-life gives `0.9971161`
+  (effective window `1/(1−λ) ≈ 347` bars). Deriving it from the half-life keeps the
+  window stable across cadences; hard-coding `0.94` does not. See issue #25 / M-02 for
+  the Monte-Carlo that rejects the longer half-lives: at 5 h of history a 17-day
+  half-life reads `235%σ`, and the real constraint is `CANDLE_LIMITS.MAX = 300`
+  (≈ 5 h of tape), which no λ can compensate for.
 - **Cold start (sim parity):** until ≥ 8 observations the hook reports
   `rv() = 0.55e18` (annualized → fee 17 bps) — `ewmaRv` seeds 0.55 below 8 candles.
   The accumulator initializes at the 8th observation (first return, the sim's `n == 0`
@@ -395,7 +413,7 @@ the Γ/ν caps is a fail.
 | --- | --- |
 | Fee formula `5+80·max(0,RV−0.40)` clamp 5–30 | |
 | `DEPTH_SAFE_FRAC` value | |
-| Vol EWMA λ=0.94 + IV `1.08·RV` | |
+| Vol EWMA λ=0.9971161 (4 h half-life) + `√(π/2)` + IV `1.08·RV` | |
 | Pull-vs-push depth model | |
 | Hook flags / zero-delta | |
 

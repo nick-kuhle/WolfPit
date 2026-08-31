@@ -6,6 +6,31 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — HOOK.md RV spec realigned to math.ts (F3 follow-up)
+
+`70ae20f` (F1–F9) pinned `λ = 0.94, τ = 60 s` in `HOOK.md` §5.1 with the note
+"per math.ts". That λ is the defect reported in issue #25 / M-02, and the fix in
+`915467b` changed `math.ts` to derive λ from a stated half-life — so the spec and
+the reference implementation disagreed. Spec-only change; no code touched.
+
+- **λ**: `0.94` → `0.9971161`, now written as `λ = 0.5^(τ/halfLife)` with
+  `halfLife = 14400 s` (4 h) so the window is derived rather than hard-coded.
+  Half-life verified at exactly 240.000 min; effective window `1/(1−λ) ≈ 347` bars.
+  F3's contribution is preserved unchanged — `λ_eff = λ^(Δt/τ)` still makes decay
+  time-weighted, so swap cadence cannot inflate RV. Only the constant changed.
+- **`√(π/2)` added to the annualization** — this was a second parity gap, not part of
+  F3. The hook accumulates `|ln(P/P)|`, whose expectation is `E|r| = σ·√(2/π)`, not σ.
+  Annualizing it raw under-reports vol by 20.2%, making `IV_atm = 1.08·RV` a 13.8%
+  discount on a structurally short-gamma book — issue #20 / M-01 reintroduced on-chain.
+  Folded constant `√(π/2)·√525960 ≈ 908.9423`. `math.ts` is the reference and already
+  applies this.
+- §12 sign-off row updated to match.
+
+The binding constraint on RV quality is still `CANDLE_LIMITS.MAX = 300` (≈ 5 h of
+tape) — worth its own issue, since no λ compensates for a 5-hour window.
+
+---
+
 ## 2026-08-31 (Mon) — issue triage: 13 fixes, 6 confirmed already-closed
 
 Worked all 28 open issues. The reviewer's own re-verification ran at `8d9e0b5`,
