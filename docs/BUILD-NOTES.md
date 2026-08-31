@@ -20,11 +20,23 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
   can't revert a user swap). Fork-test plan T1–T10, "why not v1" list, review
   sign-off table for Q.
 - Linked from `docs/README.md` + `contracts/README.md`.
-- Admin fix (env only, no code change): the earlier dev-server turn installed deps
-  under **Node v20** (project needs >=22.12), dropping `@electric-sql/pglite` — so
-  the auth store couldn't load and login failed closed. Reininstall under Node
-  22.23.2 fixes it; `verifyPassword(admin/admin)=true` verified live, `/__app-env`
-  `VITE_AUTH_ENABLED=false` (dev auth-off → admin/admin).
+- **Admin login root cause found and fixed** (the earlier note blamed a Node-20
+  install; the pglite store was healthy — this was the actual cause). TanStack
+  Start's SSR handler (`@tanstack/start-server-core` `createStartHandler`) gates
+  server-function routing on `SERVER_FN_BASE = process.env.TSS_SERVER_FN_BASE`.
+  In dev that value is NOT auto-injected into the node process, so it was
+  `undefined` — every `createServerFn` POST (admin login, swap quotes, auth) fell
+  through to the HTML router and 500'd "Only HTML requests are supported here";
+  the clients' `.catch`-less `void fn()` calls swallowed it, so the UI appeared to
+  do nothing. Fix: `scripts/with-app-env.mjs` now injects
+  `SSR_ENV_DEFAULTS = { TSS_SERVER_FN_BASE: "/_serverFn/", TSS_ROUTER_BASEPATH: "/" }`
+  (mirrors the plugin's default `serverFns.base` join), merged below file/process
+  env so an explicit override wins. Verified end-to-end over HTTP: `POST
+  /_serverFn/<id>` with the browser's seroval body → 200 `{ok:true,user:"admin"}` +
+  sets the `wp_admin` HttpOnly SameSite=Lax 12h cookie; `adminWhoami` reads
+  `user:"admin"` with the cookie / `null` without; `/admin` redirects when
+  unauthenticated. `scripts/with-app-env.test.mjs` 12/12, typecheck clean, npm
+  test 96/96 engine.
 
 ## 2026-08-31 (Mon) — review follow-ups round 4 (C1 + doc drift)
 

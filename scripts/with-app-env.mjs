@@ -30,6 +30,23 @@ export const APP_ENV_REL_PATH = "config/app-env.json";
 const VITE_PREFIX = "VITE_";
 
 /**
+ * TanStack Start reads some runtime config from `process.env` inside the SSR
+ * handler (not from the Vite `define`-replaced bundle): `createStartHandler`
+ * gated server-function routing on `SERVER_FN_BASE = process.env.TSS_SERVER_FN_BASE`.
+ * In dev that value is NOT auto-injected into the node process, so every
+ * `createServerFn` POST (admin login, swap quotes, auth) fell through to the
+ * HTML router and 500'd with "Only HTML requests are supported here" — and the
+ * clients' `.catch`-less `void fn()` calls swallowed it, so the UI appeared to
+ * do nothing. These defaults mirror the plugin's own defaults
+ * (`serverFns.base` → `/_serverFn`, `routerBasepath` → `/`, joined to
+ * `/_serverFn/`), applied as a floor so an explicit override still wins.
+ */
+const SSR_ENV_DEFAULTS = {
+  TSS_SERVER_FN_BASE: "/_serverFn/",
+  TSS_ROUTER_BASEPATH: "/",
+};
+
+/**
  * Parse an app-env document, keeping only `VITE_`-prefixed string entries.
  * Anything unparseable is an empty environment — a workspace without the file
  * must behave exactly like today (auth on, no overrides).
@@ -60,9 +77,9 @@ export function readAppEnv(root) {
   }
 }
 
-/** File values under the process environment: an explicit override wins. */
+/** SSR env defaults under file values under the process environment (process wins). */
 export function mergeAppEnv(appEnv, processEnv) {
-  return { ...appEnv, ...processEnv };
+  return { ...SSR_ENV_DEFAULTS, ...appEnv, ...processEnv };
 }
 
 /**
