@@ -21,10 +21,15 @@ Gnosis, Celo, Mantle, Blast, Linea, Scroll, ZKsync, Unichain, Berachain
 wallet's current network vs. selection, and prompts switch/add in the wallet
 when you submit.
 
-**Tokens.** Any tradeable token: the token picker searches the aggregator's
-index by symbol/name, always offers the chain-native asset, and resolves
-pasted contract addresses (falling back to direct on-chain ERC-20 metadata
-reads). Base also shows curated quick picks (ETH · WETH · USDC).
+**Tokens.** Any tradeable token: the token picker always offers the
+chain-native asset, searches by symbol/name, and resolves pasted contract
+addresses via direct on-chain ERC-20 reads. Symbol/name search cascades
+server-side: 0x Tokens API index (when `ZEROX_API_KEY` is set) → DexScreener
+pair search (keyless; matches base OR quote side of each pair, ranked by
+liquidity, decimals read on-chain) → CoinGecko platform addresses (keyless,
+merged in when results are thin). Headline Base tokens (WETH · USDC) are
+curated offline so they are always findable regardless of upstream rate
+limits. Results are cached 5 min per (chain, query).
 
 **User knobs.** Slippage tolerance is user-settable in the card (0.1 / 0.3 /
 0.5 / 1 % presets + custom). The card also surfaces network, rate, route,

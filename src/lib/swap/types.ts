@@ -90,5 +90,5 @@ export type FoundToken = {
 };
 
 export type TokenSearchResult =
-  | { ok: true; tokens: FoundToken[]; source: "aggregator" | "fallback" }
+  | { ok: true; tokens: FoundToken[]; source: "aggregator" | "dexscreener" | "coingecko" | "fallback" }
   | { ok: false; error: string };
