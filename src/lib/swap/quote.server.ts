@@ -22,8 +22,11 @@ import {
   SWAP_FEE_BPS_DISCOUNTED,
   SWAP_SLIPPAGE_BPS,
   WPIT_LIVE,
+  WPIT_TOKEN,
 } from "./config";
 import type { QuoteRequest, QuoteResult } from "./types";
+import { createPublicClient, erc20Abi, http, type Hex } from "viem";
+import { base } from "viem/chains";
 
 const ZEROX_BASE = "https://api.0x.org/swap/permit2";
 
@@ -37,6 +40,32 @@ function feeBpsFor(holdsWpit: boolean | undefined): number {
   // wallet pays the full fee, even if the client optimistically flagged it.
   if (WPIT_LIVE && holdsWpit && SWAP_FEE_BPS_DISCOUNTED > 0) return SWAP_FEE_BPS_DISCOUNTED;
   return SWAP_FEE_BPS;
+}
+
+/**
+ * Server-side WPIT holding check for FIRM quotes. The client's `holdsWpit` flag
+ * is a display hint only — never trusted for pricing: anyone could POST the
+ * server fn with holdsWpit=true to grab the discount without holding WPIT.
+ * When WPIT is live and a taker is present, we read balanceOf on-chain and use
+ * that. On any RPC failure we fail conservative (no discount).
+ */
+async function verifyHoldsWpit(taker: string): Promise<boolean> {
+  if (!WPIT_TOKEN || !/^0x[0-9a-fA-F]{40}$/.test(WPIT_TOKEN)) return false;
+  try {
+    const client = createPublicClient({
+      chain: base,
+      transport: http(process.env.BASE_RPC_URL?.trim() || undefined),
+    });
+    const bal = (await client.readContract({
+      address: WPIT_TOKEN as Hex,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [taker as Hex],
+    })) as bigint;
+    return bal > 0n;
+  } catch {
+    return false;
+  }
 }
 
 type ZeroXIssue = { liquidityAvailable?: boolean };
@@ -132,7 +161,15 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
   }
 
   const wantTx = Boolean(req.taker);
-  const feeBps = feeBpsFor(req.holdsWpit);
+
+  // Firm quotes price the fee from the SERVER-VERIFIED WPIT balance, not the
+  // client's claim. (Indicative /price quotes keep the hint — nothing executes
+  // on them, and the firm quote shows the real fee before signing.)
+  let holdsWpit = req.holdsWpit;
+  if (wantTx && WPIT_LIVE && req.taker) {
+    holdsWpit = await verifyHoldsWpit(req.taker);
+  }
+  const feeBps = feeBpsFor(holdsWpit);
 
   const params = new URLSearchParams({
     chainId: String(BASE_CHAIN_ID),
@@ -172,5 +209,5 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
     return { ok: false, error: msg, noRoute: res.status === 400 };
   }
 
-  return toResult(json, feeBps, req.holdsWpit, req.sellToken, wantTx);
+  return toResult(json, feeBps, holdsWpit, req.sellToken, wantTx);
 }

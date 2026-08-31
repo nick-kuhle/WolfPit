@@ -27,6 +27,7 @@ import {
   waitForReceipt,
 } from "./chain";
 import { useWallet, getProvider, switchToBase } from "@/lib/wallet/session";
+import { ping } from "@/lib/wolfpit/alerts";
 import { BASE_CHAIN_ID } from "./config";
 
 export type SwapPhase =
@@ -55,6 +56,13 @@ export type SwapState = {
 
 const MAX_UINT =
   "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+
+/** Compact human amount for ticket copy, e.g. "1.5" / "1,584.2". */
+function shortAmt(v: string): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
+}
 
 export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
   const wallet = useWallet();
@@ -217,6 +225,7 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
       const hash = await sendSwapTx(provider, owner, firm.tx);
       setTxHash(hash);
       setPhase("confirming");
+      ping("Swap sent · settling on Base", "brass");
       const ok = await waitForReceipt(hash);
       if (!ok) {
         setError("Transaction reverted on-chain.");
@@ -224,6 +233,13 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
         return;
       }
       setPhase("done");
+      // Uniform success notification: confetti pit-ticket, same as every fill.
+      ping(
+        `Swap settled · ${shortAmt(fromBaseUnits(sellAmount, sell.decimals))} ${sell.symbol} → ${shortAmt(fromBaseUnits(firm.buyAmount, buy.decimals))} ${buy.symbol}`,
+        "up",
+        true,
+        "Fill",
+      );
       void refreshBalances();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Swap failed.";
@@ -231,7 +247,7 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
       setError(/reject|denied|user rejected/i.test(msg) ? "You rejected the transaction." : msg);
       setPhase("error");
     }
-  }, [wallet.address, onBase, amount, sell, buy.address, holds, refreshBalances]);
+  }, [wallet.address, onBase, amount, sell, buy, holds, refreshBalances]);
 
   const fee = feeFor(holds);
 

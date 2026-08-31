@@ -7,11 +7,16 @@ touches the sim.
 
 ## Surfaces
 
-| Path    | What it is                                                        |
-|---------|-------------------------------------------------------------------|
-| `/swap` | Real on-chain market swaps (ETH · WETH · USDC) via the aggregator |
-| `/info` | Public fees + protocol info page (linked from the **More** tab)   |
-| `/trade`| Paper simulation desk (unchanged; 84 engine tests)               |
+| Path              | What it is                                                        |
+|-------------------|-------------------------------------------------------------------|
+| `/trade`          | ONE trade page with a **Simulation / Live · Base** toggle (top bar) |
+| `/trade?mode=live`| Live desk — real on-chain market swaps (ETH · WETH · USDC)        |
+| `/swap`           | Redirects to `/trade?mode=live` (legacy links keep working)       |
+| `/info`           | Public fees + protocol info page (linked from the **More** tab)   |
+
+The toggle is the only way real funds are reached: the default is Simulation
+(paper, $100k), `?mode=live` or the persisted localStorage choice switches to
+the live desk. The dock's **Trade** tab highlights for both modes.
 
 ## How it works
 
@@ -25,7 +30,11 @@ touches the sim.
    attached as the 0x affiliate fee (`swapFeeRecipient` + `swapFeeBps`), so it
    is collected **on-chain in the same transaction** and paid directly to the
    WolfPit wallet.
-4. `useSwap` (`src/lib/swap/use-swap.ts`) drives the flow: debounced indicative
+4. **WPIT discount is verified server-side.** For firm quotes (taker present)
+   the server reads `balanceOf(WPIT, taker)` on-chain and prices the fee from
+   that; the client's `holdsWpit` flag is a display hint only. RPC failure is
+   conservative: full fee. (Zero RPC calls while `VITE_WPIT` is unset.)
+5. `useSwap` (`src/lib/swap/use-swap.ts`) drives the flow: debounced indicative
    pricing while typing → firm quote on submit → ensure the wallet is on Base →
    ERC-20 approval if needed (native ETH needs none) → send swap → wait for the
    receipt.

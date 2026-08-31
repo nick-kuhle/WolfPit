@@ -11,7 +11,7 @@ import { useWallet, truncAddr } from "@/lib/wallet/session";
 const TABS = [
   { to: "/" as const, label: "Floor", Icon: IconFloor, match: (p: string) => p === "/" },
   { to: "/games" as const, label: "The Ranch", Icon: IconRanch, match: (p: string) => p === "/pools" || p === "/stake" || p === "/games" },
-  { to: "/swap" as const, label: "Spot", Icon: IconTrade, match: (p: string) => p === "/swap" || p === "/trade" || p.startsWith("/asset") },
+  { to: "/trade" as const, label: "Trade", Icon: IconTrade, match: (p: string) => p === "/trade" || p === "/swap" || p.startsWith("/asset") },
   { to: "/book" as const, label: "Book", Icon: IconCase, match: (p: string) => p === "/book" },
 ] as const;
 
