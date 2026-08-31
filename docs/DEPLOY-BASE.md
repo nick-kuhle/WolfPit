@@ -146,8 +146,9 @@ fails closed without real credentials.
 
 - **Withdrawals are instant, not epoch-batched**: `withdraw(shares)` pays a
   pro-rata slice of BOTH legs and refuses any exit that would push
-  utilisation past α (reserved collateral can never be stranded). Epoch
-  accounting / exit queues arrive with the share-price oracle cadence.
+  utilisation past α (reserved collateral can never be stranded). Withdrawals
+  remain available while the vault is paused; the collateral check still
+  applies. Epoch accounting / exit queues arrive with the share-price oracle cadence.
 - **Oracle is single-source Chainlink** with sanity bands; the RISK.md
   "Chainlink + TWAP, take the less aggressive" median is the v1.1 upgrade.
 - **`setAllowance` uses a raw `approve`** — fine for USDC/WETH (no

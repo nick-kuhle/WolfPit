@@ -46,6 +46,18 @@ contract SwapRouter {
     }
 }
 
+contract DrainRouter {
+    IERC20 public immutable token;
+
+    constructor(IERC20 token_) {
+        token = token_;
+    }
+
+    function drain(address from, uint256 amount) external {
+        token.transferFrom(from, address(this), amount);
+    }
+}
+
 interface Vm {
     function prank(address) external;
     function startPrank(address) external;
@@ -365,6 +377,31 @@ contract DealerVaultTest {
         try vault.withdraw(my) {
             revert("expected InsufficientShares");
         } catch {}
+    }
+
+    /// A pause must stop new risk, not trap an LP. Safe withdrawals remain
+    /// available while paused and still run the collateral checks.
+    function testWithdrawAllowedWhilePaused() public {
+        uint256 my = vault.shareOf(address(this));
+        vault.pause(true);
+        vault.withdraw(my / 2);
+        require(vault.shareOf(address(this)) == my - my / 2, "paused withdrawal burned shares");
+        vault.pause(false);
+    }
+
+    /// Insurance is a hard floor on generic router execution: trading inventory
+    /// may move, but an allowlisted target cannot spend the reserve.
+    function testExecCannotSpendInsuranceReserve() public {
+        vault.creditInsurance(20_000e6);
+        DrainRouter router = new DrainRouter(IERC20(address(usdc)));
+        vault.allowTarget(address(router), true);
+        vault.setAllowance(IERC20(address(usdc)), address(router), type(uint256).max);
+        bytes memory data = abi.encodeWithSignature("drain(address,uint256)", address(vault), 400_001e6);
+        try vault.exec(address(router), data) {
+            revert("expected InsuranceSpent");
+        } catch {}
+        require(usdc.balanceOf(address(vault)) == 420_000e6, "insurance drain rolled back");
+        require(vault.insuranceUsdc() == 20_000e6, "insurance ledger intact");
     }
 
     /// Withdrawals must not break the inventory law: with reservations at the

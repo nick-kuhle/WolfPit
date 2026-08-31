@@ -83,6 +83,7 @@ contract DealerVault {
     error Slippage();
     error UnreconciledLoss();
     error InsufficientShares();
+    error InsuranceSpent();
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -172,7 +173,7 @@ contract DealerVault {
     ///         it is NOT added to `usdcBal` and does not mint shares.
     function creditInsurance(uint256 usdcAmt) external onlyOwner {
         if (usdcAmt == 0) revert Zero();
-        usdc.transferFrom(msg.sender, address(this), usdcAmt);
+        if (!usdc.transferFrom(msg.sender, address(this), usdcAmt)) revert UnreconciledLoss();
         insuranceUsdc += usdcAmt;
         emit InsuranceCredited(usdcAmt, 0);
     }
@@ -232,6 +233,10 @@ contract DealerVault {
                 revert(add(ret, 32), mload(ret))
             }
         }
+        // Insurance is physically held by this contract but logically
+        // segregated. An allowlisted router may spend trading inventory, never
+        // the insurance reserve. Reconcile still handles trading-balance drift.
+        if (usdc.balanceOf(address(this)) < insuranceUsdc) revert InsuranceSpent();
         return ret;
     }
 
@@ -303,7 +308,7 @@ contract DealerVault {
     ///         never strand written options without collateral. Insurance
     ///         USDC is segregated (not in `usdcBal`) and cannot be withdrawn.
     ///         State is settled before tokens move (nonReentrant + CEI).
-    function withdraw(uint256 shareAmt) external live nonReentrant {
+    function withdraw(uint256 shareAmt) external nonReentrant {
         if (shareAmt == 0) revert Zero();
         if (shareOf[msg.sender] < shareAmt) revert InsufficientShares();
         (uint256 ethOut, uint256 usdcOut) = previewWithdraw(shareAmt);
