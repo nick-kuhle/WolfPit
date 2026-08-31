@@ -22,7 +22,7 @@ Sign: users buy calls/puts and long/short futures. Vault is the other side. Spot
 | Unhedged \|Δ\| | `max(0.05 ETH_vault, 0.02 NAV/S)` | hedge; if hedge fails, pull quotes |
 | Short call size | ≤ free ETH | reject (no naked calls) |
 | Short put notional | ≤ free USDC | reject (no naked puts) |
-| \|Γ\| × S² × σ² × (1h) | ≤ 2% NAV | stop writing ATM |
+| 2 × \|Γ\| × S² × σ² × (1h) | ≤ 2% NAV | stop writing ATM |
 | \|ν\| | ≤ 15% NAV | stop writing |
 | OI / expiry | ≤ 25% vault ETH | that expiry blank |
 | OI / strike | ≤ 10% vault ETH | that strike blank |
@@ -72,7 +72,15 @@ Seed in sim: $25,000 USDC (synthetic). Feeds:
 - 10% of WPIT emissions (sold to USDC in production)
 - 1% harvest tax
 
-Target: ≥ 99th percentile 1h HE (see MM.md). If insurance / NAV < 1%, halt new short gamma.
+Target: ≥ 99th percentile 1h HE (see MM.md) — with the **two-sided** 99th
+percentile of |Z| (`z = 2.5758`), because a short-gamma book loses in either
+direction. If insurance / NAV < 1%, halt new short gamma.
+
+**Insolvency is zero cover, not full cover.** `insuranceRatio()` returns **0**
+when `vaultNav <= 0`, matching `DealerVault.haltShortGamma()`'s
+`if (nav == 0) return true`. The engine used to return 1 there — "fully insured"
+— at the exact moment the vault became insolvent, which let the desk keep
+writing short gamma into a hole (issue #21 / M-06).
 
 ## Oracles / expiry
 
@@ -125,3 +133,17 @@ If any drill leaks LP USDC that is not a posted spread, do not ship.
 `bookGreeks()` — Δ, Γ, ν for the desk.  
 Watchlist — util, IV, RV, insurance, max net.  
 Do not put a “risk officer” button that overrides α.
+
+## Conventions pinned by tests
+
+`src/lib/wolfpit/quant.test.ts` pins the numbers a reviewer found wrong, so they
+cannot drift back through a "cleanup":
+
+| Quantity | Value | Issue |
+| --- | --- | --- |
+| MAD → σ | `sqrt(π/2) = 1.253314` | #20 / M-01 |
+| EWMA λ | `0.5^(bar/halfLife)`, half-life 4 h | #25 / M-02 |
+| Insurance z | `2.5758` (two-sided) | #24 / M-03 |
+| `gammaCash1h` | 2× textbook ½·Γ·S²·σ²·Δt | #27 / M-04 |
+| `insuranceRatio` at NAV ≤ 0 | `0`, not `1` | #21 / M-06 |
+| Deployable cash | `usdc − reservedUsdc − escrowUsdc` | #23 / M-07 |

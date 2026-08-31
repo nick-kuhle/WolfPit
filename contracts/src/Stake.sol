@@ -2,7 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {WPIT} from "./WPIT.sol";
-import {DealerVault} from "./DealerVault.sol";
+import {DealerVault, IERC20} from "./DealerVault.sol";
+import {SafeERC20} from "./SafeERC20.sol";
 
 /// @notice First-loss junior. Slash order: insurance USDC → staked WPIT → pause → LP NAV.
 ///         FARM.md: production runs a 7-day unstake cooldown so a slashed
@@ -14,6 +15,8 @@ import {DealerVault} from "./DealerVault.sol";
 ///         pro-rata. Without this, a slash would let the first unstaker exit
 ///         at full pre-slash size and brick everyone behind them.
 contract Stake {
+    using SafeERC20 for IERC20;
+
     WPIT public immutable wpit;
     DealerVault public immutable vault;
     address public owner;
@@ -98,7 +101,7 @@ contract Stake {
     }
 
     function stake(uint256 amt) external {
-        wpit.transferFrom(msg.sender, address(this), amt);
+        IERC20(address(wpit)).safeTransferFrom(msg.sender, address(this), amt);
         uint256 sh = _sync(msg.sender);
         // Invariant: totalShares > 0 ⇒ total > 0, so this never divides by 0.
         uint256 minted = totalShares == 0 ? amt : (amt * totalShares) / total;
@@ -122,7 +125,7 @@ contract Stake {
         totalShares -= burn;
         total -= amt;
         _wipeIfEmpty();
-        wpit.transfer(msg.sender, amt);
+        IERC20(address(wpit)).safeTransfer(msg.sender, amt);
         emit Unstaked(msg.sender, amt);
     }
 
@@ -134,7 +137,7 @@ contract Stake {
         if (amt > total) amt = total;
         total -= amt;
         _wipeIfEmpty();
-        wpit.transfer(address(vault), amt);
+        IERC20(address(wpit)).safeTransfer(address(vault), amt);
         emit Slashed(amt);
         return amt;
     }

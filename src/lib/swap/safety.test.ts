@@ -174,3 +174,27 @@ test("safe target: empty calldata is blocked", async () => {
     /no calldata/,
   );
 });
+
+// ─────────────────── WP-10 / #14: aggregator input validation ─────────────────
+
+import { EVM_ADDRESS, cleanAddress } from "./actions";
+
+test("WP-10: token/taker fields must be EVM addresses", () => {
+  assert.equal(cleanAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"), "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+  // The 0x native-ETH sentinel is a valid 40-hex address and must survive.
+  assert.equal(cleanAddress("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"), "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
+  assert.equal(cleanAddress("  0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913  "), "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "trimmed");
+  for (const bad of ["", "USDC", "0x123", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA0291", "not-an-address", null, undefined, 42, {}, "0x" + "z".repeat(40)]) {
+    assert.equal(cleanAddress(bad), "", `rejected: ${String(bad)}`);
+  }
+  assert.ok(EVM_ADDRESS.test("0x" + "a".repeat(40)));
+  assert.ok(!EVM_ADDRESS.test("0x" + "a".repeat(39)));
+});
+
+test("WP-10: sellAmount must be positive integer base units", () => {
+  const ok = (v: string) => /^\d+$/.test(v) && !/^0+$/.test(v);
+  for (const good of ["1", "1000000", "999999999999999999"]) assert.ok(ok(good), good);
+  for (const bad of ["0", "00", "000", "", "-1", "1.5", "1e3", "abc", " 1"]) {
+    assert.ok(!ok(bad), `rejected: ${JSON.stringify(bad)}`);
+  }
+});

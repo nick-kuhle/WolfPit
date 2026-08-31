@@ -6,6 +6,67 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — issue triage: 13 fixes, 6 confirmed already-closed
+
+Worked all 28 open issues. The reviewer's own re-verification ran at `8d9e0b5`,
+four commits behind HEAD — `8ab4119`, `a31e77c`, `c33c054`, `fc7d8e3` had
+already closed four of the five criticals. Re-checked every finding against
+current source rather than trusting the report.
+
+- **Already fixed at HEAD, confirmed by reading the code (not the log):** WP-01
+  (`SimplePair` first-add counts supply once), WP-02 (`Stake` share-based,
+  slash is pro rata), WP-03 (`withdraw`/`previewWithdraw`/`maxWithdraw` exist),
+  WP-11 (`creditInsurance` pulls real USDC).
+- **Quant (M-01…M-09), all pinned by `src/lib/wolfpit/quant.test.ts`:**
+  - `ewmaRv` was reporting `E|r|`, not σ — measured **0.7992σ** at a known
+    σ=0.60 over 1,500 GBM paths, exactly √(2/π). Now scaled by `MAD_TO_SIGMA`
+    = √(π/2); measured **1.0017σ**. `IV = 1.08·rv` was a 13.8% *discount* on a
+    structurally short-gamma book; it is a premium again.
+  - λ is now derived from a stated half-life (`ewmaLambda(barSec, halfLifeMin)`,
+    default 4 h) instead of inheriting RiskMetrics' daily-bar 0.94, which is a
+    17-minute memory on 1-minute bars.
+  - **Rejected the 17-day λ the review proposed.** Lengthening λ without
+    lengthening the history makes dispersion worse, not better: measured
+    p05–p95 at known σ is 235%σ on 5 h of tape and still 212%σ on 48 h — worse
+    than λ=0.94 at every history length tested. Real fix is a longer bar
+    history; table recorded in `docs/MM.md`.
+  - `insuranceRatio` returns **0** on `nav <= 0` (was `1` = "fully insured" at
+    the moment of insolvency), matching `DealerVault.haltShortGamma`.
+  - Limits now bind the **realised average**: CPMM algebra inverted so a limit
+    partial-fills to the limit instead of over-filling. The review's 500-ETH
+    case printed 5015.05 against a 4000 limit; at limit 4100 it now fills
+    53.64 ETH at exactly 4100.00.
+  - One `freeVaultUsdc()` across five call sites — trader escrow no longer
+    cash-secures house puts.
+  - `Z99 = 2.5758` (two-sided; the review's "18.4% too low" is really 22.6%).
+  - Resting orders append (time priority) and the 41st is rejected rather than
+    silently evicting the oldest.
+  - `gammaCash1h` documented as 2× textbook (deliberate safety factor on
+    `GAMMA_NAV`); `bsPut` guards NaN like `bsCall`.
+- **Contracts:** `ERC20Base` (emits `Transfer`/`Approval` — WPIT inherited
+  `MockERC20`, which emitted neither, so indexers and exchange deposit
+  crediting could not see it move), `SafeERC20` (no discarded return values),
+  `TestERC20` replacing `MockERC20` in `Deployer`, `SimplePair` typed `IERC20`
+  with `minOut`/`deadline` on all four value paths and a `swap1for0`,
+  `Farm.totalShareBps` capped at 10 000, `acceptMinter` rejects a null
+  proposal. Deadline sentinel is `type(uint256).max`, not 0 — `block.timestamp`
+  can legitimately be 0/1 and an expired deadline must be representable.
+- **Keeper:** `--key` removed from the CLI (env only, plus `--key-file`); buffer
+  zeroized once the signer owns it.
+- **Docs:** README no longer claims "simulation only" — the swap desk builds
+  live Base mainnet transactions — and now states the owner/operator trust
+  model plainly. `MM.md` / `RISK.md` record the vol and z conventions.
+- **Deferred, with reasons:** OpenZeppelin vendoring (#4) — the suite is
+  forge-std-free and hand-rolled cheatcode interfaces; revisit before mainnet.
+  Server-side pause/geo-fence (#13) — the surfaces it gates are themselves
+  client-side simulation, so the control is cosmetic until orders are accepted
+  server-side; the live `spotQuote` path is the one that actually needs it.
+  Timelock + `exec` selector allowlist (#12).
+- Tape: forge 55 → **70**, cargo 11 → **13**, engine/auth/swap 171 → **198**.
+  tsc, eslint, `clippy -D warnings`, `npm run build` all clean.
+
+---
+
 ## 2026-08-31 (Mon) — v4 hook spec corrections (F1–F9, external review)
 
 External review of `HOOK.md` (c33c054) found fee-parity and v4-mechanics issues.

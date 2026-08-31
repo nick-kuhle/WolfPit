@@ -35,6 +35,7 @@ import {
 import {
   maybeCircuit,
   CIRCUIT_MS,
+  freeVaultUsdc,
   rejectFuture,
   rejectOption,
   smileVol,
@@ -512,6 +513,9 @@ export function miniQty(under = "ETH") {
   return 1;
 }
 
+/** M-09 / #26: hard cap on resting orders — the 41st is rejected, not evicted. */
+export const WORKING_ORDER_CAP = 40;
+
 function quoteTick(spot: number) {
   if (spot >= 100) return 0.4;
   if (spot >= 5) return 0.02;
@@ -530,8 +534,9 @@ export function strikeGrid(spot: number) {
   const round = (n: number) => Number((Math.round(n / step) * step).toPrecision(10));
   return [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((i) => round(atm + i * step)).filter((k) => k > 0);
 }
+/** M-07 / #23: single definition of deployable house cash — see `risk.freeVaultUsdc`. */
 function freeUsdc(s: EngineState) {
-  return Math.max(0, s.vault.usdc - s.vault.reservedUsdc - (s.vault.escrowUsdc ?? 0));
+  return freeVaultUsdc(s);
 }
 
 function listedUnder(under: string) {
@@ -546,7 +551,10 @@ function maxNetLongEth(s: EngineState) {
   return Math.max(0, s.vault.eth * UTIL_CAP - s.vault.reservedEth);
 }
 function maxNetShortEth(s: EngineState) {
-  return Math.max(0, (s.vault.usdc * UTIL_CAP) / s.eth - s.vault.reservedUsdc / s.eth);
+  // M-07 / #23: parity with risk.remainingCap — trader escrow cannot fund the
+  // house short book, so the α headroom is measured against deployable cash.
+  const deployable = Math.min(s.vault.usdc * UTIL_CAP, freeUsdc(s) + s.vault.reservedUsdc);
+  return Math.max(0, (deployable - s.vault.reservedUsdc) / s.eth);
 }
 
 export function spreadBps(s: EngineState) {
@@ -669,7 +677,16 @@ export function placeDeskOrder(
     if (typeof filled !== "string") return { ...filled, working: s.working };
     return filled;
   }
-  return { ...s, working: [order, ...(s.working ?? [])].slice(0, 40) };
+  // M-09 / #26: APPEND, so `matchWorking` (which iterates in list order) fills
+  // oldest-first — time priority, as on any venue where two orders compete for
+  // the same liquidity. The old code unshifted, matching the newest order first.
+  if ((s.working?.length ?? 0) >= WORKING_ORDER_CAP) {
+    return `Working order limit reached (${WORKING_ORDER_CAP}). Cancel one first.`;
+  }
+  // M-09 / #26: the old `.slice(0, 40)` silently DELETED the oldest resting
+  // order when a 41st arrived — a resting stop could vanish with no rejection
+  // and no cancel notice. Refuse instead; never drop an order without saying so.
+  return { ...s, working: [...(s.working ?? []), order] };
 }
 
 export function cancelWorking(s: EngineState, id: string): EngineState {
@@ -696,20 +713,73 @@ function wouldCross(s: EngineState, o: WorkingOrder) {
   return true;
 }
 
+/**
+ * M-08 / #22: a limit is a PRICE BOUND on the realised average, not merely a
+ * trigger. `wouldCross` only asks whether the market has reached the limit; the
+ * fill itself walks the AMM curve and used to ignore `o.limit` entirely, so a
+ * BUY LIMIT @ 4000 on a 500-ETH order against 2,500 ETH of depth filled at an
+ * average of 5,015 — 25.4% through the limit.
+ *
+ * Spot partials are solved exactly rather than rejected outright. For a CPMM
+ * with fee f, reserves (x = base, y = quote), the realised average is
+ *   buy : avg(bOut) = y / (f·(x − bOut))
+ *   sell: avg(bIn)  = f·y / (x + f·bIn)
+ * Inverting at avg = limit gives the largest size that still respects it:
+ *   buy : bOut* = x − y / (f·L)
+ *   sell: bIn*  = (f·y / L − x) / f
+ * Anything beyond that size would print past the limit, so we cap there.
+ */
+function limitCappedSpotQty(
+  pool: EngineState["pools"][string],
+  side: "buy" | "sell",
+  qty: number,
+  limit: number | undefined,
+): number {
+  if (!limit || !(limit > 0) || !Number.isFinite(limit)) return qty;
+  const f = 1 - pool.feeBps / 10_000;
+  const x = pool.baseReserve;
+  const y = pool.quoteReserve;
+  if (!(x > 0) || !(y > 0) || !(f > 0)) return qty;
+  const cap = side === "buy" ? x - y / (f * limit) : (f * y) / limit / f - x / f;
+  const sized = Math.min(qty, side === "buy" ? cap : (f * y) / limit / f - x / f);
+  return sized > 0 ? sized : 0;
+}
+
+function limitPriceOf(o: WorkingOrder): number | undefined {
+  return o.kind === "lmt" || o.kind === "stl" ? o.limit : undefined;
+}
+
 function tryFill(s: EngineState, o: WorkingOrder): EngineState | string {
   const under = o.under ?? "ETH";
+  const limit = limitPriceOf(o);
   if (o.product === "spot") {
     const poolId = o.poolId ?? "ETH-USDC";
     const pool = s.pools[poolId];
     if (!pool) return "Unknown pool.";
     if (o.side === "buy") {
-      const quote = quoteInForBaseOut(pool, o.qty);
+      const wantBase = limitCappedSpotQty(pool, "buy", o.qty, limit);
+      if (!(wantBase > 0)) return "Limit not met: the book cannot fill any size at that price.";
+      const quote = quoteInForBaseOut(pool, wantBase);
       if (!Number.isFinite(quote)) return "Size too large for pool.";
+      // Defence in depth: verify the realised average, never trust the algebra.
+      if (limit && quote / wantBase > limit + 1e-9) return "Limit not met.";
       return tradeSpot(s, poolId, "buy", quote);
     }
-    return tradeSpot(s, poolId, "sell", o.qty);
+    const wantBase = limitCappedSpotQty(pool, "sell", o.qty, limit);
+    if (!(wantBase > 0)) return "Limit not met: the book cannot fill any size at that price.";
+    const out = ammOut(wantBase, pool.baseReserve, pool.quoteReserve, pool.feeBps);
+    if (limit && out / wantBase < limit - 1e-9) return "Limit not met.";
+    return tradeSpot(s, poolId, "sell", wantBase);
   }
   if (o.product === "future") {
+    // Futures print at mark ± spread, so the realised price is known up front.
+    if (limit) {
+      const mark = markOf(s, under);
+      const bps = spreadBps(s);
+      const px = o.side === "buy" ? mark * (1 + bps / 10_000) : mark * (1 - bps / 10_000);
+      if (o.side === "buy" && px > limit + 1e-9) return "Limit not met.";
+      if (o.side === "sell" && px < limit - 1e-9) return "Limit not met.";
+    }
     const contracts = o.qty;
     const side = o.side === "buy" ? "long" : "short";
     return tradeFuture(s, side, contracts, o.expiry ?? expiries(s.clock)[0]!.at, under);
@@ -719,7 +789,11 @@ function tryFill(s: EngineState, o: WorkingOrder): EngineState | string {
     const spot = markOf(s, under);
     const ks = strikeGrid(spot);
     const strike = o.strike ?? ks[Math.floor(ks.length / 2)]!;
-    return buyOption(s, o.optType ?? "call", strike, o.expiry ?? expiries(s.clock)[0]!.at, o.qty, under);
+    const expiry = o.expiry ?? expiries(s.clock)[0]!.at;
+    const type = o.optType ?? "call";
+    // The premium per ETH is the ask, so the realised average is the ask itself.
+    if (limit && optionQuote(s, type, strike, expiry, under).ask > limit + 1e-9) return "Limit not met.";
+    return buyOption(s, type, strike, expiry, o.qty, under);
   }
   return "Unknown product.";
 }
@@ -899,8 +973,9 @@ export function hedgeDelta(s: EngineState): EngineState {
   } else {
     const want = Math.min(step, pool.baseReserve * MAX_POOL_FRAC);
     const cost = quoteInForBaseOut(pool, want);
-    const freeUsdc = Math.max(0, vault.usdc - vault.reservedUsdc);
-    if (!Number.isFinite(cost) || cost > freeUsdc || want < 0.005) return arbToSpot(refreshQuotes({ ...s, vault }));
+    // M-07 / #23: the hedge must not spend trader escrow either.
+    const deployable = freeVaultUsdc({ ...s, vault });
+    if (!Number.isFinite(cost) || cost > deployable || want < 0.005) return arbToSpot(refreshQuotes({ ...s, vault }));
     const slipBps = Math.abs(cost / want / Math.max(s.eth, 1e-9) - 1) * 10_000;
     if (!urgent && slipBps > Math.max(halfSpreadBps, 5)) {
       return arbToSpot(refreshQuotes({ ...s, vault }));
@@ -949,7 +1024,7 @@ export function rebalanceWeights(s: EngineState): EngineState {
   } else {
     const buy = Math.min(want, stepCap);
     const cost = quoteInForBaseOut(pool, buy);
-    const free = Math.max(0, vault.usdc - vault.reservedUsdc - (vault.escrowUsdc ?? 0));
+    const free = freeVaultUsdc({ ...s, vault });
     if (!Number.isFinite(cost) || cost > free || buy < 0.005) return s;
     const slipBps = Math.abs(cost / buy / s.eth - 1) * 10_000;
     if (slipBps > pool.feeBps + 30) return s;

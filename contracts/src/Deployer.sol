@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {MockERC20} from "./mocks/MockERC20.sol";
+import {TestERC20} from "./TestERC20.sol";
 import {MockOracle} from "./mocks/MockOracle.sol";
 import {IERC20, IOracle} from "./DealerVault.sol";
 import {WPIT} from "./WPIT.sol";
@@ -20,8 +20,8 @@ import {Stake} from "./Stake.sol";
 ///         the end. The deployer must complete the handoff with
 ///         `vault.acceptOwnership()` (operator is theirs from the start).
 contract Deployer {
-    MockERC20 public usdc;
-    MockERC20 public weth;
+    TestERC20 public usdc;
+    TestERC20 public weth;
     WPIT public wpit;
     DealerVault public vault;
     SimplePair public wpitUsdc;
@@ -30,8 +30,8 @@ contract Deployer {
     Stake public stake;
 
     constructor(bool withWpit) {
-        usdc = new MockERC20("USD Coin", "USDC", 6);
-        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        usdc = new TestERC20("USD Coin", "USDC", 6);
+        weth = new TestERC20("Wrapped Ether", "WETH", 18);
         MockOracle oracle = new MockOracle(4_000e6);
         vault = new DealerVault(
             IERC20(address(usdc)),

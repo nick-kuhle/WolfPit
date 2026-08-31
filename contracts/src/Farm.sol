@@ -2,7 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {WPIT} from "./WPIT.sol";
-import {DealerVault} from "./DealerVault.sol";
+import {DealerVault, IERC20} from "./DealerVault.sol";
+import {SafeERC20} from "./SafeERC20.sol";
 
 /// @notice Gauge weights 70 / 20 / 10. Harvest tax 1% → insurance.
 ///         Not deployed at Base launch (no WPIT) — kept for the token era.
@@ -15,6 +16,8 @@ import {DealerVault} from "./DealerVault.sol";
 ///         it — never a user-supplied value. The util factor comes from the
 ///         vault itself (`vault.utilBps()`), never from a caller.
 contract Farm {
+    using SafeERC20 for IERC20;
+
     WPIT public immutable wpit;
     DealerVault public immutable vault;
     address public owner;
@@ -30,6 +33,11 @@ contract Farm {
     mapping(address => uint256) public shareBps;
     /// @notice `totalAcc` value the user's `shareBps` was last settled at.
     mapping(address => uint256) public accBase;
+    /// @notice Running sum of every gauge's `shareBps` (WP-04 / #7). The farm
+    ///         must never promise more than it mints: with only a per-gauge cap,
+    ///         three gauges at 100% each accrued the full emission and the farm
+    ///         owed 3x what `notify()` minted, paid first-come-first-served.
+    uint256 public totalShareBps;
 
     error NotOwner();
     error BadBps();
@@ -72,9 +80,15 @@ contract Farm {
 
     /// @notice Set a user's gauge share (bps of the accrual pool). Settles the
     ///         previous share first, so changing a share can never pay twice.
+    ///         WP-04 / #7: the SUM across all gauges is capped at 10_000 bps,
+    ///         not just each gauge individually — otherwise the farm accrues
+    ///         more than it minted and the earliest harvester takes everything.
     function setShare(address user, uint256 bps) external onlyOwner {
         if (bps > 10_000) revert BadBps();
         _checkpoint(user);
+        uint256 next = totalShareBps - shareBps[user] + bps;
+        if (next > 10_000) revert BadBps();
+        totalShareBps = next;
         shareBps[user] = bps;
         emit ShareSet(user, bps);
     }
@@ -101,9 +115,9 @@ contract Farm {
         tax = due / 100;
         net = due - tax;
         if (tax > 0) {
-            wpit.transfer(address(vault), tax);
+            IERC20(address(wpit)).safeTransfer(address(vault), tax);
             vault.creditInsuranceWpit(tax);
         }
-        if (net > 0) wpit.transfer(msg.sender, net);
+        if (net > 0) IERC20(address(wpit)).safeTransfer(msg.sender, net);
     }
 }

@@ -72,6 +72,26 @@ export function poolDepth(s: EngineState, under: string): number {
   return p?.baseReserve ?? 0;
 }
 
+/**
+ * ONE definition of deployable house cash (M-07 / #23).
+ *
+ * `escrowUsdc` is TRADER MARGIN — money the vault holds *for* someone else, and
+ * which its own settlement paths (`reduceFuture`, `liquidateFuture`,
+ * `settleAndLiq`, `closeOption`) all refuse to spend. Counting it as collateral
+ * would let the same dollar back a trader's position AND a house short put at
+ * the same time, so the put would not be cash-secured at all.
+ *
+ * This helper exists because the definition used to be written out by hand in
+ * five places and the risk gate's copy omitted escrow: with 10,000,000 vault
+ * USDC and 9,999,000 of it trader escrow, `rejectOption` accepted a put against
+ * 1,000 of genuinely free cash. Every site now calls this.
+ */
+export function freeVaultUsdc(s: EngineState): number {
+  const v = s.vault;
+  const free = v.usdc - v.reservedUsdc - (v.escrowUsdc ?? 0);
+  return Number.isFinite(free) ? Math.max(0, free) : 0;
+}
+
 /** IM as a fraction of notional. Rises with size vs cover and vs pool depth so we only book what we can hedge. */
 export function imRate(s: EngineState, size: number, under: string): number {
   const cover = Math.max(grossCover(s, under, "long"), grossCover(s, under, "short"), 1e-9);
@@ -81,9 +101,21 @@ export function imRate(s: EngineState, size: number, under: string): number {
   return clamp(0.25 + 0.3 * uCover * uCover + 0.45 * uPool, 0.25, 0.75);
 }
 
+/**
+ * Insurance cover as a fraction of NAV.
+ *
+ * M-06 / #21: a non-positive NAV is ZERO coverage, not full coverage. The old
+ * `nav <= 0 ? 1` guard returned 1 — "fully insured" — at the exact moment the
+ * vault became insolvent, and `haltShortGamma()` (ratio < 1%) then let the desk
+ * keep writing short gamma into a hole. `DealerVault.haltShortGamma()` in
+ * Solidity already fails closed here (`if (nav == 0) return true`); the engine
+ * must agree with the contract on the failure case that matters most.
+ */
 export function insuranceRatio(s: EngineState) {
   const nav = vaultNav(s);
-  return nav <= 0 ? 1 : (s.insuranceUsdc ?? 0) / nav;
+  if (!Number.isFinite(nav) || nav <= 0) return 0;
+  const ins = s.insuranceUsdc ?? 0;
+  return Number.isFinite(ins) ? Math.max(0, ins) / nav : 0;
 }
 
 export function circuitActive(s: EngineState) {
@@ -115,12 +147,27 @@ export function spotFeeBps(rv: number) {
 }
 
 export function gammaCash1h(gammaAbs: number, spot: number, iv: number) {
+  // CONVENTION (M-04 / #27): this deliberately returns 2× the textbook expected
+  // gamma cash over one hour. Expected gamma P&L is ½·Γ·S²·σ²·Δt; the ½ is
+  // OMITTED on purpose so the Γ cap (GAMMA_NAV = 2% NAV) binds at half the
+  // documented exposure — a 2× safety factor, not a bug.
+  // `hedgeError99` below uses the textbook ½ because it is a tail estimate, not
+  // a cap. The two conventions are stated here and there so a later "cleanup"
+  // cannot silently halve the Γ limit by making them agree.
   return Math.abs(gammaAbs) * spot * spot * iv * iv * DT_1H;
 }
 
 /** Stress vol for the insurance-vs-hedge-error test (MM.md: "under 80% ETH vol"). */
 const HE_STRESS_VOL = 0.8;
-const Z99 = 2.326;
+/**
+ * TWO-SIDED 99th percentile of |Z| (M-03 / #24). A short-gamma book loses on a
+ * move in EITHER direction, so the relevant quantile is of |Z| — 2.5758, i.e.
+ * Φ⁻¹(0.995) — not the one-sided Φ⁻¹(0.99) = 2.326. Because the hedge error
+ * scales with ΔS², using the one-sided value understated the insurance
+ * requirement by (2.5758/2.3263)² − 1 = 22.6%, letting the book run ~23% more
+ * short gamma than policy allows. Do not "correct" this back to 2.326.
+ */
+const Z99 = 2.5758;
 
 /**
  * 99th-percentile 1-hour hedge error at the stress vol (MM.md):
@@ -197,9 +244,20 @@ export function haltShortGamma(s: EngineState) {
   return insuranceRatio(s) < INSURANCE_NAV_MIN || circuitActive(s);
 }
 
+/**
+ * Room left on one side of the inventory book, in ETH (M-07 / #23).
+ *
+ * Long side: the α law reserves ETH cover, so room is `α·vault.ETH − reservedEth`.
+ * Short side: the α law allows `α·vault.USDC` of reservations, but only
+ * DEPLOYABLE cash can fund them — `escrowUsdc` is trader margin the vault holds
+ * for someone else and its own settlement paths refuse to spend. Counting escrow
+ * here inflated the cap for every short-side fill, so utilisation was measured
+ * against money the house could not deploy.
+ */
 function remainingCap(s: EngineState, side: FutSide) {
   if (side === "long") return Math.max(0, s.vault.eth * UTIL_CAP - s.vault.reservedEth);
-  return Math.max(0, (s.vault.usdc * UTIL_CAP) / s.eth - s.vault.reservedUsdc / s.eth);
+  const deployable = Math.min(s.vault.usdc * UTIL_CAP, freeVaultUsdc(s) + s.vault.reservedUsdc);
+  return Math.max(0, (deployable - s.vault.reservedUsdc) / s.eth);
 }
 
 
@@ -263,8 +321,11 @@ export function rejectOption(
     if (free < sizeEth) return "Vault will not sell a naked call. Not enough free ETH to cover.";
   } else {
     const lock = strike * sizeEth;
-    const free = Math.max(0, s.vault.usdc - s.vault.reservedUsdc);
-    if (free < lock) return "Vault will not sell a naked put. Not enough USDC to cash-secure.";
+    // M-07 / #23: cash-secured means secured with the HOUSE's own deployable
+    // cash. `freeVaultUsdc` subtracts trader escrow; the old inline
+    // `usdc − reservedUsdc` did not, so a put could be "secured" with money the
+    // vault was already holding on a trader's behalf.
+    if (freeVaultUsdc(s) < lock) return "Vault will not sell a naked put. Not enough USDC to cash-secure.";
   }
   if (projectedExpiryExposure(s, expiry, { type, sizeEth }) > s.vault.eth * OI_EXPIRY + 1e-9) {
     return "OI cap on this expiry (25% of vault ETH).";

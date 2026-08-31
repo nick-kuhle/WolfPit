@@ -8,6 +8,20 @@ function clean(v: unknown): string {
 }
 
 /**
+ * WP-10 / #14: the validator used to pass `sellToken`, `buyToken` and `taker`
+ * straight through as trimmed strings. They are forwarded to a PAID, billed
+ * aggregator endpoint (and `taker` is used as an on-chain `balanceOf` argument),
+ * so garbage must be rejected here rather than spending quota on a request that
+ * cannot succeed — and a malformed `taker` must never reach an RPC call.
+ */
+export const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+export function cleanAddress(v: unknown): string {
+  const s = clean(v);
+  return EVM_ADDRESS.test(s) ? s : "";
+}
+
+/**
  * Per-IP throttle for the aggregator proxy server fns. The 0x API key is a
  * paid, rate-limited quota and DexScreener's keyless fallback is a SHARED
  * public limit (300 req/min across all consumers) — an unthrottled endpoint
@@ -43,10 +57,10 @@ export const spotQuote = createServerFn({ method: "POST" })
   .validator((d: QuoteRequest): QuoteRequest => {
     return {
       chainId: typeof d.chainId === "number" && isSupportedChain(d.chainId) ? d.chainId : DEFAULT_CHAIN_ID,
-      sellToken: clean(d.sellToken),
-      buyToken: clean(d.buyToken),
+      sellToken: cleanAddress(d.sellToken),
+      buyToken: cleanAddress(d.buyToken),
       sellAmount: clean(d.sellAmount),
-      taker: d.taker ? clean(d.taker) : undefined,
+      taker: d.taker ? cleanAddress(d.taker) || undefined : undefined,
       // Same bounds the UI clamps to (config.SLIPPAGE_MIN/MAX_BPS): the
       // tolerance a user sees is the tolerance that executes (review fix F2).
       slippageBps:
@@ -57,6 +71,14 @@ export const spotQuote = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<QuoteResult> => {
+    // WP-10 / #14: validate BEFORE the throttle counter and before any upstream
+    // 0x call — a malformed request must cost nothing, billed or otherwise.
+    if (!data.sellToken || !data.buyToken) {
+      return { ok: false, error: "Both tokens must be valid contract addresses." };
+    }
+    if (!/^\d+$/.test(data.sellAmount) || /^0+$/.test(data.sellAmount)) {
+      return { ok: false, error: "Amount must be a positive integer in token base units." };
+    }
     if (await throttled(await callerIpOf(), "rpcq")) {
       return { ok: false, error: "Too many quote requests. Wait a moment and try again." };
     }

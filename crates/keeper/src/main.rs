@@ -61,9 +61,20 @@ struct Args {
     /// Chain label for logs (base | base-sepolia | anvil).
     #[arg(long, env = "WOLFPIT_CHAIN", default_value = "base")]
     chain: String,
-    /// Operator private key (hex). Without it, txn commands dry-run encode.
-    #[arg(long, env = "WOLFPIT_KEEPER_KEY")]
+    /// Operator private key (hex). ENVIRONMENT ONLY — deliberately NOT exposed
+    /// as a `--key` flag (WP-14 / #19): argument vectors are not secret. Any
+    /// local user can read them from `ps`, they land in shell history, and they
+    /// routinely end up in process-monitoring agents, crash dumps and CI logs.
+    /// This is the operator hot key; per WP-05 it can move the vault's whole
+    /// balance, so it gets the same care as the funds.
+    /// Prefer `--key-file` (or a KMS/hardware signer in production) over
+    /// putting the material in the environment at all.
+    #[arg(env = "WOLFPIT_KEEPER_KEY")]
     key: Option<String>,
+    /// Read the operator private key (hex) from this file instead of the
+    /// environment. The file should be mode 0600 and never committed.
+    #[arg(long, env = "WOLFPIT_KEEPER_KEY_FILE")]
+    key_file: Option<String>,
     /// Monitor loop: seconds between checks (0 = 30s default).
     #[arg(long, default_value = "0")]
     interval: u64,
@@ -106,6 +117,22 @@ enum Cmd {
     ReleaseCall { size_eth: String },
     /// Pulse: read state each interval; fail closed — pause when halted.
     Monitor,
+}
+
+/// WP-14 / #19: best-effort wipe of key material held in a `String`.
+///
+/// `String::as_bytes_mut` hands back the live buffer; overwrite it, then drop
+/// the capacity so the freed allocation is less likely to be reused intact.
+/// This is a mitigation, not a guarantee — the allocator may have copied the
+/// bytes elsewhere, which is exactly why production belongs in a hardware
+/// signer or KMS rather than in this process at all.
+fn zeroize_key(secret: &mut String) {
+    // SAFETY: writing only ASCII '0' bytes keeps the buffer valid UTF-8.
+    for b in unsafe { secret.as_bytes_mut() }.iter_mut() {
+        *b = b'0';
+    }
+    secret.clear();
+    secret.shrink_to_fit();
 }
 
 /// ETH value in wei, from a decimal string of whole ETH.
@@ -215,12 +242,27 @@ async fn run(args: &Args) -> Result<()> {
     }
 
     // Everything that can transact (and a keyed status) uses the signer.
-    let key = args
-        .key
-        .as_deref()
-        .ok_or_else(|| eyre!("this command needs WOLFPIT_KEEPER_KEY (operator private key)"))?;
-    let signer: PrivateKeySigner =
-        key.parse().map_err(|_| eyre!("WOLFPIT_KEEPER_KEY is not a valid private key (64 hex chars)"))?;
+    // WP-14 / #19: resolve the key from the file (preferred) or the
+    // environment, then ZEROIZE the buffer as soon as the signer owns it, so
+    // the material does not linger in process memory for the life of the run.
+    let mut key_buf = match (args.key_file.as_deref(), args.key.as_deref()) {
+        (Some(path), _) => std::fs::read_to_string(path)
+            .map_err(|e| eyre!("cannot read WOLFPIT_KEEPER_KEY_FILE {path}: {e}"))?,
+        (None, Some(k)) => k.to_string(),
+        (None, None) => {
+            return Err(eyre!(
+                "this command needs WOLFPIT_KEEPER_KEY or --key-file (operator private key)"
+            ))
+        }
+    };
+    let signer: PrivateKeySigner = {
+        let parsed = key_buf
+            .trim()
+            .parse()
+            .map_err(|_| eyre!("operator key is not a valid private key (64 hex chars)"));
+        zeroize_key(&mut key_buf);
+        parsed?
+    };
     let p = ProviderBuilder::new().wallet(EthereumWallet::from(signer)).connect_http(rpc.parse()?);
     let c = IDealerVault::new(vault, p);
 
@@ -507,6 +549,28 @@ mod tests {
         .abi_encode();
         assert_eq!(&data[..4], IDealerVault::execCall::SELECTOR);
         assert_eq!(data.len(), 4 + 32 * 2 + 32 + 32); // head 2×32 + len + padded data
+    }
+
+    #[test]
+    fn zeroize_key_wipes_the_buffer() {
+        let mut s = "0xdeadbeefdeadbeefdeadbeefdeadbeef".to_string();
+        let len = s.len();
+        zeroize_key(&mut s);
+        assert_eq!(s.len(), 0, "cleared");
+        assert_eq!(s.capacity(), 0, "capacity released");
+        assert!(!s.contains("deadbeef"));
+        let _ = len;
+    }
+
+    #[test]
+    fn key_is_not_a_cli_flag() {
+        // WP-14 / #19: `--key 0x...` must no longer parse. clap rejects unknown
+        // flags, so the parse of a Args-shaped command line carrying --key fails.
+        let parsed = Args::try_parse_from(["wolfpit-keeper", "--key", "0xabc", "status"]);
+        assert!(parsed.is_err(), "--key must not be accepted on the command line");
+        // The env-only path still exists.
+        let ok = Args::try_parse_from(["wolfpit-keeper", "status"]);
+        assert!(ok.is_ok());
     }
 
     #[test]

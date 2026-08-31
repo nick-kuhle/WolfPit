@@ -26,7 +26,16 @@ export function bsCall(S: number, K: number, T: number, r: number, sig: number) 
   return S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2);
 }
 
+/**
+ * Mirror of `bsCall`'s input guard (M-05 / #28): a non-finite or non-positive
+ * S/K must return 0, NOT NaN. The near-expiry branch returns `K - S` directly
+ * and the main branch returns `call - S + K·e^{-rT}`, so an unguarded NaN here
+ * propagates into `vaultNav` — and every comparison against NaN is false, which
+ * would silently disarm the Γ, ν and insurance caps at once. A guard that fails
+ * open on the risk limits is worse than the NaN itself.
+ */
 export function bsPut(S: number, K: number, T: number, r: number, sig: number) {
+  if (!(S > 0) || !(K > 0) || !Number.isFinite(S) || !Number.isFinite(K)) return 0;
   if (T <= 1 / 365 / 24) return Math.max(K - S, 0);
   const call = bsCall(S, K, T, r, sig);
   return call - S + K * Math.exp(-r * T);
@@ -109,14 +118,60 @@ export function ivSmile(atm: number, S: number, K: number, T: number) {
 }
 
 /**
- * Realized vol per MM.md: `RV_t = λ·RV_{t-1} + (1-λ)·|r_t|` with λ = 0.94 —
- * an EWMA of ABSOLUTE log returns (RiskMetrics-style), not an equal-weighted
- * sample stdev. Old vol decays geometrically so the dealer reacts to fresh
- * vol shifts instead of averaging them away.
+ * EWMA of ABSOLUTE log returns (RiskMetrics-style), annualised and converted to
+ * a Black-Scholes σ.
+ *
+ * Two corrections live here, both measured by Monte-Carlo (see #20 / M-01 and
+ * #25 / M-02):
+ *
+ * 1. MEAN-ABSOLUTE-DEVIATION → σ (M-01). An EWMA of |r| converges to E|r|, not
+ *    to σ. For a normal return E|r| = σ·√(2/π) ≈ 0.7979σ, so the raw estimator
+ *    reported 79.8% of true vol. `iv = 1.08·rv` was therefore a 13.8% DISCOUNT
+ *    on a book that is structurally short gamma. `MAD_TO_SIGMA = √(π/2)`
+ *    rescales it; at σ=0.60 over 4,000 paths the corrected mean is 1.0000×σ.
+ *
+ * 2. λ IS DERIVED FROM TIME, NOT INHERITED (M-02). RiskMetrics calibrated
+ *    λ=0.94 for DAILY bars, where it is a ~1-month window. On 1-minute bars the
+ *    same constant is 1/(1−λ) ≈ 17 bars — a seventeen-minute memory pricing
+ *    weekly options. We now state a HALF-LIFE in minutes and derive
+ *    λ = 0.5^(bar/halfLife), so the memory is a deliberate choice that survives
+ *    a change of bar interval.
+ *
+ * NOTE on dispersion (M-02, corrected): lengthening λ does NOT by itself reduce
+ * estimator noise — it makes it worse unless the history covers the window.
+ * The live feed supplies ~300 one-minute bars (~5 h). Measured p05–p95 spread at
+ * a known σ=0.60, after the √(π/2) correction:
+ *
+ *   λ / half-life      eff. bars   5 h history   48 h history   336 h history
+ *   0.94      (17 min)      17        42%σ          43%σ           42%σ
+ *   0.9971    (4 h)        347       100%σ          10%σ           10%σ
+ *   0.9995    (24 h)      2078       206%σ          59%σ            4%σ
+ *   0.99996   (17 d)     25000       235%σ         212%σ          106%σ
+ *
+ * The 17-day λ suggested in #25 is therefore rejected: with a window far longer
+ * than the history the accumulator is still dominated by its first observation
+ * and the estimate is near-meaningless. `RV_HALF_LIFE_MIN` is set to a window
+ * the feed can actually fill, and the real fix for dispersion is to feed a
+ * longer history (a separate 1h-bar series), not to tune λ upward.
  */
-export function ewmaRv(candles: { t: number; c: number }[]) {
+export const MAD_TO_SIGMA = Math.sqrt(Math.PI / 2);
+
+/** Default vol memory: 4 hours, expressed in minutes, not as a bare decimal. */
+export const RV_HALF_LIFE_MIN = 240;
+
+/** λ for a given bar length and half-life: λ = 0.5^(bar/halfLife). */
+export function ewmaLambda(barSec: number, halfLifeMin = RV_HALF_LIFE_MIN): number {
+  const bars = Math.max(barSec, 1) / (halfLifeMin * 60);
+  return Math.pow(0.5, bars);
+}
+
+export function ewmaRv(
+  candles: { t: number; c: number }[],
+  halfLifeMin = RV_HALF_LIFE_MIN,
+) {
   if (candles.length < 8) return 0.55;
-  const lambda = 0.94;
+  const barSec = Math.max(1, (candles[1]!.t - candles[0]!.t) / 1000);
+  const lambda = ewmaLambda(barSec, halfLifeMin);
   let ewma = 0;
   let n = 0;
   for (let i = 1; i < candles.length; i++) {
@@ -129,7 +184,7 @@ export function ewmaRv(candles: { t: number; c: number }[]) {
     }
   }
   if (n === 0) return 0.55;
-  const barSec = Math.max(1, (candles[1]!.t - candles[0]!.t) / 1000);
-  const annual = ewma * Math.sqrt((365.25 * 24 * 3600) / barSec);
+  const annual =
+    ewma * MAD_TO_SIGMA * Math.sqrt((365.25 * 24 * 3600) / barSec);
   return Math.min(2, Math.max(0.15, annual));
 }

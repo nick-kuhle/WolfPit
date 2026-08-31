@@ -6,6 +6,7 @@ interface IERC20 {
     function transferFrom(address from, address to, uint256 amt) external returns (bool);
     function approve(address spender, uint256 amt) external returns (bool);
     function balanceOf(address who) external view returns (uint256);
+    function decimals() external view returns (uint8);
 }
 
 /// @notice Minimal junior-tranche interface (Stake) the vault may slash.
@@ -20,6 +21,8 @@ interface IOracle {
     function ethUsdc() external view returns (uint256);
 }
 
+import {SafeERC20} from "./SafeERC20.sol";
+
 /// @notice WolfPit dealer vault. Base-shaped (WETH + native USDC).
 ///         Single tranche. Inventory law: reservedETH ≤ α·ethBal,
 ///         reservedUSDC ≤ α·usdcBal with α = 40%.
@@ -32,6 +35,8 @@ interface IOracle {
 ///         No WPIT, no pool, no derivatives are required at launch: the vault
 ///         can run as a hedged spot desk (aggregator route) on day one.
 contract DealerVault {
+    using SafeERC20 for IERC20;
+
     uint256 public constant ALPHA_BPS = 4_000; // α = 40%
     uint256 public constant WAD = 1e18;
     uint256 public constant INSURANCE_NAV_MIN_BPS = 100; // < 1% insurance/NAV halts new short gamma
@@ -180,7 +185,9 @@ contract DealerVault {
     ///         it is NOT added to `usdcBal` and does not mint shares.
     function creditInsurance(uint256 usdcAmt) external onlyOwner {
         if (usdcAmt == 0) revert Zero();
-        if (!usdc.transferFrom(msg.sender, address(this), usdcAmt)) revert UnreconciledLoss();
+        // WP-09 / #10: a false/reverting transfer must not silently credit an
+        //        unbacked insurance ledger entry (WP-11 / #15).
+        usdc.safeTransferFrom(msg.sender, address(this), usdcAmt);
         insuranceUsdc += usdcAmt;
         emit InsuranceCredited(usdcAmt, 0);
     }
@@ -225,7 +232,7 @@ contract DealerVault {
     /// @notice Owner grants token allowances to allowlisted routers only.
     function setAllowance(IERC20 token, address spender, uint256 amount) external onlyOwner {
         if (!allowedTarget[spender]) revert BadTarget();
-        token.approve(spender, amount); // IERC20-minimal: extend with safeApprove in prod if needed
+        token.safeApprove(spender, amount); // WP-09 / #10
         emit AllowanceSet(address(token), spender, amount);
     }
 
@@ -294,11 +301,11 @@ contract DealerVault {
         if (shares == 0 && value < MIN_FIRST_DEPOSIT_USDC) revert FirstDepositTooSmall();
         uint256 navPre = shares == 0 ? 0 : navUsdc(); // pre-deposit NAV (anti-dilution)
         if (ethAmt > 0) {
-            weth.transferFrom(msg.sender, address(this), ethAmt);
+            weth.safeTransferFrom(msg.sender, address(this), ethAmt);
             ethBal += ethAmt;
         }
         if (usdcAmt > 0) {
-            usdc.transferFrom(msg.sender, address(this), usdcAmt);
+            usdc.safeTransferFrom(msg.sender, address(this), usdcAmt);
             usdcBal += usdcAmt;
         }
         uint256 minted = (value * (shares + VIRTUAL_SHARES)) / (navPre + VIRTUAL_NAV);
@@ -364,8 +371,8 @@ contract DealerVault {
         // Inventory law: remaining balances must still cover reserves at α.
         if (reservedEth * 10_000 > ethBal * ALPHA_BPS) revert UtilCap();
         if (reservedUsdc * 10_000 > usdcBal * ALPHA_BPS) revert UtilCap();
-        if (ethOut > 0) weth.transfer(msg.sender, ethOut);
-        if (usdcOut > 0) usdc.transfer(msg.sender, usdcOut);
+        if (ethOut > 0) weth.safeTransfer(msg.sender, ethOut);
+        if (usdcOut > 0) usdc.safeTransfer(msg.sender, usdcOut);
         emit Withdraw(msg.sender, ethOut, usdcOut, shareAmt);
     }
 
