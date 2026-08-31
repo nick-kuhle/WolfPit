@@ -42,7 +42,15 @@ export function SwapChart({ swap, height = 240 }: { swap: ReturnType<typeof useS
 
   const quoteTok = subject.symbol === sell.symbol ? buy : sell;
 
-  /** Live executable pair rate in human units, from the aggregator quote. */
+  /**
+   * Live executable pair rate in human units, from the aggregator quote,
+   * ORIENTED as the header reads it: quoteTok per 1 subject (subject / quoteTok).
+   *
+   * The raw quote gives buy-per-sell. That equals subject/quoteTok only when the
+   * subject IS the sell leg; when the subject is the buy leg (e.g. paying USDC to
+   * buy ETH) we must invert, otherwise the headline shows ETH-per-USDC (~0.00025)
+   * while the chart shows ETH/USD (~4000) — a number contradicting its own axis.
+   */
   const liveRate = useMemo(() => {
     if (!quote || !quote.ok) return null;
     const buyN = Number(quote.buyAmount);
@@ -51,9 +59,12 @@ export function SwapChart({ swap, height = 240 }: { swap: ReturnType<typeof useS
     // Base-unit ratio → human units: decimals of the sell side cancel against
     // the buy side only after shifting by their difference.
     const shift = 10 ** (sell.decimals - buy.decimals);
-    const r = (buyN / sellN) * shift;
+    const buyPerSell = (buyN / sellN) * shift; // buy-token per sell-token
+    if (!Number.isFinite(buyPerSell) || buyPerSell <= 0) return null;
+    // Orient to subject/quoteTok: subject=sell → buyPerSell; subject=buy → invert.
+    const r = subject.symbol === sell.symbol ? buyPerSell : 1 / buyPerSell;
     return Number.isFinite(r) && r > 0 ? r : null;
-  }, [quote, sell.decimals, buy.decimals]);
+  }, [quote, sell.decimals, buy.decimals, sell.symbol, subject.symbol]);
 
   // Latest live rate without re-running the candle fetch on every quote
   // refresh (the quote updates as the user types; candle history does not).
