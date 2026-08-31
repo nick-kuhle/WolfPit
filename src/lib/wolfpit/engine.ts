@@ -3,7 +3,6 @@ import {
   DERIV_FEE,
   DERIV_UNDERS,
   FUT_IM,
-  FUT_MM,
   INSURANCE_SEED,
   MINI_ETH,
   PoolId,
@@ -17,9 +16,6 @@ import {
   type FutSide,
   type OptType,
   type WorkingOrder,
-  type DeskSide,
-  type OrderKind,
-  type Tif,
 } from "./types";
 import {
   ammOut,
@@ -33,26 +29,23 @@ import {
   ivSmile,
   monthEnd,
   nextFriday,
-  randn,
   uid,
   yearsTo,
 } from "./math";
 import {
   maybeCircuit,
   CIRCUIT_MS,
-  maxFillEth,
   rejectFuture,
   rejectOption,
   smileVol,
   spotFeeBps,
   vaultNav,
-  grossCover,
   imRate,
   poolDepth,
 } from "./risk";
 
 // Moved to risk.ts (F12): the reject path charges the same IM slope as the fill.
-export { grossCover, imRate, poolDepth } from "./risk";
+export { imRate } from "./risk";
 import {
   APY_TVL_FLOOR,
   EMIT_PX_CAP,
@@ -83,7 +76,7 @@ function nrand(r: () => number) {
   return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
 
-export const T0 = Date.UTC(2026, 7, 25, 20, 0, 0);
+const T0 = Date.UTC(2026, 7, 25, 20, 0, 0);
 
 export function initialState(now = T0): EngineState {
   const eth = 4000;
@@ -300,23 +293,6 @@ function pushCandle(candles: EngineState["candles"], t: number, px: number) {
   return copy;
 }
 
-export function resampleCandles(bars: EngineState["candles"], intervalMs: number) {
-  if (bars.length < 2 || intervalMs <= 60_000) return bars;
-  const out: EngineState["candles"] = [];
-  for (const c of bars) {
-    const bucket = Math.floor(c.t / intervalMs) * intervalMs;
-    const last = out[out.length - 1];
-    if (!last || last.t !== bucket) out.push({ ...c, t: bucket });
-    else {
-      last.h = Math.max(last.h, c.h);
-      last.l = Math.min(last.l, c.l);
-      last.c = c.c;
-      last.v += c.v;
-    }
-  }
-  return out;
-}
-
 export const BAR_MS = {
   "1m": 60_000,
   "5m": 300_000,
@@ -345,6 +321,12 @@ export function synthCandles(px: number, intervalMs: number, now: number, seed =
   return out;
 }
 
+/**
+ * Display-only mark-to-market of the whole player book, INCLUDING WPIT at the
+ * sim price (so emissions/stake yields appear here). No risk cap is enforced
+ * on this number — caps run off `vaultNav` (see docs/RISK.md §equity vs
+ * vault NAV vs emissions).
+ */
 export function equity(s: EngineState) {
   const spot = s.account.usdc + s.account.eth * s.eth + s.account.wpit * s.wpit;
   const extras = Object.entries(s.account.tokens ?? {}).reduce((a, [k, v]) => a + v * tokenPx(s, k), 0);
@@ -530,7 +512,7 @@ export function miniQty(under = "ETH") {
   return 1;
 }
 
-export function quoteTick(spot: number) {
+function quoteTick(spot: number) {
   if (spot >= 100) return 0.4;
   if (spot >= 5) return 0.02;
   if (spot >= 1) return 0.005;
@@ -548,26 +530,22 @@ export function strikeGrid(spot: number) {
   const round = (n: number) => Number((Math.round(n / step) * step).toPrecision(10));
   return [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((i) => round(atm + i * step)).filter((k) => k > 0);
 }
-
-export function freeEth(s: EngineState) {
-  return Math.max(0, s.vault.eth - s.vault.reservedEth);
-}
-export function freeUsdc(s: EngineState) {
+function freeUsdc(s: EngineState) {
   return Math.max(0, s.vault.usdc - s.vault.reservedUsdc - (s.vault.escrowUsdc ?? 0));
 }
 
-export function listedUnder(under: string) {
+function listedUnder(under: string) {
   const u = (under || "ETH").toUpperCase();
   return (DERIV_UNDERS as readonly string[]).includes(u);
 }
-export function utilEth(s: EngineState) {
+function utilEth(s: EngineState) {
   return s.vault.eth <= 0 ? 1 : s.vault.reservedEth / s.vault.eth;
 }
 
-export function maxNetLongEth(s: EngineState) {
+function maxNetLongEth(s: EngineState) {
   return Math.max(0, s.vault.eth * UTIL_CAP - s.vault.reservedEth);
 }
-export function maxNetShortEth(s: EngineState) {
+function maxNetShortEth(s: EngineState) {
   return Math.max(0, (s.vault.usdc * UTIL_CAP) / s.eth - s.vault.reservedUsdc / s.eth);
 }
 
@@ -611,7 +589,7 @@ export function refreshQuotes(s: EngineState): EngineState {
  * new price) is neither destroyed nor minted by the re-pin itself; only real
  * fills (with their fee) move k.
  */
-export function repinPool(
+function repinPool(
   pool: EngineState["pools"][string],
   priceQuotePerBase: number,
 ): EngineState["pools"][string] {
@@ -746,7 +724,7 @@ function tryFill(s: EngineState, o: WorkingOrder): EngineState | string {
   return "Unknown product.";
 }
 
-export function matchWorking(s: EngineState): EngineState {
+function matchWorking(s: EngineState): EngineState {
   let cur = s;
   const keep: WorkingOrder[] = [];
   const dayCut = utcDay(s.clock);
@@ -794,7 +772,7 @@ export function residualDelta(s: EngineState) {
   return g.delta + s.vault.reservedEth - s.vault.reservedUsdc / Math.max(s.eth, 1e-9) + hedge;
 }
 
-export function coverQty(s: EngineState, under: string, side: FutSide): number {
+function coverQty(s: EngineState, under: string, side: FutSide): number {
   if (under === "ETH") return side === "long" ? maxNetLongEth(s) : maxNetShortEth(s);
   const mark = markOf(s, under);
   if (!(mark > 0)) return 0;
@@ -805,7 +783,7 @@ export function mmRate(s: EngineState, size: number, under: string): number {
   return imRate(s, size, under) * 0.5;
 }
 
-export function posMmRate(p: EngineState["futures"][number]): number {
+function posMmRate(p: EngineState["futures"][number]): number {
   const n = p.entry * p.sizeEth;
   const im = n > 0 ? p.margin / n : FUT_IM;
   return clamp(im * 0.5, 0.08, 0.6);
@@ -818,7 +796,7 @@ export function futLiqPrice(p: EngineState["futures"][number], mm = posMmRate(p)
   return (p.margin + p.entry * q) / (q * (1 + mm));
 }
 
-export function futMaint(p: EngineState["futures"][number], mark: number) {
+function futMaint(p: EngineState["futures"][number], mark: number) {
   return p.sizeEth * mark * posMmRate(p);
 }
 
@@ -1130,7 +1108,7 @@ function applyVaultClose(vault: EngineState["vault"], pos: EngineState["futures"
   return v;
 }
 
-export function reduceFuture(
+function reduceFuture(
   s: EngineState,
   pos: EngineState["futures"][number],
   closeSize: number,
@@ -1145,15 +1123,16 @@ export function reduceFuture(
   vault.escrowUsdc = Math.max(0, (s.vault.escrowUsdc ?? 0) - slice.margin);
   const want = slice.margin + pnl;
   let insurance = s.insuranceUsdc;
-  let paid = want;
+  // Payout honesty, same as closeOption/liquidateFuture: the trader gets the
+  // full documented amount; free vault USDC pays first and the remainder is a
+  // RECORDED HOLE in insurance (goes negative → circuit), never a silent
+  // partial pay capped at insurance=0.
   if (want >= 0) {
     const floor = vault.reservedUsdc + (vault.escrowUsdc ?? 0);
     const free = Math.max(0, vault.usdc - floor);
     if (want > free + 1e-9) {
-      const take = Math.min(want - free, Math.max(0, insurance));
-      insurance -= take;
-      paid = free + take;
-      vault.usdc -= paid;
+      insurance -= want - free; // may go negative → circuit
+      vault.usdc -= free;
     } else {
       vault.usdc -= want;
     }
@@ -1171,7 +1150,7 @@ export function reduceFuture(
     ...s,
     account: {
       ...s.account,
-      usdc: s.account.usdc + paid,
+      usdc: s.account.usdc + want,
       realized: s.account.realized + pnl,
     },
     vault,
@@ -1496,12 +1475,14 @@ function settleAndLiq(s: EngineState): EngineState {
     const secUsdc = p.securedUsdc ?? 0;
     vault.reservedEth = Math.max(0, vault.reservedEth - secEth);
     vault.reservedUsdc = Math.max(0, vault.reservedUsdc - secUsdc);
-    if (secEth > 0 && (p.under ?? "ETH") === "ETH") {
-      // The covering ETH is converted at spot; the house keeps
+    if (secEth > 0 && (p.under ?? "ETH") === "ETH" && spot > p.strike) {
+      // ITM call: deliver — convert the covering ETH at spot; the house keeps
       // size·max(0, spot − max(spot−K,0)) = size·min(spot, K) as its edge.
       vault.eth = Math.max(0, vault.eth - secEth);
       vault.usdc += secEth * spot;
     }
+    // OTM call: no delivery — the cover is NOT force-sold; the house keeps the
+    // ETH (the option is worthless, the reservation is released above).
     const floor = vault.reservedUsdc + (vault.escrowUsdc ?? 0);
     const free = Math.max(0, vault.usdc - floor);
     const fromVault = Math.min(payoff, free);
@@ -1617,7 +1598,7 @@ export function tokenBal(acc: EngineState["account"], sym: string) {
   return acc.tokens?.[sym] ?? 0;
 }
 
-export function creditToken(acc: EngineState["account"], sym: string, amt: number): EngineState["account"] {
+function creditToken(acc: EngineState["account"], sym: string, amt: number): EngineState["account"] {
   const next = { ...acc, tokens: { ...(acc.tokens ?? {}) } };
   if (sym === "USDC") next.usdc += amt;
   else if (sym === "ETH") next.eth += amt;
@@ -1704,6 +1685,25 @@ export function closeOption(s: EngineState, id: string): EngineState | string {
   const vault = { ...s.vault };
   vault.reservedEth = Math.max(0, vault.reservedEth - (pos.securedEth ?? ((pos.under ?? "ETH") === "ETH" && pos.type === "call" ? pos.sizeEth : 0)));
   vault.reservedUsdc = Math.max(0, vault.reservedUsdc - (pos.securedUsdc ?? (pos.type === "put" ? pos.strike * pos.sizeEth : 0)));
+  // CRITICAL-1 fix: the buy-back is paid FROM the house, like every other
+  // payout path (reduceFuture, settleAndLiq). Free vault USDC first, then
+  // insurance; the part insurance cannot cover is a RECORDED HOLE — insurance
+  // goes NEGATIVE and the circuit trips (same loud-shortfall semantics as
+  // liquidation F11: the trader is paid in full, the vault halts). Never a
+  // silent partial pay, and never a mint. (The old path credited the trader
+  // without debiting the vault: every close minted ≈ the option's mark value
+  // and inflated vaultNav — loosening the Γ/ν/insurance caps.)
+  const floor = vault.reservedUsdc + (vault.escrowUsdc ?? 0);
+  const free = Math.max(0, vault.usdc - floor);
+  let insurance = s.insuranceUsdc;
+  if (credit > free + 1e-9) {
+    insurance -= credit - free; // may go negative → circuit
+    vault.usdc -= free; // vault cash stops at the reserved floor, never below
+  } else {
+    vault.usdc -= credit;
+  }
+  const circuitUntil =
+    insurance < 0 ? Math.max(s.circuitUntil ?? 0, s.clock + CIRCUIT_MS) : (s.circuitUntil ?? 0);
   const pnl = (px - pos.premium) * pos.sizeEth;
   const next: EngineState = {
     ...s,
@@ -1713,6 +1713,8 @@ export function closeOption(s: EngineState, id: string): EngineState | string {
       realized: s.account.realized + pnl,
     },
     vault,
+    insuranceUsdc: insurance,
+    circuitUntil,
     options: s.options.filter((p) => p.id !== id),
   };
   return hedgeDelta(

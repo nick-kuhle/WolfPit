@@ -132,9 +132,10 @@ function RanchSlide() {
     const t = window.setInterval(() => setNow(Date.now()), 200);
     return () => window.clearInterval(t);
   }, []);
+  const nowSec = Math.floor(now / 1000);
   useEffect(() => {
     seedRaces();
-  }, [Math.floor(now / 1000), seedRaces]);
+  }, [nowSec, seedRaces]);
   const horse = useMemo(() => cardFor("horse", now, games), [now, games]);
   const dog = useMemo(() => cardFor("dog", now, games), [now, games]);
   const live = horse.status === "running" ? horse : dog.status === "running" ? dog : horse.status === "open" ? horse : dog;

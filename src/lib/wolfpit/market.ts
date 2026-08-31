@@ -314,59 +314,40 @@ export const searchTokens = createServerFn({ method: "GET" })
     return g ? [g] : [];
   });
 
-export const lookupToken = createServerFn({ method: "GET" })
-  .validator((d: { q: string }) => d)
-  .handler(async ({ data }): Promise<Listing> => {
-    const q = data.q.trim().slice(0, 80);
-    if (/^wpit$/i.test(q) || /^wolfpit$/i.test(q)) {
-      return {
-        symbol: "WPIT",
-        name: "WolfPit",
-        price: 0,
-        change24: 0,
-        volume24: 0,
-        chain: "Base",
-      };
-    }
-    if (/^0x[a-fA-F0-9]{40}$/.test(q)) {
-      const dex = await dexToken(q);
-      if (dex) return dex;
-    }
-    const hits = await dexSearch(q);
-    if (hits[0]) return hits[0];
-    const search = await geckoSearch(q);
-    if (search) return search;
-    throw new Error("Token not found.");
-  });
-
-export const getSymbolCandles = createServerFn({ method: "GET" })
-  .validator((d: { symbol: string; interval?: ChartInterval; binance?: string; geckoId?: string; network?: string; poolAddress?: string }) => d)
-  .handler(async ({ data }): Promise<Candle[]> => {
-    const interval: ChartInterval = data.interval ?? "1m";
-    const sym = data.symbol.toUpperCase();
+/** Plain fetch helper (not a server route — only the sim chart uses it). */
+async function getSymbolCandles(d: {
+  symbol: string;
+  interval?: ChartInterval;
+  binance?: string;
+  geckoId?: string;
+  network?: string;
+  poolAddress?: string;
+}): Promise<Candle[]> {
+    const interval: ChartInterval = d.interval ?? "1m";
+    const sym = d.symbol.toUpperCase();
     const cb = COINBASE_MAP[sym];
     if (cb) {
       const bars = await coinbaseKlines(cb, interval);
       if (bars.length) return bars;
     }
-    const pair = safeBinance(data.binance) || BINANCE_MAP[sym];
+    const pair = safeBinance(d.binance) || BINANCE_MAP[sym];
     if (pair) {
       const bars = await binanceKlines(pair, interval);
       if (bars.length) return bars;
     }
-    const geckoId = safeGeckoId(data.geckoId);
+    const geckoId = safeGeckoId(d.geckoId);
     if (geckoId) {
       const bars = await geckoOhlc(geckoId, interval);
       if (bars.length) return bars;
     }
-    const network = safeNetwork(data.network);
-    const poolAddress = safePool(data.poolAddress);
+    const network = safeNetwork(d.network);
+    const poolAddress = safePool(d.poolAddress);
     if (network && poolAddress) {
       const bars = await geckoTerminalOhlcv(network, poolAddress, interval);
       if (bars.length) return bars;
     }
     return [];
-  });
+}
 
 const NET_OK = new Set(CHAINS.map((c) => c.id));
 
@@ -400,7 +381,7 @@ export function loadSymbolCandles(d: {
   const key = `${d.symbol}:${interval}:${d.binance ?? ""}:${d.geckoId ?? ""}:${d.network ?? ""}:${d.poolAddress ?? ""}`;
   const hit = candleJobs.get(key);
   if (hit) return hit;
-  const job = getSymbolCandles({ data: { ...d, interval } }).catch(() => [] as Candle[]);
+  const job = getSymbolCandles({ ...d, interval }).catch(() => [] as Candle[]);
   candleJobs.set(key, job);
   return job;
 }
@@ -496,37 +477,6 @@ async function geckoSearch(q: string): Promise<Listing | null> {
       geckoId: c.id,
       binance: BINANCE_MAP[c.symbol.toUpperCase()],
       chain: CHAIN_HINT[c.symbol.toUpperCase()] ?? "Multi-chain",
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function dexToken(addr: string): Promise<Listing | null> {
-  try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${addr}`);
-    if (!res.ok) return null;
-    const j = (await res.json()) as {
-      pairs?: {
-        chainId: string;
-        priceUsd?: string;
-        priceChange?: { h24?: number };
-        volume?: { h24?: number };
-        baseToken: { symbol: string; name: string; address: string };
-      }[];
-    };
-    const p = j.pairs?.[0];
-    if (!p) return null;
-    const symbol = p.baseToken.symbol.toUpperCase();
-    return {
-      symbol,
-      name: p.baseToken.name,
-      price: Number(p.priceUsd) || 0,
-      change24: (p.priceChange?.h24 ?? 0) / 100,
-      volume24: p.volume?.h24 ?? 0,
-      chain: p.chainId,
-      contract: p.baseToken.address,
-      binance: BINANCE_MAP[symbol],
     };
   } catch {
     return null;

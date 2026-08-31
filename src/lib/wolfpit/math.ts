@@ -10,7 +10,7 @@ export function randn() {
   return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
 
-export function normCdf(x: number) {
+function normCdf(x: number) {
   const a1 = 0.254829592;
   const a2 = -0.284496736;
   const a3 = 1.421413741;

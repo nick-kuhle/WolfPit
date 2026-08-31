@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { TERMS_VERSION, useTerms } from "@/lib/wolfpit/terms";
 import { ping } from "@/lib/wolfpit/alerts";
-import { useWallet, truncAddr, chainName, hasInjectedWallet, dappUrl } from "@/lib/wallet/session";
+import { useWallet } from "@/lib/wallet/session";
 
 export function ProductGate({
   children,
@@ -23,47 +23,6 @@ export function ProductGate({
   if (!ready || !readyW) return <div className="min-h-[50vh] bg-bg" />;
   if (!accepted) return <TermsWall product={product} />;
   return <>{children}</>;
-}
-
-function WalletWall({ product }: { product: string }) {
-  const w = useWallet();
-  const injected = typeof window !== "undefined" && hasInjectedWallet();
-  return (
-    <div className="mx-auto max-w-lg px-4 py-12">
-      <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">Profile · connect</p>
-      <h1 className="mt-3 font-display text-3xl font-medium tracking-tight">Activate a profile to enter the {product}.</h1>
-      <p className="mt-4 text-sm leading-relaxed text-muted">
-        Connect a web3 wallet. That address is your seat. Paper balances stay simulated until live pools are pointed at
-        it.
-      </p>
-      <Button className="mt-6 w-full" disabled={w.connecting} onClick={() => void w.connect()}>
-        {w.connecting ? "Waiting on wallet…" : "Connect wallet"}
-      </Button>
-      {!injected ? (
-        <div className="mt-3 grid gap-2">
-          <a
-            className="h-11 rounded-[var(--radius-sm)] border border-border text-center text-sm leading-[2.75rem] text-muted"
-            href={`https://metamask.app.link/dapp/${dappUrl().replace(/^https?:\/\//, "")}`}
-          >
-            Open in MetaMask
-          </a>
-          <a
-            className="h-11 rounded-[var(--radius-sm)] border border-border text-center text-sm leading-[2.75rem] text-muted"
-            href={`https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(dappUrl())}`}
-          >
-            Open in Coinbase Wallet
-          </a>
-        </div>
-      ) : null}
-      {w.error ? <p className="mt-3 text-sm text-down">{w.error}</p> : null}
-      <p className="mt-4 text-xs text-subtle">
-        {w.address ? `${truncAddr(w.address)} · ${chainName(w.chainId)}` : "No session."}{" "}
-        <Link to="/profile" className="text-brass hover:underline">
-          Profile
-        </Link>
-      </p>
-    </div>
-  );
 }
 
 function TermsWall({ product }: { product: string }) {

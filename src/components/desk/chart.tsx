@@ -25,7 +25,7 @@ function pxLabel(p: number) {
 
 type Win = { i0: number; i1: number };
 
-export function PitChart({
+function PitChart({
   candles,
   height = 240,
   interval = "1m",
@@ -45,11 +45,12 @@ export function PitChart({
   const candlesRef = useRef(candles);
   candlesRef.current = candles;
 
+  const firstT = candles[0]?.t;
   useEffect(() => {
     win.current = { i0: 0, i1: 0 };
     follow.current = true;
     lastN.current = 0;
-  }, [candles[0]?.t, interval]);
+  }, [firstT, interval]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -296,7 +297,8 @@ export function PitChart({
   return <canvas ref={ref} className="block h-full w-full cursor-crosshair touch-none" />;
 }
 
-export function ChartPane({
+
+function ChartPane({
   candles,
   interval,
   status,

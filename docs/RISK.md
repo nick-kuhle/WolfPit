@@ -94,6 +94,31 @@ Recorded drills, not vibes:
 
 If any drill leaks LP USDC that is not a posted spread, do not ship.
 
+## Equity vs vault NAV vs emissions (decided)
+
+- `equity()` (sim display tape) is a **mark-to-market of the whole player
+  book**, including WPIT at the sim price: account USDC/ETH/WPIT, token
+  extras, futures margin + PnL, option marks, LP value, staked WPIT and open
+  game tickets. WPIT emissions and stake/farm yields therefore show up in
+  displayed equity at whatever the sim's WPIT oracle says. This is a display
+  metric by design — it is **not** the number any risk cap is enforced on.
+- Every risk cap is enforced on `vaultNav` (ETH·S + USDC + short-option MTM +
+  futures counter-party MTM − escrow + insurance) or on per-position
+  margin/PnL: IM/MM, fill band, OI/expiry and
+  OI/strike, γ cash ≤ 2% NAV, ν ≤ 15% NAV, insurance < 1% NAV halts short
+  gamma, 5-min 3σ circuit. The futures counter-party term keeps the NAV
+  marked to market between settlements — without it a big move leaves the
+  insurance % and γ/ν caps computed on a stale NAV. None of those inputs
+  count WPIT, so **emissions can never loosen a risk cap**.
+- The one emission→risk touchpoint is the 10% drip into `insuranceUsdc` at
+  the WPIT price — the sim's analog of the Farm's 1% harvest tax to
+  insurance (FARM.md). It only thickens the junior buffer; it does not relax
+  a cap. Accepted.
+- Consequence (documented, not a bug): displayed equity can drift from
+  USDC-denominated vault reality because the sim's WPIT price is an
+  independent stochastic process (moonWpit) — treat equity as a portfolio
+  mark, never as a withdrawal guarantee.
+
 ## Code map
 
 `src/lib/wolfpit/engine.ts` — reject rules, IM/MM, cover.  

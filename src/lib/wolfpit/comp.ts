@@ -37,7 +37,3 @@ export function compBoard(now: number, you: { name: string; equity: number; join
 export function compLive(now: number) {
   return now >= PIT_OPEN.start && now < PIT_OPEN.end;
 }
-
-export function prizeFor(place: number) {
-  return PIT_OPEN.prize.find((p) => p.place === place)?.wpit ?? 0;
-}

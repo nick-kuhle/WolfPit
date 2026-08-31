@@ -36,5 +36,6 @@ contract Deployer {
         stake = new Stake(wpit, vault);
         vault.setWpitFeeder(address(farm));
         wpit.setMinter(address(farm));
+        wpit.acceptMinter();
     }
 }

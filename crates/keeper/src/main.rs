@@ -3,10 +3,13 @@
 //! F3: the keeper can now TRANSCAT, not just print calldata:
 //!   - sign `WOLFPIT_KEEPER_KEY` (private key hex) as the vault OPERATOR,
 //!   - run one-shot operator commands (`writeCall` / `writePut` / `openShort`
-//!     atomic swap / `reconcileBalances` / `pause` / `releaseCall` / `releasePut`),
+//!     atomic swap / `openLong` / `releaseCall` / `releasePut` / `exec` /
+//!     `reconcileBalances` / `pause`),
 //!   - or run a `monitor` loop that reads the halt/oracle/insurance state and
 //!     FAILS CLOSED by pausing the vault when `haltShortGamma()` trips (or the
-//!     reserved books ever exceed real balances).
+//!     reserved books ever exceed real balances). On RPC errors the monitor
+//!     NEVER exits: it pauses best-effort and retries with backoff — a watcher
+//!     that dies on a transient error is not fail-closed.
 //!
 //! Without a key, `status` still reads the chain from a plain RPC URL, and
 //! every command dry-run encodes its calldata.
@@ -40,6 +43,7 @@ sol! {
         function writePut(uint256 size, uint256 strike) external;
         function releaseCall(uint256 size) external;
         function releasePut(uint256 lock) external;
+        function openLong(uint256 size) external;
         function openShort(uint256 size, address router, bytes data, uint256 minOutUsdc) external;
         function reconcileBalances() external;
         function exec(address target, bytes data) external returns (bytes);
@@ -81,6 +85,17 @@ enum Cmd {
         router: Address,
         min_out_usdc: String,
         /// Hex calldata the router expects (e.g. a swap router's `sell(uint256)`).
+        data: String,
+    },
+    /// Open a covered long (reserve ETH cover, operator).
+    OpenLong { size_eth: String },
+    /// Release a previously reserved put lock (USDC, 6 decimals) (operator).
+    ReleasePut { lock_usdc: String },
+    /// Run an allowlisted aggregator router call (hedge buy-side etc.) (operator).
+    Exec {
+        /// Allowlisted router address.
+        target: Address,
+        /// Hex calldata the router expects (e.g. `swap(uint256,uint256)`).
         data: String,
     },
     /// Reconcile internal counters with real token balances (operator).
@@ -136,6 +151,22 @@ async fn dry_run(args: &Args) -> Result<()> {
             router: Address::ZERO,
             data: vec![].into(),
             minOutUsdc: usdc("3000".into())?
+        }
+        .abi_encode())
+    );
+    println!(
+        "openLong(1 ETH) calldata:        0x{}",
+        to_hex(&IDealerVault::openLongCall { size: wei("1".into())? }.abi_encode())
+    );
+    println!(
+        "releasePut(4000 USDC lock) calldata: 0x{}",
+        to_hex(&IDealerVault::releasePutCall { lock: usdc("4000".into())? }.abi_encode())
+    );
+    println!(
+        "exec(router, data) calldata: 0x{}",
+        to_hex(&IDealerVault::execCall {
+            target: Address::ZERO,
+            data: vec![].into()
         }
         .abi_encode())
     );
@@ -260,6 +291,37 @@ async fn run(args: &Args) -> Result<()> {
             tx.get_receipt().await?;
             Ok(())
         }
+        Cmd::OpenLong { size_eth } => {
+            let size = wei(size_eth.clone())?;
+            let cd = IDealerVault::openLongCall { size }.abi_encode();
+            println!("openLong({size_eth} ETH) calldata: 0x{}", to_hex(&cd));
+            let tx = c.openLong(size).send().await?;
+            println!("sent openLong tx: {}", tx.tx_hash());
+            tx.get_receipt().await?;
+            Ok(())
+        }
+        Cmd::ReleasePut { lock_usdc } => {
+            let lock = usdc(lock_usdc.clone())?;
+            let cd = IDealerVault::releasePutCall { lock }.abi_encode();
+            println!("releasePut({lock_usdc} USDC) calldata: 0x{}", to_hex(&cd));
+            let tx = c.releasePut(lock).send().await?;
+            println!("sent releasePut tx: {}", tx.tx_hash());
+            tx.get_receipt().await?;
+            Ok(())
+        }
+        Cmd::Exec { target, data } => {
+            let data = hex_decode(&data).map_err(|_| eyre!("--data must be hex (0x-prefixed ok)"))?;
+            let cd = IDealerVault::execCall {
+                target,
+                data: data.clone().into(),
+            }
+            .abi_encode();
+            println!("exec({target}, {}) calldata: 0x{}", alloy::primitives::hex::encode(&data), to_hex(&cd));
+            let tx = c.exec(target, data.into()).send().await?;
+            println!("sent exec tx: {}", tx.tx_hash());
+            tx.get_receipt().await?;
+            Ok(())
+        }
         Cmd::Reconcile => {
             let cd = IDealerVault::reconcileBalancesCall {}.abi_encode();
             println!("reconcileBalances calldata: 0x{}", to_hex(&cd));
@@ -287,25 +349,59 @@ async fn run(args: &Args) -> Result<()> {
         }
         Cmd::Monitor => {
             let step = if args.interval == 0 { 30 } else { args.interval };
+            let mut fails: u32 = 0;
             loop {
-                let paused = c.paused().call().await?;
-                let halt = c.haltShortGamma().call().await?;
-                // Fail closed: any halt condition (dead oracle, insurance < 1%
-                // NAV, raw reserved > bal) pauses the vault ON CHAIN.
-                let naked_eth = c.reservedEth().call().await? > c.ethBal().call().await?;
-                let naked_usdc = c.reservedUsdc().call().await? > c.usdcBal().call().await?;
-                if (halt || naked_eth || naked_usdc) && !paused {
-                    let tx = c.pause(true).send().await?;
-                    println!("HALT -> pause() tx {}", tx.tx_hash());
-                    tx.get_receipt().await?;
-                    println!("vault paused on-chain");
-                } else {
+                // One read pass. On ANY RPC error the monitor cannot prove the
+                // vault is safe — fail closed: attempt an on-chain pause
+                // (best-effort; it may also fail if the RPC is down) and back
+                // off. The old `?` here EXITED the loop on the first transient
+                // error, silently removing the fail-closed watcher exactly when
+                // it was needed.
+                let res: Result<bool> = async {
+                    let paused = c.paused().call().await?;
+                    let halt = c.haltShortGamma().call().await?;
+                    let naked_eth = c.reservedEth().call().await? > c.ethBal().call().await?;
+                    let naked_usdc = c.reservedUsdc().call().await? > c.usdcBal().call().await?;
+                    if monitor_should_pause(paused, halt, naked_eth, naked_usdc) {
+                        let tx = c.pause(true).send().await?;
+                        println!("HALT -> pause() tx {}", tx.tx_hash());
+                        tx.get_receipt().await?;
+                        println!("vault paused on-chain");
+                        return Ok(true);
+                    }
                     println!("ok: paused={paused} halt={halt} naked_eth={naked_eth} naked_usdc={naked_usdc}");
+                    Ok(false)
+                }
+                .await;
+                match res {
+                    Ok(_) => fails = 0,
+                    Err(e) => {
+                        fails += 1;
+                        println!("monitor read error ({fails}): {e:#} — cannot verify vault safety; pausing to fail closed");
+                        let _ = c.pause(true).send().await; // best-effort
+                        let backoff = monitor_backoff(step, fails);
+                        tokio::time::sleep(Duration::from_secs(backoff)).await;
+                        continue;
+                    }
                 }
                 tokio::time::sleep(Duration::from_secs(step)).await;
             }
         }
     }
+}
+
+/// Fail-closed predicate: pause unless we can PROVE the vault is safe (not
+/// halted, cover covers reservations, and we are not already paused).
+fn monitor_should_pause(paused: bool, halt: bool, naked_eth: bool, naked_usdc: bool) -> bool {
+    (halt || naked_eth || naked_usdc) && !paused
+}
+
+/// Exponential backoff for transient RPC failures: step · 2^(fails−1), capped
+/// at 60s, never below the base step. The monitor retries FOREVER — an
+/// exiting watcher is the failure mode this function exists to prevent.
+fn monitor_backoff(step: u64, fails: u32) -> u64 {
+    let exp = 60u64.min(step.saturating_mul(1u64 << fails.saturating_sub(1).min(6)));
+    exp.max(step)
 }
 
 #[tokio::main]
@@ -358,6 +454,59 @@ mod tests {
     fn reconcile_has_no_args() {
         let data = IDealerVault::reconcileBalancesCall {}.abi_encode();
         assert_eq!(data.len(), 4);
+    }
+
+    #[test]
+    fn open_long_encodes_size() {
+        let data = IDealerVault::openLongCall {
+            size: U256::from(1_000_000_000_000_000_000u128),
+        }
+        .abi_encode();
+        assert_eq!(&data[..4], IDealerVault::openLongCall::SELECTOR);
+        assert_eq!(data.len(), 4 + 32);
+    }
+
+    #[test]
+    fn release_put_encodes_lock() {
+        let data = IDealerVault::releasePutCall {
+            lock: U256::from(4_000_000_000u128),
+        }
+        .abi_encode();
+        assert_eq!(&data[..4], IDealerVault::releasePutCall::SELECTOR);
+        assert_eq!(data.len(), 4 + 32);
+    }
+
+    #[test]
+    fn monitor_pauses_only_when_halted_or_naked_and_not_paused() {
+        assert!(!monitor_should_pause(false, false, false, false));
+        assert!(monitor_should_pause(false, true, false, false));
+        assert!(monitor_should_pause(false, false, true, false));
+        assert!(monitor_should_pause(false, false, false, true));
+        assert!(!monitor_should_pause(true, true, false, false), "already paused: no spam");
+        assert!(!monitor_should_pause(true, false, false, false));
+    }
+
+    #[test]
+    fn monitor_backoff_grows_exponentially_and_caps() {
+        assert_eq!(monitor_backoff(30, 1), 30); // first failure: base step
+        assert_eq!(monitor_backoff(30, 2), 60); // 30·2, capped
+        assert_eq!(monitor_backoff(30, 5), 60); // capped
+        assert_eq!(monitor_backoff(10, 1), 10);
+        assert_eq!(monitor_backoff(10, 2), 20);
+        assert_eq!(monitor_backoff(10, 3), 40);
+        assert_eq!(monitor_backoff(10, 4), 60); // cap
+        assert_eq!(monitor_backoff(10, 8), 60); // still capped
+    }
+
+    #[test]
+    fn exec_encodes_target_and_data() {
+        let data = IDealerVault::execCall {
+            target: Address::with_last_byte(2),
+            data: vec![0xaa, 0xbb, 0xcc].into(),
+        }
+        .abi_encode();
+        assert_eq!(&data[..4], IDealerVault::execCall::SELECTOR);
+        assert_eq!(data.len(), 4 + 32 * 2 + 32 + 32); // head 2×32 + len + padded data
     }
 
     #[test]

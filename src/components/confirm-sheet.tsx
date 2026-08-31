@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
  * Success notifications for the same actions use the confetti "pit ticket"
  * burst (pit-alerts.tsx) — see store.ts pings.
  */
-export type ConfirmRow = { k: string; v: string; tone?: "up" | "down" | "brass" };
+type ConfirmRow = { k: string; v: string; tone?: "up" | "down" | "brass" };
 
 export type Confirm = {
   kicker: string;

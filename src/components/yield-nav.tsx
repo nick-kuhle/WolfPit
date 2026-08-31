@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 
-export function YieldNav({ on }: { on: "track" | "farms" | "pools" }) {
+function YieldNav({ on }: { on: "track" | "farms" | "pools" }) {
   const tabs = [
     { to: "/games" as const, id: "track", label: "Racetrack" },
     { to: "/pools" as const, id: "farms", label: "Farms" },

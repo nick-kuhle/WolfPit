@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import {
   advanceClock,
   buyOption,
-  closeFuture,
   expiries,
   initialState,
   setMark,

@@ -6,6 +6,33 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-30 (Sun) — audit fixes (external review)
+
+- CRITICAL: option buy-back now paid FROM the house (vault free USDC →
+  insurance → recorded hole + circuit) instead of minting the mark. Round
+  trip drift 796.94 → 0.0000 (trace-opt). Same honesty for reduceFuture.
+- Book: winner drawn weighted by form, so odds (form-based, 1.14 over) are
+  fair. Longshot EV +0.601 → −0.123 per stake; favorite −0.402 → −0.132
+  (betting-edge, 200k races). Refunded tickets say REFUNDED, not lost;
+  short-paid winners get a BOOK SHORT note.
+- NAV: vaultNav now marks expired-unsettled options at intrinsic AND the
+  vault's counter-party futures PnL (was: −390 expiry transient, stale caps
+  between settlements). All 6 conservation checks pass (settled == unsettled).
+- OTM call expiry keeps the vault's ETH cover (no forced sale).
+- OI-expiry cap nets long/short before the 25% check (no false rejects).
+- Keeper: monitor retries with backoff forever instead of exiting on a
+  transient RPC error; added `openLong` / `releasePut` / `exec` subcommands.
+- Contracts: Stake 7-day unstake cooldown (owner-set, TEST default 0); WPIT
+  minter is 2-step with zero-check (can't brick emissions).
+- Dead code: 9 files deleted (desk relics, desk-engine, share), 37 deps
+  pruned (22 radix, react-hook-form, react-table, sonner, vaul, cmdk,
+  react-day-picker, react-resizable-panels, …), ~100 unused exports removed.
+- `working` orders fully sanitized on rehydrate (was raw). Dev `admin/admin`
+  only when auth is OFF. Equity/emissions decision documented in RISK.md.
+- `nf3` @0.3.17 override is Nitro's own transitive dep — deliberately kept.
+
+---
+
 ## 2026-08-25 (Tue) — live prices + ToS mobile + Sushi pools
 
 - ETH/BTC from Coinbase → Binance → CoinGecko. Paper: 1000 ETH + 100k USDC.

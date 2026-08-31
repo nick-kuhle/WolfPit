@@ -1,4 +1,3 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AccountBar } from "@/components/desk/account-bar";
 import { ChartCard } from "@/components/desk/chart";
@@ -16,7 +15,6 @@ import { cn, fmtPx, fmtUsd } from "@/lib/utils";
 type Tab = "list" | "trade" | "pos";
 
 export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
-  const nav = useNavigate();
   const s = useWolf();
   const focus = useDesk((d) => d.focus);
   const saved = useDesk((d) => d.saved);

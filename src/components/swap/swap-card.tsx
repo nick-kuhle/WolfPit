@@ -32,11 +32,6 @@ function fmtNum(v: string, dp = 6): string {
  * share swap state with something outside the card (e.g. a price chart for the
  * selected pair), lift useSwap in the parent and render <SwapWidget swap={…} />.
  */
-export function SwapCard() {
-  const swap = useSwap();
-  return <SwapWidget swap={swap} />;
-}
-
 export function SwapWidget({ swap }: { swap: ReturnType<typeof useSwap> }) {
   const w = useWallet();
   const { state, fee, onRightChain } = swap;

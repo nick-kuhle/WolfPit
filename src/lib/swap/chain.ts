@@ -11,8 +11,6 @@ import { erc20Abi, formatUnits, parseUnits, type Hex } from "viem";
 import type { EthProvider } from "@/lib/wallet/session";
 import { chainById, ensureChain, isNative, publicClientFor, walletClientFor } from "./chains";
 
-export { isNative, NATIVE_TOKEN } from "./chains";
-
 export function toBaseUnits(amount: string, decimals: number): bigint {
   return parseUnits(amount as `${number}`, decimals);
 }

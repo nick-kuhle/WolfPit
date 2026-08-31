@@ -15,7 +15,7 @@ export type Listing = {
   poolAddress?: string;
 };
 
-export const ETH_LISTING: Listing = {
+const ETH_LISTING: Listing = {
   symbol: "ETH",
   name: "Ethereum",
   price: 0,

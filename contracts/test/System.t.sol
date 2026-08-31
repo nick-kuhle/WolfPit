@@ -11,6 +11,7 @@ import {Stake} from "../src/Stake.sol";
 
 interface Vm {
     function prank(address) external;
+    function warp(uint256) external;
 }
 
 contract SystemTest {
@@ -44,8 +45,10 @@ contract SystemTest {
 
     function testFarmNotifyAndHarvestTax() public {
         wpit.setMinter(address(this));
+        wpit.acceptMinter();
         wpit.mint(address(this), 1 ether);
         wpit.setMinter(address(farm));
+        wpit.acceptMinter();
         farm.setShare(address(this), 10_000);
         farm.notify(100 ether);
         farm.accrue(address(this));
@@ -56,6 +59,7 @@ contract SystemTest {
 
     function testFarmNotifyIsOwnerOnly() public {
         wpit.setMinter(address(farm));
+        wpit.acceptMinter();
         vm.prank(address(0xBAD));
         try farm.notify(1 ether) {
             revert("expected NotOwner");
@@ -74,6 +78,7 @@ contract SystemTest {
 
     function testPairAddRemove() public {
         wpit.setMinter(address(this));
+        wpit.acceptMinter();
         wpit.mint(address(this), 10_000 ether);
         wpit.approve(address(pairUsdc), type(uint256).max);
         usdc.approve(address(pairUsdc), type(uint256).max);
@@ -91,6 +96,7 @@ contract SystemTest {
 
     function testStakeRoundtrip() public {
         wpit.setMinter(address(this));
+        wpit.acceptMinter();
         wpit.mint(address(this), 50 ether);
         wpit.approve(address(stake), type(uint256).max);
         stake.stake(50 ether);
@@ -106,6 +112,7 @@ contract SystemTest {
     }
     function testFarmAccrueDoesNotDoublePay() public {
         wpit.setMinter(address(farm));
+        wpit.acceptMinter();
         farm.setShare(address(this), 10_000);
         farm.notify(100 ether);
         farm.accrue(address(this));
@@ -128,6 +135,7 @@ contract SystemTest {
     ///        them off both.
     function testPairImbalancedAddCannotSteal() public {
         wpit.setMinter(address(this));
+        wpit.acceptMinter();
         wpit.mint(address(this), 100_000 ether);
         wpit.approve(address(pairUsdc), type(uint256).max);
         usdc.approve(address(pairUsdc), type(uint256).max);
@@ -146,6 +154,7 @@ contract SystemTest {
     /// F5: vault can actually draw the junior tranche now.
     function testVaultSlashInsuranceCapsAtTotal() public {
         wpit.setMinter(address(this));
+        wpit.acceptMinter();
         wpit.mint(address(this), 50 ether);
         wpit.approve(address(stake), type(uint256).max);
         stake.stake(50 ether);
@@ -153,5 +162,49 @@ contract SystemTest {
         vault.slashInsuranceJunior(1_000 ether); // capped at 50
         require(vault.insuranceWpit() == 50 ether, "capped at stake total");
         require(stake.total() == 0, "drained");
+    }
+
+    /// FARM.md: production cooldown (7 days) is enforced once the owner sets
+    /// it; the TEST default (0) stays instant.
+    function testStakeCooldownEnforced() public {
+        stake.setCooldown(7 days);
+        wpit.setMinter(address(this));
+        wpit.acceptMinter();
+        wpit.mint(address(this), 10 ether);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(1 ether);
+        vm.warp(block.timestamp + 3 days);
+        try stake.unstake(0.5 ether) {
+            revert("cooldown not enforced");
+        } catch {}
+        vm.warp(block.timestamp + 5 days); // +8d total: lock expired
+        stake.unstake(0.5 ether);
+        require(stake.staked(address(this)) == 0.5 ether, "partial unstake after lock");
+        require(stake.total() == 0.5 ether, "total tracks partial");
+    }
+
+    /// WPIT minter cannot be moved to the zero address (and the move is loud).
+    function testWpitMinterRejectsZero() public {
+        try wpit.setMinter(address(0)) {
+            revert("expected ZeroMinter");
+        } catch {}
+        require(wpit.minter() == address(this), "minter unchanged");
+        require(wpit.pendingMinter() == address(0), "zero never proposed");
+    }
+
+    /// WPIT minter transfer is two-step: propose, then accept. Between the
+    /// two, the old minter still mints and the pending address is visible.
+    function testWpitMinterTwoStep() public {
+        wpit.setMinter(address(0xACE));
+        require(wpit.minter() == address(this), "minter unchanged until accept");
+        require(wpit.pendingMinter() == address(0xACE), "pending visible");
+        wpit.mint(address(this), 1 ether); // old minter still active
+        vm.prank(address(0xBAD));
+        try wpit.acceptMinter() {
+            revert("stranger cannot accept");
+        } catch {}
+        wpit.acceptMinter();
+        require(wpit.minter() == address(0xACE), "accepted");
+        require(wpit.pendingMinter() == address(0), "pending cleared");
     }
 }

@@ -30,10 +30,13 @@ WETH/USDC pit pool is seeded (`VITE_MARKETS=spot,future,option`).
 - `ChainlinkOracle`: staleness (1h), positivity, and sanity-band checks; a bad
   feed reverts and the vault halts risk-taking rather than marking fantasy.
 - Keeper (F3): can now TRANSACT — `WOLFPIT_KEEPER_KEY` signs as the operator
-  for `writeCall` / `writePut` / `openShort` (atomic swap) / `reconcileBalances`
-  / `pause` / `releaseCall`; a `monitor` loop reads
+  for `writeCall` / `writePut` / `openShort` (atomic swap) / `openLong` /
+  `releaseCall` / `releasePut` / `exec` (allowlisted router) /
+  `reconcileBalances` / `pause`; a `monitor` loop reads
   `owner/operator/navUsdc/haltShortGamma()` and FAILS CLOSED by pausing the
-  vault on-chain on halt/naked conditions. Without a key, it dry-run encodes.
+  vault on-chain on halt/naked conditions — on transient RPC errors it backs
+  off and retries forever rather than exiting. Without a key, it
+  dry-run encodes.
 - Engine (paper/sim parity): liquidation conservation (trader gets equity −
   penalty, insurance is funded, holes pause the pit), 1×/10×/60× clock,
   day-PnL, MM.md spread/reservation/hedge-band/±0.40 option edge, LP.md weight

@@ -15,7 +15,8 @@ export function BrandLockup({ className, markClass }: { className?: string; mark
   );
 }
 
-export function ChainChip() {
+
+function ChainChip() {
   const live = chainState().live;
   return (
     <span
@@ -29,7 +30,7 @@ export function ChainChip() {
   );
 }
 
-export function Shell({ children, desk }: { children: ReactNode; desk?: boolean }) {
+export function Shell({ children, desk: _desk }: { children: ReactNode; desk?: boolean }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const address = useWallet((s) => s.address);
   return (

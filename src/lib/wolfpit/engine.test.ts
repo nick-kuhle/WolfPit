@@ -5,7 +5,6 @@ import {
   advanceClock,
   bookGreeks,
   buyOption,
-  closeFuture,
   closeOption,
   createPool,
   dayPnl,
@@ -40,7 +39,6 @@ import {
   applyLive,
   arbToSpot,
   refreshQuotes,
-  maxSpotQty,
   maxMiniContracts,
   placeDeskOrder,
   groupedFutures,
@@ -50,7 +48,7 @@ import {
 } from "./engine.ts";
 import { sanitizeState } from "./sanitize.ts";
 import { PIT_OPEN } from "./comp.ts";
-import { MAX_FARM_APY, MAX_LOT } from "./limits.ts";
+import { MAX_FARM_APY, } from "./limits.ts";
 import { DERIV_FEE, FUT_IM, FUT_MM, MINI_ETH, UTIL_CAP } from "./types.ts";
 import { CALL_INV_VOL, CIRCUIT_MS, circuitActive, gammaCash1h, haltShortGamma, hedgeError99, rejectFuture, rejectOption, smileVol, spotFeeBps, vaultNav } from "./risk.ts";
 

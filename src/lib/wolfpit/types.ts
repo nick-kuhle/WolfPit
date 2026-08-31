@@ -1,4 +1,3 @@
-export type Side = "buy" | "sell";
 export type FutSide = "long" | "short";
 export type OptType = "call" | "put";
 export type Product = "spot" | "future" | "option";
@@ -11,12 +10,6 @@ export type Candle = {
   l: number;
   c: number;
   v: number;
-};
-
-export type SpotPos = {
-  asset: "ETH" | "WPIT" | "USDC";
-  qty: number;
-  avg: number;
 };
 
 export type FuturePos = {
@@ -139,7 +132,7 @@ export type GameBet = {
   odds: number;
   market: BetMarket;
   placedAt: number;
-  status: "open" | "won" | "lost";
+  status: "open" | "won" | "lost" | "refunded";
   payout: number;
   groupId?: string;
 };

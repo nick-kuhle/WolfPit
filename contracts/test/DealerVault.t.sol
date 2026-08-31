@@ -256,6 +256,7 @@ contract DealerVaultTest {
         Stake stake = new Stake(wpit, vault);
         vault.setStake(address(stake));
         wpit.setMinter(address(this));
+        wpit.acceptMinter();
         wpit.mint(address(this), 50 ether);
         wpit.approve(address(stake), type(uint256).max);
         stake.stake(50 ether);

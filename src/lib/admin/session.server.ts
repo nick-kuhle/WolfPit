@@ -27,7 +27,7 @@ function secret(): string {
   return devSecret;
 }
 
-export function adminCredentials() {
+function adminCredentials() {
   const user = process.env.ADMIN_USER;
   const pass = process.env.ADMIN_PASS;
   if (isProd()) {
@@ -37,9 +37,15 @@ export function adminCredentials() {
     return { user, pass };
   }
   if (!user || !pass) {
-    // Dev convenience only — never reachable in production.
-    console.warn("[admin] ADMIN_USER/ADMIN_PASS unset in dev — using admin/admin.");
-    return { user: user ?? "admin", pass: pass ?? "admin" };
+    // Dev convenience only — never reachable in production, and never when
+    // auth is explicitly enabled (VITE_AUTH_ENABLED=true): a deployed box
+    // with a live sign-in page must NOT ship a known admin/admin backdoor.
+    const authOn = process.env.VITE_AUTH_ENABLED !== "false";
+    if (authOn) {
+      throw new Error("ADMIN_USER and ADMIN_PASS must be set when auth is enabled.");
+    }
+    console.warn("[admin] ADMIN_USER/ADMIN_PASS unset in dev (auth off) — using admin/admin.");
+    return { user: "admin", pass: "admin" };
   }
   return { user, pass };
 }
@@ -60,7 +66,7 @@ export function verifyPassword(user: string, pass: string) {
   return eq(user, c.user) && eq(pass, c.pass);
 }
 
-export function mintAdminToken(user: string) {
+function mintAdminToken(user: string) {
   const exp = Date.now() + MAX_AGE * 1000;
   const payload = `${user}.${exp}`;
   return `${payload}.${hmac(payload)}`;

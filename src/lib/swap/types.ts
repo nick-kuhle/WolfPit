@@ -1,6 +1,5 @@
 /** Shared types for the spot swap aggregator flow (server ↔ client). */
 
-export type SwapSide = "sell";
 
 export type QuoteRequest = {
   /** Chain to trade on (see SWAP_CHAINS in chains.ts; default Base 8453). */
@@ -19,7 +18,7 @@ export type QuoteRequest = {
   holdsWpit?: boolean;
 };
 
-export type QuoteFee = {
+type QuoteFee = {
   /** Fee bps actually charged (already discount-adjusted). */
   bps: number;
   /** Whether the WPIT-holder discount was applied. */
@@ -30,13 +29,13 @@ export type QuoteFee = {
   amount?: string;
 };
 
-export type QuoteRoute = {
+type QuoteRoute = {
   /** Human-readable venue names in the chosen route, e.g. ["Uniswap_V3"]. */
   sources: string[];
   hops: number;
 };
 
-export type SwapTx = {
+type SwapTx = {
   to: string;
   data: string;
   value: string;

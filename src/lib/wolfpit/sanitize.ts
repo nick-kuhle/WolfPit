@@ -1,6 +1,10 @@
-import { WPIT_PX_MAX, WPIT_PX_MIN } from "./limits";
+import { MAX_LOT, WPIT_PX_MAX, WPIT_PX_MIN } from "./limits";
 import { CIRCUIT_MS } from "./risk";
 import { UTIL_CAP, type EngineState, type PoolState } from "./types";
+
+const PRODUCTS = ["spot", "future", "option"] as const;
+const KINDS = ["mkt", "lmt", "stp", "stl"] as const;
+const TIFS = ["day", "gtc", "ioc"] as const;
 
 export const ETH_MIN = 50;
 export const ETH_MAX = 250_000;
@@ -179,7 +183,51 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
           after: shotOf((f as { after?: unknown }).after),
         }))
       : [],
-    working: Array.isArray(raw.working) ? raw.working.slice(0, 40) : [],
+    // Working orders were previously rehydrated RAW (the one unsanitized
+    // array). A corrupt cache could inject malformed orders (NaN qty, junk
+    // product/side/kind/tif) that the engine's reject rails then have to
+    // carry forever. Clean every field; drop orders with non-finite or
+    // oversized qty.
+    working: Array.isArray(raw.working)
+      ? raw.working
+          .filter((w) => w && typeof w === "object" && typeof w.id === "string")
+          .filter((w) => {
+            const q = nn(w.qty);
+            return q > 0 && q <= MAX_LOT;
+          })
+          .slice(0, 40)
+          .map((w) => ({
+            id: String(w.id).slice(0, 40),
+            product: (PRODUCTS as readonly string[]).includes(String(w.product))
+              ? (w.product as "spot" | "future" | "option")
+              : "spot",
+            side: w.side === "sell" ? ("sell" as const) : ("buy" as const),
+            kind: (KINDS as readonly string[]).includes(String(w.kind))
+              ? (w.kind as "mkt" | "lmt" | "stp" | "stl")
+              : "mkt",
+            tif: (TIFS as readonly string[]).includes(String(w.tif))
+              ? (w.tif as "day" | "gtc" | "ioc")
+              : "day",
+            qty: Math.min(nn(w.qty), MAX_LOT),
+            limit:
+              typeof w.limit === "number" && Number.isFinite(w.limit) && w.limit > 0
+                ? Math.min(w.limit, MAX_BAL)
+                : undefined,
+            stop:
+              typeof w.stop === "number" && Number.isFinite(w.stop) && w.stop > 0
+                ? Math.min(w.stop, MAX_BAL)
+                : undefined,
+            poolId: typeof w.poolId === "string" ? w.poolId.slice(0, 40) : undefined,
+            expiry: typeof w.expiry === "number" && Number.isFinite(w.expiry) ? w.expiry : undefined,
+            strike:
+              typeof w.strike === "number" && Number.isFinite(w.strike) && w.strike > 0
+                ? Math.min(w.strike, MAX_BAL)
+                : undefined,
+            optType: w.optType === "put" ? ("put" as const) : w.optType === "call" ? ("call" as const) : undefined,
+            under: typeof w.under === "string" ? w.under.toUpperCase().slice(0, 10) : undefined,
+            created: nn(w.created),
+          }))
+      : [],
     farmWpit: nn(raw.farmWpit),
     harvestedWpit: nn(raw.harvestedWpit),
     // Insurance is a FRACTION of the book; bound it against the restored NAV so
@@ -215,7 +263,10 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
                   ? b.market
                   : "win",
               placedAt: nn(b.placedAt),
-              status: b.status === "won" || b.status === "lost" ? b.status : "open",
+              status:
+                b.status === "won" || b.status === "lost" || b.status === "refunded"
+                  ? b.status
+                  : "open",
               payout: nn(b.payout),
               groupId: typeof b.groupId === "string" ? b.groupId.slice(0, 40) : undefined,
             }))

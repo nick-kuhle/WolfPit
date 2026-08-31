@@ -9,14 +9,8 @@
 import { z } from "zod";
 import { resolveParentEmbedderOrigin } from "./preview-embedder-origin";
 
-export {
-  isPreviewEmbedderOrigin,
-  isSandboxPreviewGuestHost,
-  resolveParentEmbedderOrigin,
-} from "./preview-embedder-origin";
-
-export const PREVIEW_BRIDGE_CHANNEL = "preview-host-bridge" as const;
-export const PREVIEW_BRIDGE_VERSION = 1 as const;
+const PREVIEW_BRIDGE_CHANNEL = "preview-host-bridge" as const;
+const PREVIEW_BRIDGE_VERSION = 1 as const;
 
 const EnvelopeSchema = z.object({
   channel: z.literal(PREVIEW_BRIDGE_CHANNEL),
@@ -45,7 +39,7 @@ export type PreviewHostBridgeOptions = {
   getRoutePaths?: () => string[];
 };
 
-export function isSafeBridgePath(path: string): boolean {
+function isSafeBridgePath(path: string): boolean {
   if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
     return false;
   }

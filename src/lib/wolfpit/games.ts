@@ -5,13 +5,13 @@ import type { BetMarket, EngineState, FairRace } from "./types";
 import type { GameBet, GameMeet, GamesState, RaceKind } from "./types";
 
 export const RACE_MS = 120_000;
-export const POST_AT = 88_000;
+const POST_AT = 88_000;
 export const RUN_MS = 22_000;
 export const GAMES_VAULT_SEED = 200_000;
 export const MIN_BET = 10;
-export const MAX_BET = 5_000;
+const MAX_BET = 5_000;
 export const OVERROUND_HORSE = 1.14;
-export const OVERROUND_DOG = 1.12;
+const OVERROUND_DOG = 1.12;
 
 const HORSES = [
   "Hot to Trot", "Lady Godiva", "Bareback", "Slow Hands", "Velvet Rope",
@@ -44,7 +44,7 @@ const BARNS = [
 ];
 
 const SILKS = ["#2563eb", "#dc2626", "#e6e2d6", "#d4a017", "#22c55e", "#7c3aed", "#f97316", "#22d3ee"];
-export const COATS = ["blue", "red", "zebra", "leopard", "green", "purple", "orange", "cyan"] as const;
+const COATS = ["blue", "red", "zebra", "leopard", "green", "purple", "orange", "cyan"] as const;
 export type Coat = (typeof COATS)[number];
 
 const FRACS: [number, string][] = [
@@ -155,8 +155,31 @@ export function makeCard(kind: RaceKind, now = Date.now()): RaceCard {
   return { id, kind, start, postAt, settleAt, nextAt, runners, places: nos, winner: nos[0]!, status };
 }
 
-export function placesFromSeed(seed: string, raceId: string, n: number) {
-  const winner = winnerFromSeed(seed, raceId, n);
+/**
+ * Weighted winner from the reveal seed: runners win in proportion to their
+ * form probability, so the quoted odds (≈ 1/(p·overround)) are FAIR and the
+ * house keeps the overround. (The old code drew the winner UNIFORMLY while
+ * pricing odds from form — every longshot was +EV against the book.)
+ * Deterministic for a given (seed, raceId).
+ */
+function winnerFromSeed(seed: string, raceId: string, probs: number[]): number {
+  const n = probs.length;
+  if (n === 0) return 1;
+  const x = parseInt(sha256Hex(`${seed}:${raceId}:winner`).slice(0, 8), 16);
+  const u = x / 4294967296; // 0..1
+  const total = probs.reduce((a, b) => a + Math.max(0, b), 0);
+  if (!(total > 0)) return (x % n) + 1; // degenerate field — uniform fallback
+  let acc = 0;
+  for (let i = 0; i < n; i++) {
+    acc += Math.max(0, probs[i]!) / total;
+    if (u <= acc || i === n - 1) return i + 1;
+  }
+  return n;
+}
+
+function placesFromSeed(seed: string, raceId: string, probs: number[]) {
+  const n = probs.length;
+  const winner = winnerFromSeed(seed, raceId, probs);
   const rest: number[] = [];
   for (let i = 1; i <= n; i++) if (i !== winner) rest.push(i);
   const r = rng(parseInt(sha256Hex(`${seed}:${raceId}:order`).slice(0, 8), 16) >>> 0);
@@ -167,26 +190,21 @@ export function placesFromSeed(seed: string, raceId: string, n: number) {
   return { winner, places: [winner, ...rest] };
 }
 
-export function winnerFromSeed(seed: string, raceId: string, n: number) {
-  const x = parseInt(sha256Hex(`${seed}:${raceId}:winner`).slice(0, 8), 16);
-  return (x % n) + 1;
-}
-
-export function applyFair(card: RaceCard, fair?: FairRace | null): RaceCard {
+function applyFair(card: RaceCard, fair?: FairRace | null): RaceCard {
   if (!fair) return card;
-  const { winner, places } = placesFromSeed(fair.seed, card.id, card.runners.length);
+  const { winner, places } = placesFromSeed(fair.seed, card.id, card.runners.map((r) => r.form));
   return { ...card, winner, places, commit: fair.commit, seed: fair.seed };
 }
 
-export function makeFair(kind: RaceKind, id: string, n: number): FairRace {
+function makeFair(kind: RaceKind, id: string, probs: number[]): FairRace {
   const seed = randomHex(32);
   const commit = sha256Hex(seed);
-  return { id, kind, seed, commit, winner: winnerFromSeed(seed, id, n) };
+  return { id, kind, seed, commit, winner: winnerFromSeed(seed, id, probs) };
 }
 
-export function verifyFair(fair: { seed: string; commit: string; winner: number; id: string }, n: number) {
+export function verifyFair(fair: { seed: string; commit: string; winner: number; id: string }, probs: number[]) {
   if (sha256Hex(fair.seed) !== fair.commit) return false;
-  return winnerFromSeed(fair.seed, fair.id, n) === fair.winner;
+  return winnerFromSeed(fair.seed, fair.id, probs) === fair.winner;
 }
 
 export function ensureRace(s: EngineState, kind: RaceKind, now = Date.now()): EngineState {
@@ -194,7 +212,7 @@ export function ensureRace(s: EngineState, kind: RaceKind, now = Date.now()): En
   const games = s.games ?? emptyGames();
   const races = { ...(games.races ?? {}) };
   if (races[card.id]) return s.games ? s : { ...s, games };
-  races[card.id] = makeFair(kind, card.id, card.runners.length);
+  races[card.id] = makeFair(kind, card.id, card.runners.map((r) => r.form));
   return { ...s, games: { ...games, races } };
 }
 
@@ -217,7 +235,7 @@ export function fieldAt(card: RaceCard, now: number) {
 }
 
 /** Even pace, small wobble. Winner has the highest mean speed; nobody surges then stalls. */
-export function raceX(t: number, place: number, no: number, seed: number) {
+function raceX(t: number, place: number, no: number, seed: number) {
   const tt = Math.min(1, Math.max(0, t));
   const finish = 1 - place * 0.015;
   const r = rng(seed ^ Math.imul(no + 13, 2654435761) ^ Math.imul(place + 7, 1597334677));
@@ -234,7 +252,7 @@ export function shortHash(hex: string, n = 10) {
   return hex.slice(0, n);
 }
 
-export function liability(odds: number, stake: number) {
+function liability(odds: number, stake: number) {
   return stake * Math.max(0, odds - 1);
 }
 
@@ -266,7 +284,7 @@ export function marketOdds(card: RaceCard, market: BetMarket, a: number, b?: num
   return roundOdds(win);
 }
 
-export function ticketHits(b: GameBet, places: number[]) {
+function ticketHits(b: GameBet, places: number[]) {
   const m = b.market ?? "win";
   const i = places.indexOf(b.runner);
   if (m === "win") return i === 0;
@@ -341,7 +359,7 @@ export function placeTickets(
   return placeBet(s, kind, a, stake, now, market);
 }
 
-export function cardForBet(b: GameBet, games: GamesState, now = Date.now()): RaceCard {
+function cardForBet(b: GameBet, games: GamesState, now = Date.now()): RaceCard {
   const start = Number(String(b.raceId).split("-")[1]);
   const probe = Number.isFinite(start) ? start + POST_AT + RUN_MS / 2 : now;
   return applyFair(makeCard(b.kind, probe), games.races?.[b.raceId]);
@@ -474,6 +492,10 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
     vault -= pay;
     wpit += pay;
     realized += pay - b.stake;
+    // Book-insolvency honesty: with fair (form-weighted) winners the house
+    // keeps the overround and this should never trigger — but if it ever
+    // does, the ticket must SAY it was short-paid, not quietly "won".
+    const short = pay < payout - 1e-12;
     fills.unshift({
       id: uid("f"),
       t: now,
@@ -484,7 +506,9 @@ export function settleGames(s: EngineState, now = Date.now()): EngineState {
       price: b.odds,
       fee: 0,
       pnl: pay - b.stake,
-      note: `Official ${card.id} · ${fracOdds(b.odds)} · seed ${shortHash(fair?.seed ?? "")}`,
+      note: `Official ${card.id} · ${fracOdds(b.odds)} · seed ${shortHash(fair?.seed ?? "")}${
+        short ? ` · BOOK SHORT: paid ${pay.toFixed(2)} of ${payout.toFixed(2)}` : ""
+      }`,
       before,
       after: { ...before, wpit },
       fair: proof,
@@ -523,7 +547,11 @@ export function refundOpenBets(s: EngineState): EngineState {
     games: {
       ...games,
       vaultWpit: Math.max(0, games.vaultWpit - refund),
-      bets: games.bets.map((b) => (b.status === "open" ? { ...b, status: "lost" as const, payout: 0 } : b)),
+      // Refunded tickets are NOT "lost" — the stake came back. Dedicated
+      // status so the UI can say "refunded" instead of a wall of losses.
+      bets: games.bets.map((b) =>
+        b.status === "open" ? { ...b, status: "refunded" as const, payout: 0 } : b,
+      ),
     },
   };
 }
@@ -539,7 +567,7 @@ export type TicketView = {
   name: string;
   stake: number;
   odds: number;
-  status: "open" | "won" | "lost";
+  status: "open" | "won" | "lost" | "refunded";
   payout: number;
   legs: number;
 };
@@ -560,8 +588,9 @@ export function groupTickets(bets: GameBet[]): TicketView[] {
     const stake = legs.reduce((a, b) => a + b.stake, 0);
     const won = legs.filter((b) => b.status === "won");
     const open = legs.some((b) => b.status === "open");
+    const refunded = legs.length > 0 && legs.every((b) => b.status === "refunded");
     const payout = won.reduce((a, b) => a + b.payout, 0);
-    const status: TicketView["status"] = open ? "open" : won.length ? "won" : "lost";
+    const status: TicketView["status"] = open ? "open" : won.length ? "won" : refunded ? "refunded" : "lost";
     const names = new Set<string>();
     for (const b of legs) {
       for (const p of b.name.split(/\s*[/|>]\s*/)) {

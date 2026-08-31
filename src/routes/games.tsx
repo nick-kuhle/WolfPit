@@ -402,17 +402,35 @@ function Tickets() {
             key={b.id}
             className={cn(
               "rounded-[var(--radius-lg)] border p-3",
-              b.status === "won" ? "border-up/40 bg-up/10" : "border-down/50 bg-down/15",
+              b.status === "won"
+                ? "border-up/40 bg-up/10"
+                : b.status === "refunded"
+                  ? "border-brass/40 bg-brass/10"
+                  : "border-down/50 bg-down/15",
             )}
           >
-            <div className={cn("font-mono text-[10px] uppercase tracking-wider", b.status === "won" ? "text-up" : "text-down")}>
+            <div
+              className={cn(
+                "font-mono text-[10px] uppercase tracking-wider",
+                b.status === "won" ? "text-up" : b.status === "refunded" ? "text-brass" : "text-down",
+              )}
+            >
               {b.status} · {b.market} · {b.kind}
               {b.legs > 1 ? ` · box ${b.legs}` : ""}
             </div>
             <div className="font-display text-xl">{b.name}</div>
-            <div className={cn("font-mono text-[12px]", b.status === "won" ? "text-up" : "text-down")}>
+            <div
+              className={cn(
+                "font-mono text-[12px]",
+                b.status === "won" ? "text-up" : b.status === "refunded" ? "text-brass" : "text-down",
+              )}
+            >
               {fmtQty(b.stake)} WPIT @ {fracOdds(b.odds)}
-              {b.status === "won" ? ` · prize ${fmtQty(b.payout)}` : ` · lost ${fmtQty(b.stake)}`}
+              {b.status === "won"
+                ? ` · prize ${fmtQty(b.payout)}`
+                : b.status === "refunded"
+                  ? " · stake returned"
+                  : ` · lost ${fmtQty(b.stake)}`}
             </div>
           </article>
         ))}

@@ -2,7 +2,7 @@
 // a real deployment is wired (VITE_CHAIN=base|base-sepolia AND VITE_VAULT is a
 // valid 0x address). Everything else is paper/sim, and the UI says so. The
 // deploy contract lives in env.example + docs/DEV.md.
-export type ChainMode = "sim" | "base-sepolia" | "base";
+type ChainMode = "sim" | "base-sepolia" | "base";
 
 export type ChainState = {
   mode: ChainMode;
@@ -29,14 +29,14 @@ function envVar(key: string): string | undefined {
   }
 }
 
-export function chainMode(raw?: string): ChainMode {
+function chainMode(raw?: string): ChainMode {
   const v = ((raw ?? envVar("VITE_CHAIN")) || "sim").toLowerCase();
   if (v === "base") return "base";
   if (v === "base-sepolia" || v === "sepolia") return "base-sepolia";
   return "sim";
 }
 
-export function isEvmAddress(v?: string): boolean {
+function isEvmAddress(v?: string): boolean {
   return typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
 }
 

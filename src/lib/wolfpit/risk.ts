@@ -1,15 +1,15 @@
-import { DERIV_FEE, FUT_IM, UTIL_CAP, type EngineState, type FutSide, type OptType } from "./types";
+import { DERIV_FEE, UTIL_CAP, type EngineState, type FutSide, type OptType } from "./types";
 import { bsCall, bsGamma, bsPut, bsVega, clamp, ivSmile, yearsTo } from "./math";
 
-export const GAMMA_NAV = 0.02;
-export const VEGA_NAV = 0.15;
-export const OI_EXPIRY = 0.25;
-export const OI_STRIKE = 0.1;
-export const FILL_BAND = 0.1;
-export const INSURANCE_NAV_MIN = 0.01;
+const GAMMA_NAV = 0.02;
+const VEGA_NAV = 0.15;
+const OI_EXPIRY = 0.25;
+const OI_STRIKE = 0.1;
+const FILL_BAND = 0.1;
+const INSURANCE_NAV_MIN = 0.01;
 export const CIRCUIT_MS = 15 * 60 * 1000;
-export const DT_1H = 1 / (365.25 * 24);
-export const MINUTES_YR = 365.25 * 24 * 60;
+const DT_1H = 1 / (365.25 * 24);
+const MINUTES_YR = 365.25 * 24 * 60;
 export const CALL_INV_VOL = 0.005;
 
 /**
@@ -22,17 +22,36 @@ export const CALL_INV_VOL = 0.005;
  * so they are not added again — their escrow side is the −trader credits term.
  */
 export function vaultNav(s: EngineState) {
+  // The vault is the counter-party to every trader future: its NAV must mark
+  // that book to market, or a big move leaves insurance/γ/ν caps computed on
+  // a stale NAV between settlements. (Trader long => vault short: −futPnl.)
+  let futuresPnl = 0;
+  for (const f of s.futures) {
+    const under = f.under ?? "ETH";
+    const mark = under === "ETH" ? s.eth : s.wpit;
+    const pnl = f.side === "long" ? (mark - f.entry) * f.sizeEth : (f.entry - mark) * f.sizeEth;
+    futuresPnl += -pnl; // vault is the counter-party
+  }
   let mtmShort = 0;
   for (const p of s.options) {
-    if (s.clock >= p.expiry) continue; // settled (payout booked) by settleAndLiq
     const under = p.under ?? "ETH";
     const spot = under === "WPIT" ? s.wpit : s.eth;
+    if (s.clock >= p.expiry) {
+      // Expired but not yet settled (settle runs every tick; the window is one
+      // step): value the short at INTRINSIC so NAV is continuous across the
+      // settlement — the payout then debits the vault 1:1 against this
+      // liability, and no transient NAV bloat loosens the Γ/ν/insurance caps.
+      const intrinsic =
+        p.type === "call" ? Math.max(spot - p.strike, 0) : Math.max(p.strike - spot, 0);
+      mtmShort -= intrinsic * p.sizeEth;
+      continue;
+    }
     const T = Math.max(yearsTo(p.expiry, s.clock), 1 / 365 / 24);
     const vol = ivSmile(s.iv, spot, p.strike, T);
     const mid = p.type === "call" ? bsCall(spot, p.strike, T, 0.03, vol) : bsPut(spot, p.strike, T, 0.03, vol);
     mtmShort -= mid * p.sizeEth;
   }
-  return s.vault.eth * s.eth + s.vault.usdc + mtmShort - (s.vault.escrowUsdc ?? 0) + (s.insuranceUsdc ?? 0);
+  return s.vault.eth * s.eth + s.vault.usdc + mtmShort + futuresPnl - (s.vault.escrowUsdc ?? 0) + (s.insuranceUsdc ?? 0);
 }
 
 
@@ -71,7 +90,7 @@ export function circuitActive(s: EngineState) {
   return (s.circuitUntil ?? 0) > s.clock;
 }
 
-export function ret5m(s: EngineState) {
+function ret5m(s: EngineState) {
   const c = s.candles;
   if (c.length < 6) return 0;
   const a = c[c.length - 6]!.c;
@@ -80,7 +99,7 @@ export function ret5m(s: EngineState) {
   return (b - a) / a;
 }
 
-export function circuitThreshold(s: EngineState) {
+function circuitThreshold(s: EngineState) {
   return 3 * s.iv * Math.sqrt(5 / MINUTES_YR);
 }
 
@@ -100,8 +119,8 @@ export function gammaCash1h(gammaAbs: number, spot: number, iv: number) {
 }
 
 /** Stress vol for the insurance-vs-hedge-error test (MM.md: "under 80% ETH vol"). */
-export const HE_STRESS_VOL = 0.8;
-export const Z99 = 2.326;
+const HE_STRESS_VOL = 0.8;
+const Z99 = 2.326;
 
 /**
  * 99th-percentile 1-hour hedge error at the stress vol (MM.md):
@@ -113,18 +132,64 @@ export function hedgeError99(spot: number, gammaAbs: number) {
   return 0.5 * Math.abs(gammaAbs) * dS * dS;
 }
 
-export function oiExpiry(s: EngineState, expiry: number) {
-  let n = 0;
-  for (const p of s.options) if (p.expiry === expiry) n += p.sizeEth;
-  for (const p of s.futures) if (p.expiry === expiry) n += p.sizeEth;
-  return n;
+/**
+ * Projected NET open-interest exposure at an expiry after an add, in ETH.
+ *
+ * The engine flattens a new futures fill against opposite-side futures on the
+ * same (under, expiry) before booking it, so the OI cap must be evaluated on
+ * the NETTED book — otherwise a fill that would REDUCE exposure is rejected
+ * once gross OI sits near the cap (false rejection). Options never flatten, so
+ * they are additive to their delta side:
+ *
+ *   vault-short side  = long futures + short calls
+ *   vault-long side   = short futures + short puts
+ *
+ * `add` is either { side } for futures or { type } for options. Returns the
+ * larger side after netting = the gross exposure that must fit the cap.
+ */
+function projectedExpiryExposure(
+  s: EngineState,
+  expiry: number,
+  add?: { side?: FutSide; type?: OptType; sizeEth: number },
+): number {
+  let futLong = 0;
+  let futShort = 0;
+  let optCall = 0;
+  let optPut = 0;
+  for (const p of s.futures) {
+    if (p.expiry !== expiry) continue;
+    if (p.side === "long") futLong += p.sizeEth;
+    else futShort += p.sizeEth;
+  }
+  for (const p of s.options) {
+    if (p.expiry !== expiry) continue;
+    if (p.type === "call") optCall += p.sizeEth;
+    else optPut += p.sizeEth;
+  }
+  const size = add?.sizeEth ?? 0;
+  if (add) {
+    if (add.side === "long") {
+      const flat = Math.min(size, futShort);
+      futLong += size - flat;
+      futShort -= flat;
+    } else if (add.side === "short") {
+      const flat = Math.min(size, futLong);
+      futShort += size - flat;
+      futLong -= flat;
+    } else if (add.type === "call") {
+      optCall += size;
+    } else if (add.type === "put") {
+      optPut += size;
+    }
+  }
+  return Math.max(futLong + optCall, futShort + optPut);
 }
 
-export function oiStrike(s: EngineState, strike: number) {
+function oiStrike(s: EngineState, strike: number) {
   return s.options.filter((p) => p.strike === strike).reduce((a, p) => a + p.sizeEth, 0);
 }
 
-export function shortCallSize(s: EngineState) {
+function shortCallSize(s: EngineState) {
   return s.options.filter((p) => p.type === "call").reduce((a, p) => a + p.sizeEth, 0);
 }
 
@@ -132,7 +197,7 @@ export function haltShortGamma(s: EngineState) {
   return insuranceRatio(s) < INSURANCE_NAV_MIN || circuitActive(s);
 }
 
-export function remainingCap(s: EngineState, side: FutSide) {
+function remainingCap(s: EngineState, side: FutSide) {
   if (side === "long") return Math.max(0, s.vault.eth * UTIL_CAP - s.vault.reservedEth);
   return Math.max(0, (s.vault.usdc * UTIL_CAP) / s.eth - s.vault.reservedUsdc / s.eth);
 }
@@ -141,13 +206,13 @@ export function maxFillEth(s: EngineState, side: FutSide) {
   return remainingCap(s, side) * FILL_BAND;
 }
 
-export function projectedOptionGamma(s: EngineState, type: OptType, strike: number, expiry: number, sizeEth: number) {
+function projectedOptionGamma(s: EngineState, type: OptType, strike: number, expiry: number, sizeEth: number) {
   const T = yearsTo(expiry, s.clock);
   const vol = smileVol(s, type, strike, T);
   return -bsGamma(s.eth, strike, T, 0.03, vol) * sizeEth;
 }
 
-export function projectedOptionVega(s: EngineState, type: OptType, strike: number, expiry: number, sizeEth: number) {
+function projectedOptionVega(s: EngineState, type: OptType, strike: number, expiry: number, sizeEth: number) {
   const T = yearsTo(expiry, s.clock);
   const vol = smileVol(s, type, strike, T);
   return -bsVega(s.eth, strike, T, 0.03, vol) * 100 * sizeEth;
@@ -171,7 +236,7 @@ export function rejectFuture(s: EngineState, side: FutSide, sizeEth: number, exp
   if (s.account.usdc + 1e-9 < im + fee) return "Not enough buying power for initial margin + fee.";
   const cap = remainingCap(s, side);
   if (sizeEth > cap + 1e-9) return `Inventory cap. Max ${cap.toFixed(4)} ETH net this side.`;
-  if (oiExpiry(s, expiry) + sizeEth > s.vault.eth * OI_EXPIRY + 1e-9) {
+  if (projectedExpiryExposure(s, expiry, { side, sizeEth }) > s.vault.eth * OI_EXPIRY + 1e-9) {
     return "OI cap on this expiry (25% of vault ETH).";
   }
   const fillMax = cap * FILL_BAND;
@@ -204,7 +269,7 @@ export function rejectOption(
     const free = Math.max(0, s.vault.usdc - s.vault.reservedUsdc);
     if (free < lock) return "Vault will not sell a naked put. Not enough USDC to cash-secure.";
   }
-  if (oiExpiry(s, expiry) + sizeEth > s.vault.eth * OI_EXPIRY + 1e-9) {
+  if (projectedExpiryExposure(s, expiry, { type, sizeEth }) > s.vault.eth * OI_EXPIRY + 1e-9) {
     return "OI cap on this expiry (25% of vault ETH).";
   }
   if (oiStrike(s, strike) + sizeEth > s.vault.eth * OI_STRIKE + 1e-9) {

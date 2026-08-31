@@ -27,8 +27,3 @@ export const useTerms = create<TermsState>()(
     { name: "wolfpit-terms-v1", skipHydration: true },
   ),
 );
-
-export function termsOk() {
-  const s = useTerms.getState();
-  return s.accepted && s.version === TERMS_VERSION;
-}

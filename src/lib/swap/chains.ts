@@ -42,7 +42,7 @@ import {
 import type { EthProvider } from "@/lib/wallet/session";
 
 /** 0x sentinel for the chain-native asset in Swap API calls. */
-export const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 export type SwapChain = {
   id: number;

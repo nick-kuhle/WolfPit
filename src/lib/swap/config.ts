@@ -132,9 +132,5 @@ export const SPOT_TOKENS: SpotToken[] = [
   { symbol: "USDC", name: "USD Coin", address: BASE_TOKENS.USDC, decimals: 6 },
 ];
 
-export function tokenBySymbol(sym: string): SpotToken | undefined {
-  return SPOT_TOKENS.find((t) => t.symbol === sym.toUpperCase());
-}
-
 /** Slippage-tolerance presets shown in the UI (bps). */
 export const SLIPPAGE_PRESETS = [10, 30, 50, 100] as const;

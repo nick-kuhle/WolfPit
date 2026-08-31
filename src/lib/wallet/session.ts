@@ -15,7 +15,7 @@ declare global {
   }
 }
 
-export const CHAINS: Record<number, string> = {
+const CHAINS: Record<number, string> = {
   1: "Ethereum",
   8453: "Base",
   42161: "Arbitrum",
@@ -161,39 +161,6 @@ export function getProvider(): EthProvider | null {
  * Ensure the wallet is on Base (8453), prompting a network switch / add if not.
  * Returns true when the wallet ends up on Base.
  */
-export async function switchToBase(): Promise<boolean> {
-  const eth = pickProvider();
-  if (!eth) return false;
-  const BASE_HEX = "0x2105"; // 8453
-  try {
-    await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: BASE_HEX }] });
-    return true;
-  } catch (e) {
-    const code = (e as { code?: number })?.code;
-    // 4902 = chain not added to the wallet yet.
-    if (code === 4902) {
-      try {
-        await eth.request({
-          method: "wallet_addEthereumChain",
-          params: [
-            {
-              chainId: BASE_HEX,
-              chainName: "Base",
-              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-              rpcUrls: ["https://mainnet.base.org"],
-              blockExplorerUrls: ["https://basescan.org"],
-            },
-          ],
-        });
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    return false;
-  }
-}
-
 export function dappUrl() {
   if (typeof window === "undefined") return "https://wolfpit-protocol.vercel.app";
   return window.location.href;

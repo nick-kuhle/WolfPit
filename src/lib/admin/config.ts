@@ -12,7 +12,7 @@ export type ContractBook = {
   stake: string;
 };
 
-export type AdminConfig = {
+type AdminConfig = {
   listingsPaused: boolean;
   geoFenceUs: boolean;
   chainOverride: "sim" | "base-sepolia" | "base" | "";

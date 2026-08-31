@@ -19,11 +19,6 @@ export function fmtPx(n: number) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 6 });
 }
 
-export function fmtSigned(n: number, digits = 2) {
-  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
-  return `${sign}${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
-}
-
 export function fmtPct(n: number) {
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
   return `${sign}${(Math.abs(n) * 100).toFixed(2)}%`;

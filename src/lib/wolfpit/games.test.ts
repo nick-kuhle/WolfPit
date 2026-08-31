@@ -14,6 +14,7 @@ import {
   makeCard,
   placeBet,
   placeTickets,
+  refundOpenBets,
   settleGames,
   slotStart,
   verifyFair,
@@ -50,10 +51,11 @@ describe("pit racetrack", () => {
     const start = slotStart(2_000_000_000_000, "horse");
     const now = start + 1_000;
     const s = ensureRace(initialState(), "horse", now);
-    const fair = s.games?.races?.[cardFor("horse", now, s.games).id];
+    const card = cardFor("horse", now, s.games);
+    const fair = s.games?.races?.[card.id];
     assert.ok(fair);
     assert.equal(fair!.commit, sha256Hex(fair!.seed));
-    assert.ok(verifyFair({ ...fair! }, 8));
+    assert.ok(verifyFair({ ...fair! }, card.runners.map((r) => r.form)));
   });
 
   it("takes a ticket from WPIT into the games vault", () => {
@@ -269,5 +271,74 @@ describe("pit racetrack", () => {
     assert.equal(win?.status, "won");
     assert.ok(done.account.wpit > 900);
     assert.ok(Math.abs(done.account.wpit - (900 + (win?.payout ?? 0))) < 1e-6);
+  });
+
+  it("draws winners weighted by form, not uniform", () => {
+    // Each card re-seeds its field, so track the ACTUAL form favorite per
+    // race. Over many seeds the favorite's observed win rate must track its
+    // form share and sit far above the uniform 1/8 baseline — the pre-fix
+    // uniform draw failed this by construction.
+    const n = 4_000;
+    let favWins = 0;
+    let expFav = 0;
+    for (let k = 0; k < n; k++) {
+      const now = 4_000_000_000_000 + k;
+      const s = ensureRace(initialState(), "horse", now);
+      const card = cardFor("horse", now, s.games);
+      const forms = card.runners.map((r) => r.form);
+      const sum = forms.reduce((a, b) => a + b, 0);
+      const fav = forms.indexOf(Math.max(...forms));
+      expFav += forms[fav]! / sum;
+      if (card.winner === fav + 1) favWins += 1;
+      const fair = s.games?.races?.[card.id];
+      assert.ok(fair && verifyFair({ ...fair }, forms));
+    }
+    const obs = favWins / n;
+    const exp = expFav / n;
+    assert.ok(Math.abs(obs - exp) < 0.04, `favorite ${obs} vs expected ${exp}`);
+    assert.ok(obs > 0.16, `favorite ${obs} — uniform baseline is 1/8`);
+  });
+
+  it("refunds open stakes as refunded, not lost", () => {
+    const start = slotStart(2_700_000_000_000, "horse");
+    const now = start + 1_000;
+    let s0 = initialState();
+    s0.account.wpit = 1_000;
+    s0 = ensureRace(s0, "horse", now);
+    const card = cardFor("horse", now, s0.games);
+    const r = placeBet(s0, "horse", card.runners[0]!.no, 100, now);
+    assert.equal(typeof r, "object");
+    if (typeof r === "string") throw new Error(r);
+    const refunded = refundOpenBets(r);
+    assert.equal(refunded.games?.bets[0]?.status, "refunded");
+    assert.equal(refunded.games?.bets[0]?.payout, 0);
+    assert.ok(Math.abs(refunded.account.wpit - 1_000) < 1e-6);
+    assert.ok(Math.abs((refunded.games?.vaultWpit ?? 0) - GAMES_VAULT_SEED) < 1e-6);
+    const view = groupTickets(refunded.games?.bets ?? [])[0];
+    assert.equal(view?.status, "refunded");
+    assert.ok(Math.abs((view?.stake ?? 0) - 100) < 1e-6);
+  });
+
+  it("marks a short-paid winner honestly (BOOK SHORT note)", () => {
+    const start = slotStart(2_800_000_000_000, "horse");
+    const now = start + 1_000;
+    let s0 = initialState();
+    s0.account.wpit = 5_000;
+    s0 = ensureRace(s0, "horse", now);
+    const card = cardFor("horse", now, s0.games);
+    const r = placeBet(s0, "horse", card.winner, 100, now);
+    assert.equal(typeof r, "object");
+    if (typeof r === "string") throw new Error(r);
+    // Drain the book: only 10 WPIT left to pay a ~200 stake×odds ticket.
+    const drained = { ...r, games: { ...r.games!, vaultWpit: 10 } };
+    const done = settleGames(drained, card.settleAt + 50);
+    const win = done.games?.bets[0];
+    assert.ok(win, "bet settled");
+    assert.equal(win!.status, "won");
+    assert.equal(win.payout, 10);
+    const note = done.fills.find((f) => f.symbol.includes(card.runners.find((x) => x.no === card.winner)!.name))?.note ?? "";
+    assert.ok(note.includes("BOOK SHORT"), note);
+    assert.ok(note.includes("paid 10.00 of"), note);
+    assert.ok(Math.abs(done.account.wpit - 4_910) < 1e-6);
   });
 });

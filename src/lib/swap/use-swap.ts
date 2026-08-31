@@ -36,7 +36,7 @@ export type SwapPhase =
   | "done"
   | "error";
 
-export type SwapState = {
+type SwapState = {
   chainId: number;
   sell: SpotToken;
   buy: SpotToken;
