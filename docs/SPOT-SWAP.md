@@ -9,10 +9,27 @@ touches the sim.
 
 | Path              | What it is                                                        |
 |-------------------|-------------------------------------------------------------------|
-| `/trade`          | ONE trade page with a **Simulation / Live · Base** toggle (top bar) |
-| `/trade?mode=live`| Live desk — real on-chain market swaps (ETH · WETH · USDC)        |
+| `/trade`          | ONE trade page with a **Simulation / Live** toggle (top bar)      |
+| `/trade?mode=live`| Live desk — real on-chain market swaps, any supported chain       |
 | `/swap`           | Redirects to `/trade?mode=live` (legacy links keep working)       |
 | `/info`           | Public fees + protocol info page (linked from the **More** tab)   |
+
+**Chains.** The live desk opens on **Base (★ default)** and covers every chain
+the aggregator serves: Ethereum, Arbitrum, Optimism, Polygon, BNB, Avalanche,
+Gnosis, Celo, Mantle, Blast, Linea, Scroll, ZKsync, Unichain, Berachain
+(`src/lib/swap/chains.ts`). Selecting a chain re-quotes on it, shows the
+wallet's current network vs. selection, and prompts switch/add in the wallet
+when you submit.
+
+**Tokens.** Any tradeable token: the token picker searches the aggregator's
+index by symbol/name, always offers the chain-native asset, and resolves
+pasted contract addresses (falling back to direct on-chain ERC-20 metadata
+reads). Base also shows curated quick picks (ETH · WETH · USDC).
+
+**User knobs.** Slippage tolerance is user-settable in the card (0.1 / 0.3 /
+0.5 / 1 % presets + custom). The card also surfaces network, rate, route,
+fee % AND fee amount, min received, price impact, and estimated gas cost in
+the native token.
 
 The toggle is the only way real funds are reached: the default is Simulation
 (paper, $100k), `?mode=live` or the persisted localStorage choice switches to
@@ -30,11 +47,14 @@ the live desk. The dock's **Trade** tab highlights for both modes.
    attached as the 0x affiliate fee (`swapFeeRecipient` + `swapFeeBps`), so it
    is collected **on-chain in the same transaction** and paid directly to the
    WolfPit wallet.
-4. **WPIT discount is verified server-side.** For firm quotes (taker present)
+4. **Multi-chain.** `chainId` rides the quote request (validated against the
+   catalog server-side). The WPIT discount only ever applies on Base, where
+   WPIT exists.
+5. **WPIT discount is verified server-side.** For firm quotes (taker present)
    the server reads `balanceOf(WPIT, taker)` on-chain and prices the fee from
    that; the client's `holdsWpit` flag is a display hint only. RPC failure is
    conservative: full fee. (Zero RPC calls while `VITE_WPIT` is unset.)
-5. `useSwap` (`src/lib/swap/use-swap.ts`) drives the flow: debounced indicative
+6. `useSwap` (`src/lib/swap/use-swap.ts`) drives the flow: debounced indicative
    pricing while typing → firm quote on submit → ensure the wallet is on Base →
    ERC-20 approval if needed (native ETH needs none) → send swap → wait for the
    receipt.

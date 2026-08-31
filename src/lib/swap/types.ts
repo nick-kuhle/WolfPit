@@ -3,7 +3,9 @@
 export type SwapSide = "sell";
 
 export type QuoteRequest = {
-  /** Sell token address (0xeee… for native ETH). */
+  /** Chain to trade on (see SWAP_CHAINS in chains.ts; default Base 8453). */
+  chainId?: number;
+  /** Sell token address (0xeee… for the native asset). */
   sellToken: string;
   /** Buy token address. */
   buyToken: string;
@@ -43,8 +45,10 @@ export type SwapTx = {
 };
 
 export type QuoteResult =
-  | {
+    | {
       ok: true;
+      /** Chain the quote is valid on. */
+      chainId: number;
       /** Sell amount echoed back (base units). */
       sellAmount: string;
       /** Expected buy amount (base units). */
@@ -63,6 +67,10 @@ export type QuoteResult =
       allowanceAmount?: string;
       /** Estimated total gas (wei), if provided. */
       gas?: string;
+      /** Estimated total network fee in native wei (gas × gas price), if provided. */
+      gasFee?: string;
+      /** Firm-quote quoteId (echoed back on /price re-check), if provided. */
+      quoteId?: string;
     }
   | {
       ok: false;
@@ -70,3 +78,17 @@ export type QuoteResult =
       /** true when the failure is "no liquidity route", not a config/key error. */
       noRoute?: boolean;
     };
+
+/** A token found via search (tokens API or address resolution). */
+export type FoundToken = {
+  chainId: number;
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  native?: boolean;
+};
+
+export type TokenSearchResult =
+  | { ok: true; tokens: FoundToken[]; source: "aggregator" | "fallback" }
+  | { ok: false; error: string };

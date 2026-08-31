@@ -19,12 +19,9 @@
 
 export const BASE_CHAIN_ID = 8453;
 
-/** Sentinel 0x uses for the chain's native asset (ETH) in Swap API calls. */
-export const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
-
 /** Canonical Base token addresses (public; verify against docs at deploy). */
 export const BASE_TOKENS = {
-  ETH: NATIVE_TOKEN,
+  ETH: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
   WETH: "0x4200000000000000000000000000000000000006",
   USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 } as const;
@@ -120,11 +117,15 @@ export type SpotToken = {
   name: string;
   address: string;
   decimals: number;
-  /** true for the chain-native asset (ETH), which needs no approval. */
+  /** true for the chain-native asset (ETH/BNB/POL/…), which needs no approval. */
   native?: boolean;
 };
 
-/** The launch spot universe: ETH, WETH, USDC on Base. */
+/**
+ * Quick-pick tokens on Base (the default chain). Every other token on every
+ * supported chain is reachable via search / pasting a contract address — see
+ * token-search.ts and the token picker in swap-card.tsx.
+ */
 export const SPOT_TOKENS: SpotToken[] = [
   { symbol: "ETH", name: "Ether", address: BASE_TOKENS.ETH, decimals: 18, native: true },
   { symbol: "WETH", name: "Wrapped Ether", address: BASE_TOKENS.WETH, decimals: 18 },
@@ -134,3 +135,6 @@ export const SPOT_TOKENS: SpotToken[] = [
 export function tokenBySymbol(sym: string): SpotToken | undefined {
   return SPOT_TOKENS.find((t) => t.symbol === sym.toUpperCase());
 }
+
+/** Slippage-tolerance presets shown in the UI (bps). */
+export const SLIPPAGE_PRESETS = [10, 30, 50, 100] as const;

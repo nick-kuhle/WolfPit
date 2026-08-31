@@ -1,34 +1,29 @@
 /**
- * useSwap — orchestrates the real on-chain spot flow:
- *   type amount → debounced indicative quote → firm quote → (approve) → swap.
+ * useSwap — orchestrates the real on-chain multi-chain spot flow:
+ *   pick chain → pick/search tokens → debounced indicative quote →
+ *   firm quote → (approve) → swap → receipt.
  *
  * Wallet session comes from src/lib/wallet/session.ts (shared across the app).
- * Quotes come from the server fn (0x proxy). Chain reads/writes use viem
- * against the injected provider.
+ * Quotes + token search come from server fns (aggregator proxy, key stays
+ * server-side). Chain reads/writes use viem against the injected provider.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { spotQuote } from "./actions";
-import {
-  SWAP_SLIPPAGE_BPS,
-  feeFor,
-  tokenBySymbol,
-  type SpotToken,
-} from "./config";
+import { BASE_CHAIN_ID, SWAP_SLIPPAGE_BPS, WPIT_TOKEN, feeFor, type SpotToken } from "./config";
+import { DEFAULT_CHAIN_ID, chainById, ensureChain, nativeTokenOf } from "./chains";
 import type { QuoteResult } from "./types";
 import {
   approveToken,
   fromBaseUnits,
-  holdsWpit as readHoldsWpit,
   sendSwapTx,
   toBaseUnits,
   tokenAllowance,
   tokenBalance,
   waitForReceipt,
 } from "./chain";
-import { useWallet, getProvider, switchToBase } from "@/lib/wallet/session";
+import { useWallet, getProvider } from "@/lib/wallet/session";
 import { ping } from "@/lib/wolfpit/alerts";
-import { BASE_CHAIN_ID } from "./config";
 
 export type SwapPhase =
   | "idle"
@@ -42,6 +37,7 @@ export type SwapPhase =
   | "error";
 
 export type SwapState = {
+  chainId: number;
   sell: SpotToken;
   buy: SpotToken;
   amount: string;
@@ -64,10 +60,26 @@ function shortAmt(v: string): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
-export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
+function baseQuickPicks(chainId: number): { sell: SpotToken; buy: SpotToken } {
+  if (chainId === DEFAULT_CHAIN_ID) {
+    return {
+      sell: { symbol: "ETH", name: "Ether", address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", decimals: 18, native: true },
+      buy: { symbol: "USDC", name: "USD Coin", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+    };
+  }
+  const native = nativeTokenOf(chainId);
+  if (native) return { sell: { ...native }, buy: { ...native } };
+  return {
+    sell: { symbol: "ETH", name: "Ether", address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", decimals: 18, native: true },
+    buy: { symbol: "USDC", name: "USD Coin", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+  };
+}
+
+export function useSwap() {
   const wallet = useWallet();
-  const [sell, setSell] = useState<SpotToken>(() => tokenBySymbol(initialSell)!);
-  const [buy, setBuy] = useState<SpotToken>(() => tokenBySymbol(initialBuy)!);
+  const [chainId, setChainId] = useState<number>(DEFAULT_CHAIN_ID);
+  const [pair, setPair] = useState(() => baseQuickPicks(DEFAULT_CHAIN_ID));
+  const { sell, buy } = pair;
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [phase, setPhase] = useState<SwapPhase>("idle");
@@ -76,11 +88,12 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
   const [sellBalance, setSellBalance] = useState<bigint | null>(null);
   const [buyBalance, setBuyBalance] = useState<bigint | null>(null);
   const [holds, setHolds] = useState(false);
+  const [slippageBps, setSlippageBps] = useState<number>(SWAP_SLIPPAGE_BPS);
   const quoteSeq = useRef(0);
 
-  const onBase = wallet.chainId === BASE_CHAIN_ID;
+  const onRightChain = wallet.chainId === chainId;
 
-  // Balances + WPIT holding whenever the wallet or token pair changes.
+  // Balances + WPIT holding whenever wallet / chain / pair changes.
   const refreshBalances = useCallback(async () => {
     const owner = wallet.address;
     if (!owner) {
@@ -90,24 +103,70 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
       return;
     }
     try {
-      const [sb, bb, hw] = await Promise.all([
-        tokenBalance(sell.address, owner),
-        tokenBalance(buy.address, owner),
-        readHoldsWpit(owner),
+      const [sb, bb] = await Promise.all([
+        tokenBalance(chainId, sell.address, owner),
+        tokenBalance(chainId, buy.address, owner),
       ]);
       setSellBalance(sb);
       setBuyBalance(bb);
-      setHolds(hw);
+      // WPIT exists on Base only — skip the read anywhere else.
+      setHolds(chainId === BASE_CHAIN_ID ? await readHoldsWpit(owner) : false);
     } catch {
       // Read failures leave balances unknown; the UI degrades gracefully.
     }
-  }, [wallet.address, sell.address, buy.address]);
+  }, [wallet.address, chainId, sell.address, buy.address]);
 
   useEffect(() => {
     void refreshBalances();
   }, [refreshBalances]);
 
-  // Debounced indicative quote as the user types.
+  /** Switch the active chain; resets to that chain's sensible default pair. */
+  const chooseChain = useCallback((next: number) => {
+    setChainId(next);
+    setPair(baseQuickPicks(next));
+    setAmount("");
+    setQuote(null);
+    setPhase("idle");
+    setError(null);
+    setTxHash(null);
+  }, []);
+
+  function setSellToken(t: SpotToken) {
+    if (t.address.toLowerCase() === buy.address.toLowerCase()) {
+      flip();
+      return;
+    }
+    setPair((p) => ({ ...p, sell: t }));
+    setQuote(null);
+    setPhase("idle");
+  }
+
+  function setBuyToken(t: SpotToken) {
+    if (t.address.toLowerCase() === sell.address.toLowerCase()) {
+      flip();
+      return;
+    }
+    setPair((p) => ({ ...p, buy: t }));
+    setQuote(null);
+    setPhase("idle");
+  }
+
+  function flip() {
+    setPair({ sell: buy, buy: sell });
+    setAmount("");
+    setQuote(null);
+    setPhase("idle");
+  }
+
+  function reset() {
+    setAmount("");
+    setQuote(null);
+    setPhase("idle");
+    setError(null);
+    setTxHash(null);
+  }
+
+  // Debounced indicative quote as the user types / pair or knobs change.
   useEffect(() => {
     const n = Number(amount);
     if (!amount || !Number.isFinite(n) || n <= 0) {
@@ -124,10 +183,11 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
         const sellAmount = toBaseUnits(amount, sell.decimals).toString();
         const res = await spotQuote({
           data: {
+            chainId,
             sellToken: sell.address,
             buyToken: buy.address,
             sellAmount,
-            slippageBps: SWAP_SLIPPAGE_BPS,
+            slippageBps,
             holdsWpit: holds,
           },
         });
@@ -142,25 +202,9 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
       }
     }, 350);
     return () => window.clearTimeout(t);
-  }, [amount, sell.address, sell.decimals, buy.address, holds]);
+  }, [amount, chainId, sell.address, sell.decimals, buy.address, buy.decimals, slippageBps, holds]);
 
-  function flip() {
-    setSell(buy);
-    setBuy(sell);
-    setAmount("");
-    setQuote(null);
-    setPhase("idle");
-  }
-
-  function reset() {
-    setAmount("");
-    setQuote(null);
-    setPhase("idle");
-    setError(null);
-    setTxHash(null);
-  }
-
-  /** Execute: firm quote → ensure Base → approve if needed → swap → confirm. */
+  /** Execute: firm quote → ensure chain → approve if needed → swap → confirm. */
   const execute = useCallback(async () => {
     const owner = wallet.address;
     const provider = getProvider();
@@ -171,10 +215,10 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
     }
     setError(null);
     try {
-      if (!onBase) {
-        const ok = await switchToBase();
+      if (!onRightChain) {
+        const ok = await ensureChain(provider, chainId);
         if (!ok) {
-          setError("Switch your wallet to Base to trade.");
+          setError(`Switch your wallet to ${chainById(chainId)?.label ?? "the selected chain"} to trade.`);
           setPhase("error");
           return;
         }
@@ -184,11 +228,12 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
       const sellAmount = toBaseUnits(amount, sell.decimals).toString();
       const firm = await spotQuote({
         data: {
+          chainId,
           sellToken: sell.address,
           buyToken: buy.address,
           sellAmount,
           taker: owner,
-          slippageBps: SWAP_SLIPPAGE_BPS,
+          slippageBps,
           holdsWpit: holds,
         },
       });
@@ -204,29 +249,23 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
         return;
       }
 
-      // ERC-20 approval (native ETH needs none).
+      // ERC-20 approval (native assets need none).
       if (!sell.native && firm.allowanceTarget) {
         const need = BigInt(firm.allowanceAmount ?? sellAmount);
-        const current = await tokenAllowance(sell.address, owner, firm.allowanceTarget);
+        const current = await tokenAllowance(chainId, sell.address, owner, firm.allowanceTarget);
         if (current < need) {
           setPhase("approving");
-          const ah = await approveToken(
-            provider,
-            owner,
-            sell.address,
-            firm.allowanceTarget,
-            BigInt(MAX_UINT),
-          );
-          await waitForReceipt(ah);
+          const ah = await approveToken(provider, owner, chainId, sell.address, firm.allowanceTarget, BigInt(MAX_UINT));
+          await waitForReceipt(chainId, ah);
         }
       }
 
       setPhase("swapping");
-      const hash = await sendSwapTx(provider, owner, firm.tx);
+      const hash = await sendSwapTx(provider, owner, chainId, firm.tx);
       setTxHash(hash);
       setPhase("confirming");
-      ping("Swap sent · settling on Base", "brass");
-      const ok = await waitForReceipt(hash);
+      ping("Swap sent · settling on-chain", "brass");
+      const ok = await waitForReceipt(chainId, hash);
       if (!ok) {
         setError("Transaction reverted on-chain.");
         setPhase("error");
@@ -247,12 +286,13 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
       setError(/reject|denied|user rejected/i.test(msg) ? "You rejected the transaction." : msg);
       setPhase("error");
     }
-  }, [wallet.address, onBase, amount, sell, buy, holds, refreshBalances]);
+  }, [wallet.address, onRightChain, chainId, amount, sell, buy, slippageBps, holds, refreshBalances]);
 
-  const fee = feeFor(holds);
+  const fee = feeFor(holds && chainId === BASE_CHAIN_ID);
 
   return {
     state: {
+      chainId,
       sell,
       buy,
       amount,
@@ -265,13 +305,27 @@ export function useSwap(initialSell = "ETH", initialBuy = "USDC") {
       holdsWpit: holds,
     } as SwapState,
     fee,
-    onBase,
-    setSell,
-    setBuy,
+    slippageBps,
+    setSlippageBps,
+    onRightChain,
+    chooseChain,
+    setSell: setSellToken,
+    setBuy: setBuyToken,
     setAmount,
     flip,
     reset,
     execute,
     fmtBal: (bal: bigint | null, t: SpotToken) => (bal === null ? "—" : fromBaseUnits(bal, t.decimals)),
   };
+}
+
+/** True when the wallet holds WPIT (Base-only read; catches throw → false). */
+async function readHoldsWpit(owner: string): Promise<boolean> {
+  if (!WPIT_TOKEN || !/^0x[0-9a-fA-F]{40}$/.test(WPIT_TOKEN)) return false;
+  try {
+    const bal = await tokenBalance(BASE_CHAIN_ID, WPIT_TOKEN, owner);
+    return bal > 0n;
+  } catch {
+    return false;
+  }
 }

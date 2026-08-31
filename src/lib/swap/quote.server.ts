@@ -24,9 +24,9 @@ import {
   WPIT_LIVE,
   WPIT_TOKEN,
 } from "./config";
+import { DEFAULT_CHAIN_ID, chainById, publicClientFor } from "./chains";
 import type { QuoteRequest, QuoteResult } from "./types";
-import { createPublicClient, erc20Abi, http, type Hex } from "viem";
-import { base } from "viem/chains";
+import { erc20Abi, type Hex } from "viem";
 
 const ZEROX_BASE = "https://api.0x.org/swap/permit2";
 
@@ -49,13 +49,13 @@ function feeBpsFor(holdsWpit: boolean | undefined): number {
  * When WPIT is live and a taker is present, we read balanceOf on-chain and use
  * that. On any RPC failure we fail conservative (no discount).
  */
-async function verifyHoldsWpit(taker: string): Promise<boolean> {
+async function verifyHoldsWpit(chainId: number, taker: string): Promise<boolean> {
+  // WPIT exists on Base only — on any other chain the discount cannot apply.
+  if (chainId !== BASE_CHAIN_ID) return false;
   if (!WPIT_TOKEN || !/^0x[0-9a-fA-F]{40}$/.test(WPIT_TOKEN)) return false;
+  const client = publicClientFor(chainId);
+  if (!client) return false;
   try {
-    const client = createPublicClient({
-      chain: base,
-      transport: http(process.env.BASE_RPC_URL?.trim() || undefined),
-    });
     const bal = (await client.readContract({
       address: WPIT_TOKEN as Hex,
       abi: erc20Abi,
@@ -72,6 +72,7 @@ type ZeroXIssue = { liquidityAvailable?: boolean };
 type ZeroXFee = { amount?: string; token?: string } | null;
 type ZeroXResponse = {
   liquidityAvailable?: boolean;
+  quoteId?: string;
   buyAmount?: string;
   sellAmount?: string;
   minBuyAmount?: string;
@@ -90,6 +91,7 @@ function toResult(
   holdsWpit: boolean | undefined,
   sellToken: string,
   wantTx: boolean,
+  chainId: number,
 ): QuoteResult {
   if (json.liquidityAvailable === false) {
     return { ok: false, error: "No liquidity route for this pair/size right now.", noRoute: true };
@@ -120,6 +122,7 @@ function toResult(
 
   return {
     ok: true,
+    chainId,
     sellAmount: json.sellAmount ?? "0",
     buyAmount,
     minBuyAmount: json.minBuyAmount ?? buyAmount,
@@ -135,6 +138,8 @@ function toResult(
     allowanceTarget: json.issues?.allowance?.spender ?? undefined,
     allowanceAmount: json.issues?.allowance?.actual ?? undefined,
     gas: json.transaction?.gas ?? json.gas,
+    gasFee: json.totalNetworkFee,
+    quoteId: json.quoteId,
   };
 }
 
@@ -160,19 +165,25 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
     return { ok: false, error: "Enter an amount." };
   }
 
+  const chainId = req.chainId ?? DEFAULT_CHAIN_ID;
+  const chain = chainById(chainId);
+  if (!chain) {
+    return { ok: false, error: `Unsupported chain (${chainId}).` };
+  }
+
   const wantTx = Boolean(req.taker);
 
   // Firm quotes price the fee from the SERVER-VERIFIED WPIT balance, not the
   // client's claim. (Indicative /price quotes keep the hint — nothing executes
   // on them, and the firm quote shows the real fee before signing.)
-  let holdsWpit = req.holdsWpit;
+  let holdsWpit = Boolean(req.holdsWpit) && chainId === BASE_CHAIN_ID;
   if (wantTx && WPIT_LIVE && req.taker) {
-    holdsWpit = await verifyHoldsWpit(req.taker);
+    holdsWpit = await verifyHoldsWpit(chainId, req.taker);
   }
   const feeBps = feeBpsFor(holdsWpit);
 
   const params = new URLSearchParams({
-    chainId: String(BASE_CHAIN_ID),
+    chainId: String(chainId),
     sellToken: req.sellToken,
     buyToken: req.buyToken,
     sellAmount: req.sellAmount,
@@ -209,5 +220,5 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
     return { ok: false, error: msg, noRoute: res.status === 400 };
   }
 
-  return toResult(json, feeBps, holdsWpit, req.sellToken, wantTx);
+  return toResult(json, feeBps, holdsWpit, req.sellToken, wantTx, chainId);
 }
