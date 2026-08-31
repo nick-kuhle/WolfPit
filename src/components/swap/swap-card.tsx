@@ -27,9 +27,18 @@ function fmtNum(v: string, dp = 6): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: dp });
 }
 
+/**
+ * SwapCard owns its own useSwap instance (standalone use). When you need to
+ * share swap state with something outside the card (e.g. a price chart for the
+ * selected pair), lift useSwap in the parent and render <SwapWidget swap={…} />.
+ */
 export function SwapCard() {
-  const w = useWallet();
   const swap = useSwap();
+  return <SwapWidget swap={swap} />;
+}
+
+export function SwapWidget({ swap }: { swap: ReturnType<typeof useSwap> }) {
+  const w = useWallet();
   const { state, fee, onRightChain } = swap;
   const q = state.quote;
   const chain = chainById(state.chainId);

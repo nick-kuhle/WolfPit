@@ -147,6 +147,18 @@ export function OrderTicket({
     bp - (est.usd > 0 && Number.isFinite(est.usd) ? est.usd : 0) + (side === "sell" && product === "spot" ? Math.abs(est.usd) : 0),
   );
 
+  /** Spot "you receive" estimate for the selected pool/side (quote token). */
+  const spotOut = (() => {
+    if (product !== "spot") return 0;
+    const pool = s.pools[poolId];
+    if (!pool) return 0;
+    if (side === "buy") return n; // buying n base units
+    return n * (pool.quoteReserve / pool.baseReserve) * (1 - pool.feeBps / 10_000);
+  })();
+  const spotPool = s.pools[poolId];
+  const spotQuoteSym = spotPool?.quote ?? "USDC";
+  const spotBaseSym = spotPool?.base ?? under;
+
   const overSize = n > 0 && n > maxN + 1e-12;
   const overCash = est.usd > 0 && Number.isFinite(est.usd) && est.usd > bp + 1e-6;
   const blocked =
@@ -191,24 +203,29 @@ export function OrderTicket({
 
   return (
     <div className="relative flex min-h-full flex-col bg-panel lg:h-full lg:min-h-0">
-      <div className="flex border-b border-border">
-        {products.map((p) => (
-          <button
-            key={p}
-            onClick={() => {
-              setProduct(p);
-              setSheet(false);
-              setReview(false);
-              clear();
-            }}
-            className={cn(
-              "pressable h-11 flex-1 text-[11px] uppercase tracking-wider",
-              product === p ? "border-b border-brass text-brass" : "text-muted",
-            )}
-          >
-            {p === "spot" ? "Spot" : p === "future" ? "Mini" : "Options"}
-          </button>
-        ))}
+      {/* Product tabs — same visual grammar as the swap card header. */}
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-1 rounded-full border border-brass/45 bg-elevated p-0.5 font-mono text-[10px] uppercase tracking-wider">
+          {products.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => {
+                setProduct(p);
+                setSheet(false);
+                setReview(false);
+                clear();
+              }}
+              className={cn(
+                "pressable rounded-full px-3 py-1.5 transition-colors",
+                product === p ? "bg-brass text-bg" : "text-muted hover:text-fg",
+              )}
+            >
+              {p === "spot" ? "Spot" : p === "future" ? "Mini" : "Options"}
+            </button>
+          ))}
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-wider text-subtle">Paper · sim</span>
       </div>
       {!MARKET_LAUNCH.futuresOpen && !MARKET_LAUNCH.optionsOpen ? (
         <div className="border-b border-border bg-panel2 px-3 py-1.5 text-[10px] leading-snug text-subtle">
@@ -261,128 +278,202 @@ export function OrderTicket({
               })}
             </div>
           </>
-        ) : product === "future" ? (
-          <div className="mt-2 flex gap-1 overflow-x-auto">
-            {exps.map((e, i) => (
-              <button
-                key={e.at}
-                onClick={() => setExi(i)}
-                className={cn(
-                  "pressable h-9 shrink-0 rounded-full border px-3 font-mono text-[11px]",
-                  i === exi ? "border-brass bg-brass text-bg" : "border-border text-muted",
-                )}
-              >
-                {e.label} · {e.when.replace(" UTC", "")}
-              </button>
-            ))}
-          </div>
-        ) : product === "spot" ? (
-          <Field label="Pool">
-            <select className={inp} value={poolId} onChange={(e) => setPoolId(e.target.value as PoolId)}>
-              {Object.keys(s.pools).map((id) => (
-                <option key={id}>{id}</option>
-              ))}
-            </select>
-          </Field>
         ) : (
-          <p className="mt-2 font-mono text-[11px] text-brass">
-            {side.toUpperCase()} {optType.toUpperCase()} {under} {fmtPx(k)} · {exp.when}
-          </p>
-        )}
-
-      {editor ? (
-        <div className="mt-2 rounded-md border border-brass/35 bg-[color-mix(in_oklab,var(--color-brass)_14%,#12100a)]">
-          <div className="flex items-center gap-1 px-3 py-2">
-            <div className="grid h-9 w-28 grid-cols-2 overflow-hidden rounded-full border border-brass/50">
+          <div className="mt-3 space-y-3">
+            {/* Buy / Sell segmented control — swap-widget pill styling. */}
+            <div className="grid grid-cols-2 gap-1 rounded-full border border-border bg-surface p-0.5">
               <button
                 type="button"
-                className={cn("text-[11px] font-medium", side === "sell" ? "bg-down text-fg" : "text-muted")}
-                onClick={() => setSide("sell")}
-              >
-                Sell
-              </button>
-              <button
-                type="button"
-                className={cn("text-[11px] font-medium", side === "buy" ? "bg-up text-bg" : "text-muted")}
                 onClick={() => setSide("buy")}
+                className={cn(
+                  "pressable h-9 rounded-full text-[12px] font-medium uppercase tracking-wider transition-colors",
+                  side === "buy" ? "bg-up text-bg" : "text-muted hover:text-fg",
+                )}
               >
                 Buy
               </button>
+              <button
+                type="button"
+                onClick={() => setSide("sell")}
+                className={cn(
+                  "pressable h-9 rounded-full text-[12px] font-medium uppercase tracking-wider transition-colors",
+                  side === "sell" ? "bg-down text-fg" : "text-muted hover:text-fg",
+                )}
+              >
+                Sell
+              </button>
             </div>
-            <Carousel
-              value={kind}
-              items={KINDS}
-              label={(knd) => (knd === "mkt" ? "MARKET" : knd === "lmt" ? "LIMIT" : "STOP")}
-              onChange={setKind}
-            />
-          </div>
 
-          <Line label="Quantity">
-            <Stepper value={qty} onChange={setQty} step={product === "spot" ? 0.1 : 1} dp={product === "spot" ? 4 : 0} />
-          </Line>
-          {kind === "lmt" || kind === "stp" ? (
-            <Line label={kind === "lmt" ? "Limit" : "Stop"}>
-              <Stepper
-                value={kind === "lmt" ? limit : stop}
-                onChange={kind === "lmt" ? setLimit : setStop}
-                step={spot > 100 ? 0.5 : 0.01}
-                dp={spot > 100 ? 2 : 4}
-              />
-            </Line>
-          ) : null}
-
-          <Line label="TIF">
-            <Carousel value={tif} items={TIFS} label={(x) => x.toUpperCase()} onChange={setTif} />
-          </Line>
-
-          {overSize ? (
-            <p className="px-3 pb-2 text-[10px] text-down">
-              Size exceeds max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} given cash, inventory, and pool depth.
-            </p>
-          ) : null}
-          {overCash ? (
-            <p className="px-3 pb-2 text-[10px] text-down">
-              Not enough cash. Debit {fmtUsd(est.usd)} vs {fmtUsd(bp)} free.
-            </p>
-          ) : null}
-          {product === "option" && side === "sell" ? (
-            <p className="px-3 pb-2 text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p>
-          ) : null}
-          {q?.blank ? <p className="px-3 pb-2 text-[10px] text-down">{q.blank}</p> : null}
-          {err ? <p className="px-3 pb-2 text-[10px] text-down">{err}</p> : null}
-        </div>
-      ) : null}
-      </div>
-
-      {editor ? (
-        <div className="sticky bottom-0 z-20 shrink-0 border-t border-brass/35 bg-[color-mix(in_oklab,var(--color-brass)_18%,#12100a)]">
-          <div className="flex items-center justify-between px-3 py-2">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-subtle">Cost of Trade</div>
-              <div className="font-display text-xl tabular-nums">{Number.isFinite(est.usd) ? fmtUsd(side === "sell" && product === "spot" ? -est.usd : est.usd) : "—"}</div>
+            {/* "You pay" style amount box (quantity). */}
+            <div className="rounded-xl border border-border bg-surface p-3">
+              <div className="flex items-center justify-between text-[11px] text-muted">
+                <span>{side === "buy" ? "You buy" : "You sell"}</span>
+                <span>
+                  Max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)}
+                  <button
+                    type="button"
+                    onClick={() => setQty(product === "spot" ? maxN.toPrecision(4) : String(Math.floor(maxN)))}
+                    className="ml-1 text-brass hover:underline"
+                  >
+                    Max
+                  </button>
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  inputMode="decimal"
+                  placeholder="0.0"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value.replace(/[^0-9.]/g, ""))}
+                  className="min-w-0 flex-1 bg-transparent font-display text-3xl tabular-nums outline-none placeholder:text-subtle"
+                />
+                <div className="pressable flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-border bg-elevated px-3 font-medium">
+                  <span className="grid size-6 place-items-center rounded-full border border-brass/40 text-[9px] text-brass">
+                    {(product === "spot" ? spotBaseSym : under).slice(0, 2).toUpperCase()}
+                  </span>
+                  <span className="max-w-[7rem] truncate">
+                    {product === "spot" ? spotBaseSym : product === "future" ? `${under} mini` : under}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="text-right font-mono text-[10px] text-muted">
+
+            {/* "You receive" style box — spot only (quote token estimate). */}
+            {product === "spot" ? (
+              <div className="rounded-xl border border-border bg-surface p-3">
+                <div className="flex items-center justify-between text-[11px] text-muted">
+                  <span>{side === "buy" ? "You pay (est.)" : "You receive (est.)"}</span>
+                  <span>mark {fmtPx(spot)}</span>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="min-w-0 flex-1 font-display text-3xl tabular-nums text-fg">
+                    {Number.isFinite(est.usd)
+                      ? side === "buy"
+                        ? fmtUsd(est.usd)
+                        : fmtUsd(spotOut)
+                      : "—"}
+                  </div>
+                  <div className="pressable flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-border bg-elevated px-3 font-medium">
+                    <span className="grid size-6 place-items-center rounded-full border border-brass/40 text-[9px] text-brass">
+                      {spotQuoteSym.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="max-w-[7rem] truncate">{spotQuoteSym}</span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Order-type + TIF knobs, styled like the swap details panel. */}
+            <div className="space-y-1.5 rounded-xl border border-border/70 bg-surface/50 px-3 py-2.5 font-mono text-[11px]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-subtle">Order type</span>
+                <Segmented
+                  value={kind}
+                  items={KINDS}
+                  label={(knd) => (knd === "mkt" ? "MARKET" : knd === "lmt" ? "LIMIT" : "STOP")}
+                  onChange={setKind}
+                />
+              </div>
+              {kind === "lmt" || kind === "stp" ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-subtle">{kind === "lmt" ? "Limit price" : "Stop price"}</span>
+                  <Stepper
+                    value={kind === "lmt" ? limit : stop}
+                    onChange={kind === "lmt" ? setLimit : setStop}
+                    step={spot > 100 ? 0.5 : 0.01}
+                    dp={spot > 100 ? 2 : 4}
+                  />
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-subtle">Time in force</span>
+                <Segmented value={tif} items={TIFS} label={(x) => x.toUpperCase()} onChange={setTif} />
+              </div>
               {product === "future" ? (
                 <>
-                  IM {fmtUsd(im)} · liq {fmtPx(liq)}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-subtle">Expiry</span>
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {exps.map((e, i) => (
+                        <button
+                          key={e.at}
+                          type="button"
+                          onClick={() => setExi(i)}
+                          className={cn(
+                            "pressable rounded-full border px-2 py-0.5",
+                            i === exi ? "border-brass text-brass" : "border-border text-muted hover:text-fg",
+                          )}
+                        >
+                          {e.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-subtle">Initial margin</span>
+                    <span className="text-fg">
+                      {fmtUsd(im)} · {(rate > 0 ? 1 / rate : 0).toFixed(1)}×
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-subtle">Liquidation</span>
+                    <span className="text-fg">{fmtPx(liq)}</span>
+                  </div>
                 </>
-              ) : (
-                est.label
-              )}
+              ) : null}
+              {product === "spot" ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-subtle">Pool</span>
+                  <select
+                    className="h-7 max-w-[10rem] rounded-full border border-border bg-elevated px-2 font-mono text-[11px] text-fg outline-none focus:border-brass"
+                    value={poolId}
+                    onChange={(e) => setPoolId(e.target.value as PoolId)}
+                  >
+                    {Object.keys(s.pools).map((id) => (
+                      <option key={id}>{id}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-subtle">Cost of trade</span>
+                <span className={cn(side === "sell" && product === "spot" ? "text-up" : "text-fg")}>
+                  {Number.isFinite(est.usd)
+                    ? fmtUsd(side === "sell" && product === "spot" ? -est.usd : est.usd)
+                    : "—"}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="flex gap-2 px-3 pb-2">
-            {product === "option" ? (
-              <Button variant="ghost" className="h-11 flex-1" onClick={() => { setSheet(false); setReview(false); }}>
-                Edit
-              </Button>
+
+            {overSize ? (
+              <p className="text-[10px] text-down">
+                Size exceeds max {product === "spot" ? maxN.toPrecision(4) : Math.floor(maxN)} given cash, inventory, and pool depth.
+              </p>
             ) : null}
-            <Button className="h-11 flex-1 bg-brass text-bg hover:brightness-110" disabled={blocked} onClick={() => setReview(true)}>
-              Review
+            {overCash ? (
+              <p className="text-[10px] text-down">Not enough cash. Debit {fmtUsd(est.usd)} vs {fmtUsd(bp)} free.</p>
+            ) : null}
+            {product === "option" && side === "sell" ? (
+              <p className="text-[10px] text-muted">Vault does not buy. Close longs from Positions.</p>
+            ) : null}
+            {q?.blank ? <p className="text-[10px] text-down">{q.blank}</p> : null}
+            {err ? <p className="text-[10px] text-down">{err}</p> : null}
+
+            {/* Big review CTA — mirrors the swap widget's primary button. */}
+            <Button
+              className="h-12 w-full"
+              variant={side === "buy" ? "up" : "down"}
+              disabled={blocked}
+              onClick={() => setReview(true)}
+            >
+              Review {side} {product === "spot" ? spotBaseSym : under}
             </Button>
+            <p className="text-center text-[10px] text-subtle">
+              Paper funds. Nothing leaves the sim until you confirm.
+            </p>
           </div>
-        </div>
-      ) : null}
+        )}
+      </div>
 
       {(s.working ?? []).length > 0 ? (
         <div className="shrink-0 border-t border-border px-3 py-1">
@@ -464,7 +555,8 @@ export function OrderTicket({
   );
 }
 
-function Carousel<T extends string>({
+/** Inline segmented selector (swap-widget pill styling) — replaces the ‹ › carousel. */
+function Segmented<T extends string>({
   value,
   items,
   label,
@@ -475,25 +567,21 @@ function Carousel<T extends string>({
   label: (v: T) => string;
   onChange: (v: T) => void;
 }) {
-  const i = Math.max(0, items.indexOf(value));
   return (
-    <div className="flex h-9 flex-1 items-center justify-center gap-2 rounded-full border border-brass/45 px-2">
-      <button type="button" className="pressable px-1 text-brass" onClick={() => onChange(items[(i - 1 + items.length) % items.length]!)}>
-        ‹
-      </button>
-      <span className="min-w-[4.5rem] text-center font-mono text-[11px] uppercase tracking-wider">{label(value)}</span>
-      <button type="button" className="pressable px-1 text-brass" onClick={() => onChange(items[(i + 1) % items.length]!)}>
-        ›
-      </button>
-    </div>
-  );
-}
-
-function Line({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-t border-brass/15 px-3 py-1.5">
-      <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
-      {children}
+    <div className="flex items-center gap-1">
+      {items.map((it) => (
+        <button
+          key={it}
+          type="button"
+          onClick={() => onChange(it)}
+          className={cn(
+            "pressable rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider",
+            value === it ? "border-brass text-brass" : "border-border text-muted hover:text-fg",
+          )}
+        >
+          {label(it)}
+        </button>
+      ))}
     </div>
   );
 }
@@ -526,18 +614,6 @@ function LadderCell({
   );
 }
 
-const inp =
-  "h-11 w-full rounded-[var(--radius-sm)] border border-border bg-surface px-3 font-mono text-sm outline-none focus:border-brass";
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="mt-3 block">
-      <div className="mb-1 text-[10px] uppercase tracking-wider text-subtle">{label}</div>
-      {children}
-    </label>
-  );
-}
-
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex justify-between gap-3 border-b border-border/60 py-1.5">
@@ -562,11 +638,11 @@ function Stepper({
   const d = dp ?? (step < 1 ? 4 : 2);
   return (
     <div className="flex gap-1">
-      <button type="button" className="pressable h-9 w-9 rounded-[var(--radius-sm)] border border-border" onClick={() => onChange(Math.max(0, n - step).toFixed(d))}>
+      <button type="button" className="pressable h-8 w-8 rounded-full border border-border" onClick={() => onChange(Math.max(0, n - step).toFixed(d))}>
         −
       </button>
-      <input className="h-9 w-20 rounded-[var(--radius-sm)] border border-border bg-surface text-center font-mono text-sm" value={value} onChange={(e) => onChange(e.target.value)} />
-      <button type="button" className="pressable h-9 w-9 rounded-[var(--radius-sm)] border border-border" onClick={() => onChange((n + step).toFixed(d))}>
+      <input className="h-8 w-20 rounded-full border border-border bg-elevated text-center font-mono text-sm" value={value} onChange={(e) => onChange(e.target.value)} />
+      <button type="button" className="pressable h-8 w-8 rounded-full border border-border" onClick={() => onChange((n + step).toFixed(d))}>
         +
       </button>
     </div>

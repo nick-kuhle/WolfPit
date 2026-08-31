@@ -4,7 +4,9 @@ import { Desk } from "@/components/desk/desk";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
 import { SiteFooter } from "@/components/site-footer";
-import { SwapCard } from "@/components/swap/swap-card";
+import { SwapWidget } from "@/components/swap/swap-card";
+import { SwapChart } from "@/components/swap/swap-chart";
+import { useSwap } from "@/lib/swap/use-swap";
 import { SWAP_CHAINS } from "@/lib/swap/chains";
 import { SWAP_FEE_BPS, bpsToPct } from "@/lib/swap/config";
 import { cn } from "@/lib/utils";
@@ -114,9 +116,11 @@ function TradePage() {
 }
 
 function LiveSpotPane() {
+  // Lift the swap state so the chart and the widget share one selected pair.
+  const swap = useSwap();
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <main className="mx-auto w-full max-w-3xl px-4 py-8">
+      <main className="mx-auto w-full max-w-6xl px-4 py-8">
         <div className="mb-6 text-center">
           <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-brass">Spot · live · Base by default</p>
           <h1 className="mt-2 font-display text-3xl font-medium tracking-tight sm:text-4xl">
@@ -131,7 +135,15 @@ function LiveSpotPane() {
             </Link>
           </p>
         </div>
-        <SwapCard />
+        {/* Chart for the selected pair beside the swap widget (stacks on mobile). */}
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_26rem]">
+          <div className="order-2 lg:order-1">
+            <SwapChart swap={swap} height={320} />
+          </div>
+          <div className="order-1 lg:order-2">
+            <SwapWidget swap={swap} />
+          </div>
+        </div>
       </main>
       <SiteFooter />
     </div>
