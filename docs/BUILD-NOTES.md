@@ -6,6 +6,36 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — audit B1/B2/B3 fixes
+
+- HIGH (contracts, SimplePair): first `add` double-counted `lpSupply` — the
+  branch set `lpSupply = a0` and then the shared `lpSupply += shares` tail ran
+  again, so total supply was ~2·a0 and a first LP clawed back only ~half their
+  deposit on a round-trip (later adds were over-credited against the inflated
+  supply). Fix: the burn is seeded as `lpSupply = MINIMUM_LIQUIDITY` (V2-style,
+  counted exactly once), so total supply = burn + shares = a0. Round-trip
+  regression test added (pins supply == a0 and ~full return; the burn is the
+  only intended cost).
+- HIGH (contracts, Deployer): the token-era deploy path was bricked — Deployer
+  called owner-gated `vault.setWpitFeeder` while the vault's owner was the
+  external deployer (`NotOwner`), and even past that, `setStake` was never
+  wired so `slashInsuranceJunior` always reverted `Zero()`. Fix: Deployer is
+  the vault's owner during construction (factory pattern), wires `setWpitFeeder`
+  AND `setStake`, then hands ownership back via the vault's two-step transfer
+  (`vault.acceptOwnership()` completes it; operator is the deployer from the
+  start). Deployer-path tests added: full stake → slash loop through the
+  deployed contracts, plus the vault-only launch-shape check.
+- MEDIUM (contracts, DealerVault): `openShort` now enforces the same cover
+  floors as `exec` — after the router call, real balances must still back
+  `insuranceUsdc` (`InsuranceSpent`) and the reserved book (`CoverSpent`, USDC
+  and WETH). Pre-fix a buggy/compromised hedge router holding a USDC allowance
+  could spend the reserve and the tx died with a raw arithmetic-underflow panic
+  instead of an explicit error. Regression test asserts the explicit
+  `InsuranceSpent` selector.
+- Tests: forge +4 (50 → 54). All suites green, tsc / eslint --quiet / build
+  clean. (Note: `npm test`'s rate-limit suite SIGKILLs under heavy memory
+  pressure in low-RAM sandboxes — PGLite/WASM; green with headroom.)
+
 ## 2026-08-31 (Mon) — review follow-ups (round-3 residue)
 
 - Contracts:

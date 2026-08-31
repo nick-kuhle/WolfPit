@@ -94,6 +94,30 @@ contract SystemTest {
         require(pairUsdc.feeBps() == 10, "owner sets fee");
     }
 
+    /// B1 regression: the first add must count lpSupply exactly once. The old
+    ///        code set lpSupply = a0 in the first-add branch AND ran the shared
+    ///        `lpSupply += shares` tail, so total supply was ~2·a0 and a first
+    ///        LP got back only ~half their deposit on a round-trip.
+    function testPairFirstAddRoundTripIsFair() public {
+        wpit.setMinter(address(this));
+        wpit.acceptMinter();
+        wpit.mint(address(this), 10_000 ether);
+        wpit.approve(address(pairUsdc), type(uint256).max);
+        usdc.approve(address(pairUsdc), type(uint256).max);
+        uint256 sh = pairUsdc.add(1_000 ether, 1_000e6);
+        uint256 burn = pairUsdc.MINIMUM_LIQUIDITY();
+        require(sh == 1_000 ether - burn, "first add mints a0 minus the burn");
+        require(pairUsdc.lpSupply() == 1_000 ether, "lpSupply counts the burn exactly once");
+        uint256 r0 = pairUsdc.reserve0();
+        uint256 r1 = pairUsdc.reserve1();
+        (uint256 back0, uint256 back1) = pairUsdc.remove(sh);
+        // Pre-fix this was ~50% of the deposit; the burn is the only intended cost.
+        require(back0 > 999 ether, "round trip keeps the WPIT leg (was ~half)");
+        require(back1 >= 1_000e6 - (burn * r1) / r0 - 1, "round trip keeps the USDC leg");
+        require(pairUsdc.reserve0() == burn, "burn stays locked in the pool");
+        require(pairUsdc.lpSupply() == burn, "only the burn remains in supply");
+    }
+
     function testStakeRoundtrip() public {
         wpit.setMinter(address(this));
         wpit.acceptMinter();

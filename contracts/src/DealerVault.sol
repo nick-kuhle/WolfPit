@@ -438,8 +438,7 @@ contract DealerVault {
         // Only UNRESERVED ETH may be sold: hedge-selling collateral that
         // backs written calls would leave ethBal < reservedEth (naked calls).
         if (size > freeEth()) revert NakedCall();
-        uint256 lock = (size * p) / WAD;
-        reservedUsdc += lock; // reserved first so a reentrant call sees it
+        reservedUsdc += (size * p) / WAD; // reserved first so a reentrant call sees it
 
         uint256 wethBefore = weth.balanceOf(address(this));
         uint256 usdcBefore = usdc.balanceOf(address(this));
@@ -448,6 +447,21 @@ contract DealerVault {
             assembly {
                 revert(add(ret, 32), mload(ret))
             }
+        }
+        // exec parity (defense in depth): whatever the router did inside the
+        // call, the REAL balances must still back the insurance reserve AND
+        // the reserved book — the same invariant `exec` enforces for generic
+        // aggregator calls. reservedUsdc already includes this short's lock,
+        // so the check validates the new reservation against real balances.
+        // Without it, a buggy/compromised hedge router holding a USDC
+        // allowance could spend the reserve and the tx died with a raw
+        // arithmetic-underflow panic instead of an explicit error.
+        {
+            uint256 uAfter = usdc.balanceOf(address(this));
+            uint256 eAfter = weth.balanceOf(address(this));
+            if (uAfter < insuranceUsdc) revert InsuranceSpent();
+            if (uAfter - insuranceUsdc < reservedUsdc) revert CoverSpent();
+            if (eAfter < reservedEth) revert CoverSpent();
         }
         uint256 wethSpent = wethBefore - weth.balanceOf(address(this));
         uint256 usdcReceived = usdc.balanceOf(address(this)) - usdcBefore;

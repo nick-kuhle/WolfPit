@@ -58,6 +58,32 @@ contract DrainRouter {
     }
 }
 
+/// @notice Malicious hedge router: sells WETH for USDC like SwapRouter but
+///         ALSO pulls USDC out of the vault mid-swap — simulates a
+///         buggy/compromised aggregator that holds a USDC allowance.
+contract HedgeDrainRouter {
+    MockERC20 public immutable weth;
+    MockERC20 public immutable usdc;
+    uint256 public price = 4_000e6;
+    uint256 public drain;
+
+    constructor(MockERC20 w, MockERC20 u) {
+        weth = w;
+        usdc = u;
+    }
+
+    function setDrain(uint256 amt) external {
+        drain = amt;
+    }
+
+    function sell(uint256 amt) external {
+        weth.transferFrom(msg.sender, address(this), amt);
+        if (drain > 0) usdc.transferFrom(msg.sender, address(this), drain);
+        uint256 pay = (amt * price) / 1e18;
+        usdc.transfer(msg.sender, pay);
+    }
+}
+
 interface Vm {
     function prank(address) external;
     function startPrank(address) external;
@@ -468,6 +494,36 @@ contract DealerVaultTest {
             revert("expected CoverSpent: trading USDC below reservedUsdc");
         } catch {}
         require(usdc.balanceOf(address(vault)) == 420_000e6, "trading cover intact");
+    }
+
+    /// B3 regression: openShort must enforce the same insurance floor as exec.
+    ///        Pre-fix, a hedge router holding a USDC allowance could drain the
+    ///        vault mid-swap and the tx died with a raw arithmetic-underflow
+    ///        panic instead of the explicit InsuranceSpent guard (the floor
+    ///        keeps the invariant local and explicit rather than accidental).
+    function testOpenShortEnforcesInsuranceFloor() public {
+        vault.creditInsurance(20_000e6);
+        HedgeDrainRouter router = new HedgeDrainRouter(weth, usdc);
+        usdc.mint(address(router), 10_000_000e6);
+        vault.allowTarget(address(router), true);
+        vault.setAllowance(IERC20(address(weth)), address(router), type(uint256).max);
+        vault.setAllowance(IERC20(address(usdc)), address(router), type(uint256).max);
+        router.setDrain(420_000e6); // eats the entire vault USDC balance
+        bytes memory data = abi.encodeWithSignature("sell(uint256)", 1 ether);
+        try vault.openShort(1 ether, address(router), data, 0) {
+            revert("expected InsuranceSpent");
+        } catch (bytes memory why) {
+            bytes4 sel;
+            assembly {
+                sel := mload(add(why, 32))
+            }
+            require(sel == DealerVault.InsuranceSpent.selector, "explicit InsuranceSpent, not a raw panic");
+        }
+        require(usdc.balanceOf(address(vault)) == 420_000e6, "full rollback: usdc");
+        require(vault.ethBal() == 100 ether, "full rollback: eth");
+        require(vault.usdcBal() == 400_000e6, "full rollback: ledger");
+        require(vault.reservedUsdc() == 0, "full rollback: reservation");
+        require(vault.insuranceUsdc() == 20_000e6, "insurance ledger intact");
     }
 
     /// maxWithdraw is the largest exit that keeps BOTH legs inside α; it must

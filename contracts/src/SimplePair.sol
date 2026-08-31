@@ -53,7 +53,12 @@ contract SimplePair {
         if (lpSupply == 0) {
             if (a0 < MINIMUM_LIQUIDITY || a1 < MINIMUM_LIQUIDITY) revert Zero();
             shares = a0 - MINIMUM_LIQUIDITY;
-            lpSupply = a0;
+            // V2-style burn, counted in the supply exactly once: the shared
+            // `lpSupply += shares` tail below folds the user's shares in, so
+            // total supply = MINIMUM_LIQUIDITY + shares = a0. (The old code
+            // also set lpSupply = a0 here, double-counting the first add and
+            // letting a first LP claw back only ~half their deposit.)
+            lpSupply = MINIMUM_LIQUIDITY;
             lpOf[address(0)] += MINIMUM_LIQUIDITY; // burned, never redeemable
         } else {
             // Fair shares: priced on the SMALLER proportional leg, so neither
