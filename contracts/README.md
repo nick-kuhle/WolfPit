@@ -23,10 +23,10 @@ No Uniswap v4 hook. No ERC-1155 series yet (Q1).
 
 ```
 cd contracts
-forge script script/Deploy.s.sol --rpc-url $BASE_SEPOLIA_RPC --broadcast
+forge script script/DeployBase.s.sol --rpc-url $BASE_SEPOLIA_RPC --broadcast
 ```
 
-Until `forge-std` is installed, `test/System.t.sol` is the wiring diagram.
+`script/DeployBase.s.sol` is the Base deploy script (see [docs/DEPLOY-BASE.md](../docs/DEPLOY-BASE.md)); it refuses non-8453 chains unless `BASE_ALLOW_ANY_CHAIN=1` (Sepolia dry-runs). Until `forge-std` is installed, `test/System.t.sol` is the wiring diagram.
 
 ## Alloy keeper
 

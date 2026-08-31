@@ -6,6 +6,24 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — review follow-ups round 4 (C1 + doc drift)
+
+- C1 (contracts, DealerVault): `pause` was `onlyOwner` while the Rust keeper
+  signs as the OPERATOR — a fail-closed on-chain halt in production reverted
+  `NotOwner`. Now `onlyOperator` (owner still passes): the keeper can halt the
+  pit and resume via its manual `Pause{v}` command; a third party stays locked
+  out. Pausing stops new risk (the `live` gate); safe LP withdrawals remain
+  available while paused. Regression tests: operator fail-closed pause +
+  resume, owner pause, third-party reject (`NotOperator`).
+- Docs drift closed:
+  - `contracts/README.md` deploy command pointed at the nonexistent
+    `script/Deploy.s.sol` → `script/DeployBase.s.sol` (the script
+    DEPLOY-BASE.md documents; Sepolia dry-runs need `BASE_ALLOW_ANY_CHAIN=1`).
+  - `docs/WEEK1.md` told readers to run vitest → the repo runs `npx tsx --test`
+    (`npm run test:engine`).
+- Tests: forge 55/55 (was 54), engine 96/96, npm test 171/171, cargo 11/11,
+  tsc/eslint/build clean.
+
 ## 2026-08-31 (Mon) — audit B1/B2/B3 fixes
 
 - HIGH (contracts, SimplePair): first `add` double-counted `lpSupply` — the

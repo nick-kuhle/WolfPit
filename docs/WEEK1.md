@@ -94,7 +94,7 @@ Read [CHAIN.md](./CHAIN.md), [LP.md](./LP.md), [FARM.md](./FARM.md), [MM.md](./M
 
 Extract `src/lib/wolfpit/desk-engine.ts` (the interface already sketched in PROTOCOL). Zustand remains the sim adapter.
 
-Golden tests (vitest, deterministic clock):
+Golden tests (node:test via `npx tsx --test`, deterministic clock):
 
 | ID | Must |
 | --- | --- |
@@ -105,7 +105,7 @@ Golden tests (vitest, deterministic clock):
 | G5 | Liquidation when equity < 0.125 × size × S |
 | G6 | Hedge 1:1: long N ETH increases reservedETH by N |
 
-**AC:** `npx vitest run src/lib/wolfpit` green. Interface has no `hedgeLater()`.
+**AC:** `npm run test:engine` green (runs `npx tsx --test` over the wolfpit suites). Interface has no `hedgeLater()`.
 
 ### W1-02  Remaining RISK limits in sim  · Q · 10h
 

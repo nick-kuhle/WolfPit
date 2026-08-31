@@ -163,15 +163,35 @@ contract DealerVaultTest {
         } catch {}
     }
 
-    function testPauseOnlyOwner() public {
+    /// C1: the pause key must be reachable by the OPERATOR (the keeper's hot
+    ///        key) for fail-closed halts — not owner-only. A third party stays
+    ///        locked out.
+    function testPauseGatedToOwnerOrOperator() public {
         vm.prank(ALICE);
         try vault.pause(true) {
-            revert("expected NotOwner");
+            revert("expected NotOperator");
         } catch {}
         vault.pause(true); // owner can
         try vault.openLong(1 ether) {
             revert("expected pause");
         } catch {}
+        vault.pause(false); // owner resumes
+    }
+
+    /// C1 regression: a distinct operator (keeper hot key) can fail closed
+    ///        and resume — production pause must not revert NotOwner.
+    function testOperatorCanFailClosedPause() public {
+        address keeper = address(0xBAD0);
+        vault.setOperator(keeper); // owner wires the keeper key
+        vm.prank(keeper);
+        vault.pause(true); // keeper halts the pit on-chain
+        require(vault.paused(), "paused on-chain");
+        try vault.openLong(1 ether) {
+            revert("expected pause: live ops blocked");
+        } catch {}
+        vm.prank(keeper);
+        vault.pause(false); // keeper resumes after review
+        require(!vault.paused(), "resumed");
     }
 
     function testRiskOpsRequireOperator() public {

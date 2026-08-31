@@ -161,7 +161,13 @@ contract DealerVault {
         oracle = next;
     }
 
-    function pause(bool v) external onlyOwner {
+    /// @notice Pause / resume the pit. OWNER or OPERATOR — the fail-closed
+    ///         watcher signs as the OPERATOR, so an on-chain halt must not
+    ///         revert NotOwner; the operator's manual `Pause{v}` command can
+    ///         also resume after review. A third party stays locked out.
+    ///         Pausing stops new risk (the `live` gate); safe LP withdrawals
+    ///         remain available while paused.
+    function pause(bool v) external onlyOperator {
         paused = v;
         emit PausedSet(v);
     }
