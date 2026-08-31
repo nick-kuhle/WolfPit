@@ -17,6 +17,7 @@ Canonical copies for GitHub. In-app: `/plan`.
 | [BUILD-NOTES.md](./BUILD-NOTES.md) | Append-only log |
 | [ROADMAP.md](./ROADMAP.md) | All |
 | [PROTOCOL.md](./PROTOCOL.md) | Implementers |
+| [HOOK.md](../contracts/HOOK.md) | Uni v4 hook spec — CTO + quant (Q1-05) |
 | [FRONTEND.md](./FRONTEND.md) | Desk |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | CTO |
 

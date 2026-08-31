@@ -16,8 +16,9 @@ cargo test --manifest-path crates/keeper/Cargo.toml
 | `Farm` | Gauges 70/20/10, harvest tax 1% |
 | `Stake` | First-loss WPIT |
 | `WPIT` | TEST token, cap, minter |
+| `HOOK.md` | **Uni v4 hook SPEC** (Q1-05) — depth lens + dynamic fee, no deploy |
 
-No Uniswap v4 hook. No ERC-1155 series yet (Q1).
+No ERC-1155 series yet (Q1). The Uniswap v4 hook is **spec'd in [HOOK.md](./HOOK.md)** (Q1-05, no deploy); implementation is Q1-12.
 
 ## Deploy (Sepolia, unfunded)
 

@@ -6,6 +6,26 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — v4 hook spec (Q1-05) + admin env fix
+
+- `contracts/HOOK.md` written (Q1-05, spec-only, no deploy): the Uni v4 hook is
+  the **depth lens + listing oracle + dynamic-fee hook** for the ETH/USDC pool on
+  Base. Covers `Hooks.Permissions` (all `*ReturnDelta` false — the hook holds no
+  position/earns no delta), the `setPoolDepth` vault surface (`onlyHook`,
+  fail-closed to zero on stale depth), `fee = 5+80·max(0,RV−0.40)` clamp 5–30 from
+  an on-chain EWMA vol accumulator (λ=0.94, same-block collapse so a flash-loop
+  can't forge vol), the **cover-never-concentrated** rule (cover = idle vault ETH
+  only; pool depth is never cover), I1–I10 hard invariants, and the pull-vs-push
+  decision (keeper reconcile; the hook never calls the vault synchronously so it
+  can't revert a user swap). Fork-test plan T1–T10, "why not v1" list, review
+  sign-off table for Q.
+- Linked from `docs/README.md` + `contracts/README.md`.
+- Admin fix (env only, no code change): the earlier dev-server turn installed deps
+  under **Node v20** (project needs >=22.12), dropping `@electric-sql/pglite` — so
+  the auth store couldn't load and login failed closed. Reininstall under Node
+  22.23.2 fixes it; `verifyPassword(admin/admin)=true` verified live, `/__app-env`
+  `VITE_AUTH_ENABLED=false` (dev auth-off → admin/admin).
+
 ## 2026-08-31 (Mon) — review follow-ups round 4 (C1 + doc drift)
 
 - C1 (contracts, DealerVault): `pause` was `onlyOwner` while the Rust keeper
