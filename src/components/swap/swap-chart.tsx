@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChartPane } from "@/components/desk/chart";
+import { ChartCard } from "@/components/desk/chart";
 import { BAR_MS, synthCandles } from "@/lib/wolfpit/engine";
 import { loadSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
 import type { Candle } from "@/lib/wolfpit/types";
 import type { useSwap } from "@/lib/swap/use-swap";
-import { cn, fmtPx } from "@/lib/utils";
 
 /** Stablecoins we price *against* rather than chart. */
 const QUOTE_SYMS = new Set(["USDC", "USDT", "DAI", "USD", "USDBC", "FDUSD", "USDE"]);
@@ -142,31 +141,24 @@ export function SwapChart({ swap, height = 240 }: { swap: ReturnType<typeof useS
   const headline = liveRate ?? (live ? last : 0);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-panel shadow-xl">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-baseline gap-2">
-          <h2 className="font-display text-lg leading-tight">{subject.symbol}</h2>
-          <span className="font-mono text-[11px] text-subtle">/ {quoteTok.symbol}</span>
-          {headline > 0 ? (
-            <span className={cn("font-mono text-sm tabular-nums", chg >= 0 ? "text-up" : "text-down")}>
-              {fmtPx(headline)}
-            </span>
-          ) : null}
-          {live && bars.length ? (
-            <span className={cn("font-mono text-[11px]", chg >= 0 ? "text-up" : "text-down")}>
-              {chg >= 0 ? "+" : "−"}
-              {(Math.abs(chg) * 100).toFixed(2)}%
-            </span>
-          ) : null}
-          {!live ? (
-            <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-warn">
-              sim · indicative
-            </span>
-          ) : null}
-        </div>
-        <span className="truncate pl-2 font-mono text-[10px] uppercase tracking-wider text-subtle">{subject.name}</span>
-      </div>
-      <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={height} />
-    </div>
+    <ChartCard
+      symbol={subject.symbol}
+      quoteSymbol={quoteTok.symbol}
+      name={subject.name}
+      price={headline}
+      changePct={live && bars.length ? chg : null}
+      tag={
+        !live ? (
+          <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-warn">
+            sim · indicative
+          </span>
+        ) : null
+      }
+      candles={bars}
+      interval={interval}
+      status={status}
+      onInterval={setIv}
+      height={height}
+    />
   );
 }

@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { ChartInterval } from "@/lib/wolfpit/market";
 import type { Candle } from "@/lib/wolfpit/types";
+import { cn, fmtPx } from "@/lib/utils";
 
 function cssVar(name: string, fallback: string) {
   if (typeof window === "undefined") return fallback;
@@ -332,6 +333,67 @@ export function ChartPane({
           <PitChart candles={candles} height={compact} interval={interval} />
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Framed chart card — the shared "beautiful" presentation used on both the live
+ * swap page and the simulation trade page. Wraps ChartPane in a rounded panel
+ * with a header (symbol / quote, headline price, change, name/tag). Callers pass
+ * their own header pieces so the same card serves swap pairs and desk listings.
+ */
+export function ChartCard({
+  symbol,
+  quoteSymbol,
+  name,
+  price,
+  changePct,
+  tag,
+  candles,
+  interval,
+  status,
+  onInterval,
+  height = 320,
+}: {
+  symbol: string;
+  quoteSymbol?: string;
+  name?: string;
+  /** Headline price; omit or 0 to hide. */
+  price?: number;
+  /** Change as a fraction (0.012 = +1.2%); omit to hide. */
+  changePct?: number | null;
+  /** Optional badge on the right of the header row (e.g. "sim · indicative"). */
+  tag?: ReactNode;
+  candles: Candle[];
+  interval: ChartInterval;
+  status?: "ok" | "load" | "empty";
+  onInterval?: (iv: ChartInterval) => void;
+  height?: number;
+}) {
+  const up = (changePct ?? 0) >= 0;
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-panel shadow-xl">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex items-baseline gap-2">
+          <h2 className="font-display text-lg leading-tight">{symbol}</h2>
+          {quoteSymbol ? <span className="font-mono text-[11px] text-subtle">/ {quoteSymbol}</span> : null}
+          {price && price > 0 ? (
+            <span className={cn("font-mono text-sm tabular-nums", up ? "text-up" : "text-down")}>{fmtPx(price)}</span>
+          ) : null}
+          {changePct != null ? (
+            <span className={cn("font-mono text-[11px]", up ? "text-up" : "text-down")}>
+              {up ? "+" : "−"}
+              {(Math.abs(changePct) * 100).toFixed(2)}%
+            </span>
+          ) : null}
+          {tag}
+        </div>
+        {name ? (
+          <span className="truncate pl-2 font-mono text-[10px] uppercase tracking-wider text-subtle">{name}</span>
+        ) : null}
+      </div>
+      <ChartPane candles={candles} interval={interval} status={status} onInterval={onInterval} compact={height} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AccountBar } from "@/components/desk/account-bar";
-import { ChartPane } from "@/components/desk/chart";
+import { ChartCard } from "@/components/desk/chart";
 import { MiniTape } from "@/components/desk/mini-tape";
 import { OrderTicket } from "@/components/desk/order-ticket";
 import { Positions } from "@/components/desk/positions";
@@ -204,8 +204,18 @@ export function Desk({ seed, pane }: { seed?: string; pane?: Tab }) {
             </div>
           </div>
           <MiniTape onPick={pick} />
-          <div className="shrink-0 border-b border-border">
-            <ChartPane candles={bars} interval={interval} status={status} onInterval={setIv} compact={72} />
+          <div className="shrink-0 p-3">
+            <ChartCard
+              symbol={under}
+              name={focus.name}
+              price={spot}
+              changePct={chg}
+              candles={bars}
+              interval={interval}
+              status={status}
+              onInterval={setIv}
+              height={240}
+            />
           </div>
           <div className="min-h-[14rem] flex-1 lg:min-h-0">
             <OrderTicket prefer={prefer} under={under} want={want} />
