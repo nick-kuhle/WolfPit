@@ -6,6 +6,40 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — review follow-ups (round-3 residue)
+
+- Contracts:
+  - `openShort` now re-checks the ETH side of the α law after the swap
+    (`reservedEth ≤ α·ethBal`), not just the USDC side — a hedge-sale
+    shrinks the cover pool that backs written calls / long futures, so at
+    util = α no further hedge-sale can compress it (regression tests for the
+    reject at the cap and the allowed-with-headroom path).
+  - `exec` now enforces full cover floors after any allowlisted router call:
+    insurance USDC (`InsuranceSpent`, existing), trading USDC ≥ `reservedUsdc`
+    and WETH ≥ `reservedEth` (new `CoverSpent`) — the round-3 insurance guard
+    alone would still have let a router drain WETH from under written calls or
+    trading USDC from under cash-secured puts. Drain-router tests for both.
+  - New `maxWithdraw(who)`: the largest exit that keeps BOTH legs inside α
+    (exact to the share — the max passes, one more share reverts). At the α
+    cap it returns 0: LPs cannot exit until utilisation falls (exit queues are
+    v1.1). Tested at cap / flat / boundary.
+- Contracts (Stake): `_wipeIfEmpty` now also wipes below a dust threshold
+  (`DUST = 1e-6 WPIT`) — a near-full slash leaving 1 wei previously kept a
+  near-zero `total` with a huge share ledger, letting the next stake mint
+  astronomical share counts. Dust-wipe test added.
+- Engine:
+  - `closeFuture` (early close) now charges the same `DERIV_FEE` as opens and
+    flattens (F9 parity), split vault/insurance by `takeFee`; settlement
+    prints stay fee-free. The Close button is no longer strictly cheaper than
+    flattening.
+  - `removeLiquidity` re-anchors k-conservingly to the live mark (parity with
+    the round-3 `addLiquidity` fix) so exits never price off a stale pool
+    print.
+  - Sim `applyVaultOpen` short path enforces the ETH-side α law (contract
+    parity with `openShort`).
+- Tests: engine +4 (92 → 96), forge +6 (44 → 50). All suites green, tsc /
+  eslint --quiet / build clean.
+
 ## 2026-08-31 (Mon) — audit round-3 fixes (external review)
 
 - HIGH (contracts): `openShort` checked raw `ethBal`, not `freeEth()` — a

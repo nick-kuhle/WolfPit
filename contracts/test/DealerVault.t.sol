@@ -335,11 +335,20 @@ contract DealerVaultTest {
             revert("expected NakedCall: 65 > freeEth 60");
         } catch {}
         require(vault.ethBal() == 100 ether, "rollback intact");
-        // Selling exactly the free inventory is still allowed...
+        // At the α cap the ETH side has no room: even a sale of exactly the
+        // free inventory would push utilisation past α (40/40 = 100%) — the
+        // inventory law is stricter than bare coverage.
         data = abi.encodeWithSignature("sell(uint256)", 60 ether);
-        vault.openShort(60 ether, address(router), data, 230_000e6);
-        // ...and the covered-call invariant survives: ethBal >= reservedEth.
-        require(vault.ethBal() == 40 ether, "sold only free eth");
+        try vault.openShort(60 ether, address(router), data, 0) {
+            revert("expected UtilCap: ETH util would exceed alpha");
+        } catch {}
+        require(vault.ethBal() == 100 ether, "util-cap rollback intact");
+        // Releasing call cover frees room: at util 20/100 = 20%, selling 40
+        // ETH lands at 20/60 = 33% — inside α and still covered.
+        vault.releaseCall(20 ether); // reservedEth 40 -> 20
+        data = abi.encodeWithSignature("sell(uint256)", 40 ether);
+        vault.openShort(40 ether, address(router), data, 150_000e6);
+        require(vault.ethBal() == 60 ether, "sold within alpha");
         require(vault.ethBal() >= vault.reservedEth(), "calls stay covered");
     }
 
@@ -402,6 +411,85 @@ contract DealerVaultTest {
         } catch {}
         require(usdc.balanceOf(address(vault)) == 420_000e6, "insurance drain rolled back");
         require(vault.insuranceUsdc() == 20_000e6, "insurance ledger intact");
+    }
+
+    /// Hedge-sales must not push ETH-side utilisation past α: the sale shrinks
+    ///        the balance that backs written calls, even though it stays
+    ///        "covered" (size <= freeEth).
+    function testOpenShortCannotBreachEthUtilCap() public {
+        SwapRouter router = _routerFixture();
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(40 ether); // ETH util exactly at the α cap
+        bytes memory data = abi.encodeWithSignature("sell(uint256)", 60 ether);
+        try vault.openShort(60 ether, address(router), data, 0) {
+            revert("expected UtilCap: ETH util would exceed alpha after the sale");
+        } catch {}
+        require(vault.ethBal() == 100 ether, "no ETH left the vault");
+    }
+
+    /// With headroom on the ETH side, hedge-sales inside α still work.
+    function testOpenShortRespectsEthUtilWithHeadroom() public {
+        SwapRouter router = _routerFixture();
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(20 ether); // util 20%: room for a 40 ETH hedge-sale
+        bytes memory data = abi.encodeWithSignature("sell(uint256)", 40 ether);
+        vault.openShort(40 ether, address(router), data, 0);
+        require(vault.ethBal() == 60 ether, "sold 40 ETH");
+        require(vault.reservedEth() == 20 ether, "cover intact");
+        require(vault.utilBps() == 3_333, "ETH util within alpha (20/60 = 33.33%)");
+    }
+
+    /// exec must not be able to drain WETH from under written calls.
+    function testExecCannotSpendWethCover() public {
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(40 ether); // reservedEth = 40
+        DrainRouter router = new DrainRouter(IERC20(address(weth)));
+        vault.allowTarget(address(router), true);
+        vault.setAllowance(IERC20(address(weth)), address(router), type(uint256).max);
+        bytes memory data = abi.encodeWithSignature("drain(address,uint256)", address(vault), 61 ether);
+        try vault.exec(address(router), data) {
+            revert("expected CoverSpent: WETH below reservedEth");
+        } catch {}
+        require(weth.balanceOf(address(vault)) == 100 ether, "WETH cover intact");
+    }
+
+    /// exec must not drain trading USDC below reservedUsdc either (the
+    ///        insurance floor alone would not stop this).
+    function testExecCannotSpendReservedUsdc() public {
+        vault.creditInsurance(20_000e6);
+        vault.writePut(10 ether, 4000e6); // reservedUsdc = 40_000e6
+        DrainRouter router = new DrainRouter(IERC20(address(usdc)));
+        vault.allowTarget(address(router), true);
+        vault.setAllowance(IERC20(address(usdc)), address(router), type(uint256).max);
+        // 400k trading + 20k insurance = 420k total; draining 380,001 leaves
+        // 39,999 total => trading = 19,999 < reservedUsdc 40,000.
+        bytes memory data = abi.encodeWithSignature("drain(address,uint256)", address(vault), 380_001e6);
+        try vault.exec(address(router), data) {
+            revert("expected CoverSpent: trading USDC below reservedUsdc");
+        } catch {}
+        require(usdc.balanceOf(address(vault)) == 420_000e6, "trading cover intact");
+    }
+
+    /// maxWithdraw is the largest exit that keeps BOTH legs inside α; it must
+    ///        be exactly right — the max itself passes, one share more reverts.
+    function testMaxWithdrawRespectsBothAlphaLaws() public {
+        uint256 my = vault.shareOf(address(this));
+        vault.creditInsurance(20_000e6);
+        // At the ETH α-cap no exit is possible.
+        vault.writeCall(40 ether);
+        require(vault.maxWithdraw(address(this)) == 0, "no exit at the alpha cap");
+        vault.releaseCall(40 ether);
+        // Flat book: the full position is withdrawable.
+        require(vault.maxWithdraw(address(this)) == my, "full exit on a flat book");
+        // Half-reserved: the preview is the tight boundary.
+        vault.writeCall(20 ether);
+        uint256 m = vault.maxWithdraw(address(this));
+        require(m > 0 && m < my, "max is between 0 and full");
+        try vault.withdraw(m + 1) {
+            revert("expected UtilCap: one share over the max");
+        } catch {}
+        vault.withdraw(m); // the max itself must pass
+        require(vault.reservedEth() * 10_000 <= vault.ethBal() * 4000, "post-max util within alpha");
     }
 
     /// Withdrawals must not break the inventory law: with reservations at the
@@ -481,5 +569,33 @@ contract DealerVaultTest {
         try stake.unstake(1 ether) {
             revert("expected bal revert for wiped staker");
         } catch {}
+    }
+
+    /// A near-full slash leaves dust; the share ledger must wipe (like a full
+    ///        slash) so the next stake cannot mint astronomical share counts.
+    function testStakeDustWipeStartsCleanEpoch() public {
+        WPIT wpit = new WPIT(100_000_000 ether);
+        Stake stake = new Stake(wpit, vault);
+        vault.setStake(address(stake));
+        wpit.setMinter(address(this));
+        wpit.acceptMinter();
+        wpit.mint(address(this), 1_000 ether);
+        wpit.mint(ALICE, 2_000 ether); // enough for a stake + a post-slash restake
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(1_000 ether);
+        vm.startPrank(ALICE);
+        wpit.approve(address(stake), type(uint256).max);
+        stake.stake(1_000 ether);
+        vm.stopPrank();
+        vault.slashInsuranceJunior(2_000 ether - 1); // leaves 1 wei of dust
+        require(stake.total() == 1, "dust left behind");
+        require(stake.staked(ALICE) == 0, "dust shares wiped (stale epoch)");
+        // A fresh stake starts a clean 1:1 epoch instead of inflating shares.
+        vm.startPrank(ALICE);
+        stake.stake(1_000 ether);
+        require(stake.staked(ALICE) >= 1_000 ether, "fresh stake redeemable");
+        stake.unstake(1_000 ether);
+        require(wpit.balanceOf(ALICE) == 1_000 ether, "full exit");
+        vm.stopPrank();
     }
 }

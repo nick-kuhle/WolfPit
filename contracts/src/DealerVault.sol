@@ -84,6 +84,7 @@ contract DealerVault {
     error UnreconciledLoss();
     error InsufficientShares();
     error InsuranceSpent();
+    error CoverSpent();
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -235,8 +236,15 @@ contract DealerVault {
         }
         // Insurance is physically held by this contract but logically
         // segregated. An allowlisted router may spend trading inventory, never
-        // the insurance reserve. Reconcile still handles trading-balance drift.
-        if (usdc.balanceOf(address(this)) < insuranceUsdc) revert InsuranceSpent();
+        // the insurance reserve, and never the RESERVED cover: after the call
+        // the real balances must still back insurance AND the reserved book,
+        // or a hedge router could drain WETH from under written calls (naked
+        // calls) or trading USDC from under cash-secured puts / short futures.
+        uint256 uBal = usdc.balanceOf(address(this));
+        uint256 eBal = weth.balanceOf(address(this));
+        if (uBal < insuranceUsdc) revert InsuranceSpent();
+        if (uBal - insuranceUsdc < reservedUsdc) revert CoverSpent();
+        if (eBal < reservedEth) revert CoverSpent();
         return ret;
     }
 
@@ -300,6 +308,37 @@ contract DealerVault {
         uint256 denom = shares + VIRTUAL_SHARES;
         ethOut = (ethBal * shareAmt) / denom;
         usdcOut = (usdcBal * shareAmt) / denom;
+    }
+
+    /// @notice Largest `shareAmt` `who` can withdraw without breaching the
+    ///         inventory law (reserved ≤ α·balance on BOTH legs). When the
+    ///         book sits at the α cap this is 0 — an LP cannot exit until
+    ///         utilisation falls (exit queues are a v1.1 concern). The bound
+    ///         is exact to the share: callers can burn `maxWithdraw(who)` and
+    ///         it will never revert on UtilCap, and one share more would.
+    function maxWithdraw(address who) public view returns (uint256) {
+        uint256 denom = shares + VIRTUAL_SHARES;
+        uint256 cap = shareOf[who];
+        uint256 needEth = (reservedEth * 10_000 + ALPHA_BPS - 1) / ALPHA_BPS; // ceil
+        uint256 maxByEth = ethBal > needEth ? ((ethBal - needEth) * denom) / ethBal : 0;
+        uint256 needUsdc = (reservedUsdc * 10_000 + ALPHA_BPS - 1) / ALPHA_BPS;
+        uint256 maxByUsdc = usdcBal > needUsdc ? ((usdcBal - needUsdc) * denom) / usdcBal : 0;
+        uint256 m = maxByEth < maxByUsdc ? maxByEth : maxByUsdc;
+        if (m > cap) m = cap;
+        // Integer floors can shift the exact maximum by a share or two — walk
+        // to it so the preview is tight in both directions.
+        while (m < cap && _withdrawUtilOk(m + 1)) m++;
+        while (m > 0 && !_withdrawUtilOk(m)) m--;
+        return m;
+    }
+
+    /// @dev Does burning `shareAmt` shares keep BOTH legs inside α?
+    function _withdrawUtilOk(uint256 shareAmt) internal view returns (bool) {
+        uint256 denom = shares + VIRTUAL_SHARES;
+        uint256 eOut = (ethBal * shareAmt) / denom;
+        uint256 uOut = (usdcBal * shareAmt) / denom;
+        return reservedEth * 10_000 <= (ethBal - eOut) * ALPHA_BPS
+            && reservedUsdc * 10_000 <= (usdcBal - uOut) * ALPHA_BPS;
     }
 
     /// @notice Burn shares for a pro-rata slice of BOTH legs. The inventory
@@ -417,6 +456,12 @@ contract DealerVault {
 
         ethBal -= size;
         usdcBal += usdcReceived;
+        // Both sides must stay inside α. The USDC leg grows with the swap
+        // proceeds; the ETH leg SHRINKS, so it must be re-checked too — a
+        // hedge-sale can otherwise compress the cover pool that backs written
+        // calls / long futures below the 40% law even though no reservation
+        // changed (the size <= freeEth() check only guarantees cover, not α).
+        if (reservedEth * 10_000 > ethBal * ALPHA_BPS) revert UtilCap();
         if (reservedUsdc * 10_000 > usdcBal * ALPHA_BPS) revert UtilCap();
         emit RiskOpened(this.openShort.selector, size, p);
     }

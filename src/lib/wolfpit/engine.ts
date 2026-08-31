@@ -1085,6 +1085,12 @@ function applyVaultOpen(
       v.reservedUsdc += size * px;
       v.eth -= size;
       v.usdc += size * px;
+      // Contract parity (DealerVault.openShort): selling ETH for a short must
+      // keep the ETH-side utilisation inside α — the cover for written calls
+      // / long futures is still reserved against the shrunken balance.
+      if (v.reservedEth > UTIL_CAP * v.eth + 1e-9) {
+        return "Inventory cap. ETH utilization would exceed α after the sale.";
+      }
     }
   } else {
     v.reservedUsdc += size * px;
@@ -1264,17 +1270,34 @@ export function closeFuture(s: EngineState, id: string, settlement = false): Eng
   const reduced = reduceFuture(s, pos, pos.sizeEth, px);
   if (typeof reduced === "string") return reduced;
   const pnl = futPnl(pos, px);
-  const filled = pushFill(reduced, {
-    id: uid("f"),
-    t: s.clock,
-    product: "future",
-    symbol: `${under} mini close`,
-    side: pos.side === "long" ? "sell" : "buy",
-    size: pos.sizeEth,
-    price: px,
-    fee: 0,
-    note: `PnL ${pnl.toFixed(2)}`,
-  }, cashShot(s));
+  // Fee parity with opens and flattens (F9): an early close pays the same
+  // DERIV_FEE, debited from the trader and split vault/insurance by takeFee.
+  // Settlement prints are not trades — no fee.
+  const fee = settlement ? 0 : pos.sizeEth * px * DERIV_FEE;
+  const charged = fee > 0
+    ? {
+        ...reduced,
+        account: {
+          ...reduced.account,
+          usdc: reduced.account.usdc - fee,
+          realized: reduced.account.realized - fee,
+        },
+      }
+    : reduced;
+  const filled = takeFee(
+    pushFill(charged, {
+      id: uid("f"),
+      t: s.clock,
+      product: "future",
+      symbol: `${under} mini close`,
+      side: pos.side === "long" ? "sell" : "buy",
+      size: pos.sizeEth,
+      price: px,
+      fee,
+      note: `PnL ${pnl.toFixed(2)}`,
+    }, cashShot(charged)),
+    fee,
+  );
   return under === "ETH" ? hedgeDelta(filled) : filled;
 }
 
@@ -1590,10 +1613,18 @@ export function removeLiquidity(s: EngineState, poolId: PoolId, shares: number):
   const pool = s.pools[poolId];
   if (!pool || pool.lpSupply <= 0) return "Empty pool.";
   if (shares > pool.lpSupply + 1e-12) return "Shares exceed pool supply.";
+  // Re-anchor to the live mark k-conservingly (parity with addLiquidity): an
+  // exit pays pro-rata at the fair mark, never at a stale pool print, so the
+  // exiting LP and the LPs left behind price on the same basis.
+  let target = 0;
+  if (pool.base === "ETH" && pool.quote === "USDC") target = s.eth;
+  else if (pool.base === "WPIT" && pool.quote === "USDC") target = s.wpit;
+  else if (pool.base === "WPIT" && pool.quote === "ETH") target = s.wpit / Math.max(s.eth, 1e-9);
+  const repinned = target > 0 ? repinPool(pool, target) : pool;
   const frac = Math.min(1, shares / pool.lpSupply);
-  const quoteOut = pool.quoteReserve * frac;
-  const baseOut = pool.baseReserve * frac;
-  const copy = { ...pool, quoteReserve: pool.quoteReserve - quoteOut, baseReserve: pool.baseReserve - baseOut, lpSupply: pool.lpSupply - shares };
+  const quoteOut = repinned.quoteReserve * frac;
+  const baseOut = repinned.baseReserve * frac;
+  const copy = { ...repinned, quoteReserve: repinned.quoteReserve - quoteOut, baseReserve: repinned.baseReserve - baseOut, lpSupply: pool.lpSupply - shares };
   let acc = creditToken(s.account, pool.quote, quoteOut);
   acc = creditToken(acc, pool.base, baseOut);
   const lp = s.lp

@@ -36,6 +36,13 @@ contract Stake {
     error NotOwner();
     error Cooldown();
 
+    /// @notice Below this backing (1e-6 WPIT, 18 decimals) the share ledger is
+    ///         wiped: dust must not inflate future share counts or leave a
+    ///         near-zero `total` that makes `stake()` mint astronomical share
+    ///         counts off the old ledger. Any value left in the pool at this
+    ///         point is itself dust.
+    uint256 public constant DUST = 1_000_000_000_000;
+
     event OwnerSet(address indexed previous, address indexed next);
     event CooldownSet(uint256 cooldown);
     event Staked(address indexed who, uint256 amt);
@@ -79,11 +86,12 @@ contract Stake {
         return sharesOf[who];
     }
 
-    /// @dev If backing hits zero while shares remain (full slash or dust),
-    ///      wipe the share ledger so the invariant totalShares > 0 ⇒ total > 0
-    ///      holds and share pricing never divides by zero.
+    /// @dev If backing hits zero — or dust below `DUST` — while shares
+    ///      remain (full slash or near-full slash), wipe the share ledger so
+    ///      the invariant totalShares > 0 ⇒ total > 0 holds and share pricing
+    ///      never divides by zero or inflates on the next stake.
     function _wipeIfEmpty() internal {
-        if (total == 0 && totalShares != 0) {
+        if ((total == 0 || total < DUST) && totalShares != 0) {
             totalShares = 0;
             epoch += 1;
         }

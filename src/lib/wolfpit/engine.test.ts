@@ -941,3 +941,76 @@ describe("audit fixes 2026-08-31", () => {
     assert.ok(destructiveK > k0 * 1.05, "old path minted k; repin conserves it");
   });
 });
+
+describe("review follow-ups 2026-08-31", () => {
+  it("closeFuture (non-settlement) charges the same DERIV_FEE as opens/flattens", () => {
+    const s0 = initialState();
+    const opened = tradeFuture(s0, "long", 2, exp);
+    assert.equal(typeof opened, "object", String(opened));
+    const s = opened as typeof s0;
+    const ins0 = s.insuranceUsdc;
+    const closed = closeFuture(s, s.futures[0]!.id);
+    assert.equal(typeof closed, "object", String(closed));
+    const c = closed as typeof s0;
+    const fill = c.fills[0]!;
+    assert.ok(fill.fee > 0, "close pays DERIV_FEE");
+    assert.ok(Math.abs(fill.fee - 0.2 * fill.price * DERIV_FEE) < 1e-12, "fee = size × px × DERIV_FEE");
+    assert.ok(Math.abs(c.insuranceUsdc - ins0 - fill.fee * 0.5) < 1e-9, "half the fee funds insurance");
+  });
+
+  it("closeFuture settlement stays fee-free", () => {
+    const s0 = initialState();
+    const opened = tradeFuture(s0, "long", 2, exp);
+    assert.equal(typeof opened, "object", String(opened));
+    const s = opened as typeof s0;
+    const closed = closeFuture(s, s.futures[0]!.id, true);
+    assert.equal(typeof closed, "object", String(closed));
+    const fill = (closed as typeof s0).fills[0]!;
+    assert.equal(fill.fee, 0, "settlement prints have no fee");
+  });
+
+  it("removeLiquidity re-anchors k-conservingly (parity with addLiquidity)", () => {
+    let s = initialState();
+    s.account.eth = 100;
+    s.account.usdc = 1_000_000;
+    const seeded = addLiquidity(s, "ETH-USDC", 40_000);
+    assert.equal(typeof seeded, "object", String(seeded));
+    s = seeded as typeof s;
+    const sh = s.lp[0]!.shares;
+    const pool0 = s.pools["ETH-USDC"]!;
+    const k0 = pool0.baseReserve * pool0.quoteReserve;
+    const frac = sh / pool0.lpSupply;
+    // Move the mark +10% WITHOUT ticking; the removal itself must re-anchor.
+    s = { ...s, eth: s.eth * 1.1 };
+    const px = s.eth;
+    const removed = removeLiquidity(s, "ETH-USDC", sh);
+    assert.equal(typeof removed, "object", String(removed));
+    const after = removed as typeof s;
+    const p1 = after.pools["ETH-USDC"]!;
+    // Pool sits at the live mark after the exit...
+    assert.ok(Math.abs(p1.quoteReserve / p1.baseReserve - px) / px < 1e-9, "pool sits at the live mark");
+    // ...and the exiting LP was paid the pro-rata slice of the k-conservingly
+    // repinned book, never a stale print.
+    const ethOut = after.account.eth - (100 - 10);
+    const usdcOut = after.account.usdc - (1_000_000 - 40_000);
+    const expBase = Math.sqrt(k0 / px);
+    const expQuote = Math.sqrt(k0 * px);
+    assert.ok(Math.abs(ethOut - expBase * frac) / (expBase * frac) < 1e-6, "ETH leg priced at repinned book");
+    assert.ok(Math.abs(usdcOut - expQuote * frac) / (expQuote * frac) < 1e-6, "USDC leg priced at repinned book");
+  });
+
+  it("short open that would push ETH-side util past α is rejected (contract parity)", () => {
+    const s0 = initialState();
+    const e = expiries(s0.clock)[0]!.at;
+    // Reserve ETH to near the α cap (direct state, like other engine tests):
+    // any hedge-sale now shrinks the cover pool below 2.5× reserved.
+    const s = { ...s0, vault: { ...s0.vault, reservedEth: 39 } };
+    const r = tradeFuture(s, "short", 40, e); // 4 ETH sale → util 39/96 ≈ 40.6%
+    assert.equal(typeof r, "string", "ETH-side util breach must reject");
+    assert.match(String(r), /Inventory cap/i);
+    // Control: with headroom the same short fills.
+    const s2 = { ...s0, vault: { ...s0.vault, reservedEth: 10 } };
+    const ok = tradeFuture(s2, "short", 40, e);
+    assert.equal(typeof ok, "object", "short with headroom passes");
+  });
+});
