@@ -30,7 +30,10 @@ import { DEFAULT_CHAIN_ID, chainById, publicClientFor } from "./chains";
 import type { QuoteRequest, QuoteResult } from "./types";
 import { erc20Abi, type Hex } from "viem";
 
-const ZEROX_BASE = "https://api.0x.org/swap/permit2";
+// Use the AllowanceHolder API: the client implements the ordinary ERC-20
+// approve flow. The Permit2 endpoint requires an EIP-712 signature and cannot
+// safely be used until that signing/submission flow exists end to end.
+const ZEROX_BASE = "https://api.0x.org/swap/allowance-holder";
 
 function apiKey(): string | undefined {
   const k = process.env.ZEROX_API_KEY;
@@ -124,7 +127,7 @@ function toResult(
     .filter((x): x is string => Boolean(x));
   const uniqueSources = Array.from(new Set(sources));
   // F5: 0x v2 returns priceImpact as a PERCENT number (0.42 = 0.42%).
-  // Defensive: a value >= 100 cannot be a percent, treat it as a fraction.
+  // Values above 100 cannot be a percent; omit rather than guess the unit.
   const impact = normalizePriceImpact(json.priceImpact);
 
   const tx =

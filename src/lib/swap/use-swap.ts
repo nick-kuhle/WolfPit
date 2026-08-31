@@ -305,6 +305,23 @@ export function useSwap() {
         setPhase("error");
         return;
       }
+
+      // Approval may have taken long enough for the executable quote to move.
+      // Do not silently replace the quote the user reviewed: require an
+      // explicit second click when the expected output moved beyond the
+      // selected tolerance. No transaction is sent on this path.
+      const firmBuy = BigInt(firm.buyAmount);
+      const freshBuy = BigInt(fresh.buyAmount);
+      const quoteMoveBps =
+        firmBuy > 0n
+          ? Number((firmBuy > freshBuy ? firmBuy - freshBuy : freshBuy - firmBuy) * 10_000n / firmBuy)
+          : Number.POSITIVE_INFINITY;
+      if (!Number.isFinite(quoteMoveBps) || quoteMoveBps > slippageBps) {
+        setError("The market moved while approval was pending. Review the updated quote and confirm again.");
+        setPhase("quoted");
+        return;
+      }
+
       // The refreshed quote is what we actually send — re-verify it too.
       try {
         await assertSafeSwapTarget(chainId, fresh.tx, {

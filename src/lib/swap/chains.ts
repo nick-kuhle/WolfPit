@@ -194,6 +194,7 @@ export function nativeTokenOf(chainId: number) {
     address: NATIVE_TOKEN,
     decimals: chain.native.decimals,
     native: true as const,
+    verified: true as const,
   };
 }
 

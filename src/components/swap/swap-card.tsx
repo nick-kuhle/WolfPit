@@ -193,7 +193,7 @@ export function SwapWidget({ swap }: { swap: ReturnType<typeof useSwap> }) {
         {/* F6: unverified community tokens and transfer/sell-tax warnings.
              The address is only as trustworthy as the search source that
              surfaced it — say so before the user commits real funds. */}
-        {state.sell.verified === false || state.buy.verified === false ? (
+        {state.sell.verified !== true || state.buy.verified !== true ? (
           <p className="mx-4 mb-3 rounded-lg border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10px] text-warn">
             Community token — not on the verified list. Double-check the contract address
             before swapping.
@@ -564,8 +564,8 @@ function TokenPicker({
                 </div>
               </div>
               <div className="shrink-0 text-right font-mono text-[10px] text-subtle">
-                <span className={t.verified === false ? "text-warn" : "text-up"}>
-                  {t.verified === false ? "unverified" : "verified"}
+                <span className={t.verified === true ? "text-up" : "text-warn"}>
+                  {t.verified === true ? "verified" : "unverified"}
                 </span>
                 {" · "}
                 {t.native ? "native" : `${t.address.slice(0, 6)}…${t.address.slice(-4)}`}

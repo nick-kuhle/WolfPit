@@ -1167,7 +1167,10 @@ export function tradeFuture(s: EngineState, side: FutSide, contracts: number, ex
   if (why) return why;
   const mark = markOf(s, under);
   const bps = spreadBps(s);
-  const mid = under === "ETH" ? reservationPx(s) : mark;
+  // v1 quotes use the documented mark plus the spread stack. Inventory is
+  // already represented in spreadBps; do not apply the A-S reservation shift
+  // a second time (MM.md, v1 quote model).
+  const mid = mark;
   const px = side === "long" ? mid * (1 + bps / 10_000) : mid * (1 - bps / 10_000);
   const fee = size * px * DERIV_FEE;
 

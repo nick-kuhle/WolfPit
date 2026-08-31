@@ -56,8 +56,8 @@ export type QuoteResult =
       minBuyAmount: string;
       /**
        * Price impact in PERCENT (e.g. 0.42 = 0.42%), if provided. 0x v2's
-       * `priceImpact` is a percentage number; values >= 100 are defensively
-       * treated as fractions (x100) — see quote.server.ts (review fix F5).
+       * `priceImpact` is a percentage number; invalid values above 100 are
+       * omitted rather than displayed with a guessed unit.
        */
       priceImpact?: number;
       fee: QuoteFee;

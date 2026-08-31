@@ -228,6 +228,23 @@ test("auth guard: wrong-password attempts alone cannot lock a victim out", async
   }
 });
 
+test("auth pruning cannot delete a counter from the different-width swap window", async () => {
+  const { run, clock } = await makeGuard();
+  await run("insert into wolfpit_rate_limit (id, kind, key, count, window_start) values ($1,$2,$3,$4,$5)", [
+    "swap:198.51.100.44",
+    "swap",
+    "198.51.100.44",
+    3,
+    0, // swap quota buckets are one minute; this is intentionally old
+  ]);
+  const g = preflight(await guardAuthRequest(authReq("cross-scale@x.com"), { run, now: () => clock.value }));
+  await g.record(new Response("bad", { status: 401 }));
+  const rows = (await run("select id from wolfpit_rate_limit where id = 'swap:198.51.100.44'")) as {
+    id: string;
+  }[];
+  assert.equal(rows.length, 1, "auth pruning must not remove swap quota rows");
+});
+
 test("auth guard: rows from old windows are pruned (bounded growth)", async () => {
   const { run, clock } = await makeGuard();
   // Seed rows that belong to a long-gone window (older than the previous one).

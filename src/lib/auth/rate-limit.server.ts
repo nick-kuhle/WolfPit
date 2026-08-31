@@ -25,9 +25,11 @@
  * rather than letting the retry through — auth cannot work without the
  * database anyway.
  *
- * Rows are pruned opportunistically (see bumpCount): any row whose window is
- * older than the previous one is deleted, so rotating attacker keys cannot
- * grow the table without bound (migrations/0003 adds the window_start index).
+ * Rows are pruned opportunistically (see bumpCount): any row in the same
+ * limiter kind whose window is older than the previous one is deleted, so
+ * rotating attacker keys cannot grow the table without bound. Pruning is
+ * kind-scoped because auth and swap quota buckets have different widths
+ * (migrations/0003 adds the window_start index).
  *
  * Wiring: `guardAuthRequest` is called by the `/api/auth/*` mount and by the
  * sign-in popup initiation (`popup.server.ts`) before Better Auth processes
@@ -127,7 +129,10 @@ async function bumpCount(
      returning count`,
     [id, kind, key, bucket],
   )) as { count: number }[];
-  await run("delete from wolfpit_rate_limit where window_start < $1", [bucket - 1]).catch(
+  // Buckets use different widths (auth: 15 minutes; swap quota: 1 minute).
+  // Pruning by bucket alone lets a swap request delete every auth counter.
+  // Scope pruning to the limiter kind so each namespace remains independent.
+  await run("delete from wolfpit_rate_limit where kind = $1 and window_start < $2", [kind, bucket - 1]).catch(
     () => {
       /* pruning is best-effort */
     },
@@ -228,7 +233,6 @@ export async function guardAuthRequest(
   // Preflight is READ-ONLY: over-limit only, no counting.
   const over = async (kind: string, key: string, max: number, bucket: number) => {
     const c = await readCount(runStore, `${kind}:${key}`, bucket);
-    console.error("OVER", kind, key, c, max, bucket);
     return c >= max;
   };
 

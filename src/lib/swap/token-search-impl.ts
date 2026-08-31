@@ -251,7 +251,7 @@ export async function searchTokensImpl(chainId: number, qRaw: string): Promise<T
     const indexed = await aggregatorSearch(chainId, q);
     if (indexed.length) return { ok: true, tokens: indexed, source: "aggregator" };
     const meta = await readErc20Meta(chainId, q);
-    if (meta) return { ok: true, tokens: [...out, { chainId, address: q, ...meta }], source: "fallback" };
+    if (meta) return { ok: true, tokens: [...out, { chainId, address: q, ...meta, verified: false }], source: "fallback" };
     return {
       ok: false,
       error: `Not an ERC-20 on ${chain.label} (or the RPC is unreachable). Check the address and chain.`,

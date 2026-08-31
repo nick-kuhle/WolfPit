@@ -16,3 +16,4 @@ keeper:
 	cargo test -p wolfpit-keeper
 
 test: typecheck engine forge
+	npx tsx --test src/lib/auth/gate-identity.test.ts src/lib/auth/rate-limit.server.test.ts src/lib/swap/safety.test.ts
