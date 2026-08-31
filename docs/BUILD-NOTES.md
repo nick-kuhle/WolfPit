@@ -6,6 +6,41 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — v4 hook spec corrections (F1–F9, external review)
+
+External review of `HOOK.md` (c33c054) found fee-parity and v4-mechanics issues.
+Spec-only fixes — no engine/risk/contract logic change.
+
+- F1 (HIGH): `_dynamicFee` returned the fee in bps units; v4 fees are **pips**
+  (hundredths of a bip — `LPFeeLibrary.MAX_LP_FEE = 1_000_000` = 100%). Returning
+  `5–30` charged 0.0005%–0.003%, 100× too low. Now `feeBps * 100` (`[500,3000]`).
+- F2 (HIGH): `beforeSwap` returned a bare fee without `OVERRIDE_FEE_FLAG` — the Pool
+  falls back to its stored fee, so the dynamic fee never applied. Now
+  `fee | OVERRIDE_FEE_FLAG`; §2 corrected (v4 has no "floor + dynamic" composition —
+  the returned fee REPLACES the stored fee for that swap; dynamic pool initialized
+  with `DYNAMIC_FEE_FLAG`).
+- F3 (MEDIUM): RV was event-sampled but annualized with a calendar constant, making
+  the fee a swap-frequency gauge. Now a **time-weighted EWMA**
+  (`λ_eff = λ^(Δt/τ)`, τ = 60 s) annualized with `√(365.25·24·3600/τ) = √525960` and
+  clamped `[0.15, 2]` — sim parity at any swap cadence (`ewmaRv` measures actual bar
+  spacing).
+- F4 (LOW): sim `spotFeeBps` rounds (`Math.round`); the hook floored. Now
+  round-half-up (`+0.5e18`), matching the sim at sub-bps boundaries.
+- F5 (LOW): on-chain RV cold-start seed undefined. Pinned `0.55` (annualized) until
+  ≥ 8 observations — sim parity (`ewmaRv` seeds 0.55 below 8 candles).
+- F6 (nit): T2's `RV≥0.875 → 30` mislabeled the kink; the formula saturates at
+  `RV = 0.7125`. T2 now pins the true saturation point and asserts `fee.isOverride()`.
+- F7 (nit): §4 pushed depth via `setPoolDepth` while §8 chose pull. §4 rewritten to
+  pull: `reconcileDepth()` (`onlyOperator`, idempotent) reads the hook's `lastDepth`;
+  the push surface (`IWolfPitDepthSink`) is removed.
+- F8 (nit): "write-once-per-block" claim had no guard; reworded — idempotent
+  overwrites, with the vol same-block collapse (I9) the only cadence guard.
+- F9 (nit): `beforeSwap` `view` was premised on staticcall; v4 uses `call`. Reworded:
+  `view` is a self-imposed guarantee, kept.
+
+Spec-only (no logic change): suites unchanged at HEAD (forge 55/55, npm 171/171,
+cargo 11/11).
+
 ## 2026-08-31 (Mon) — v4 hook spec (Q1-05) + admin env fix
 
 - `contracts/HOOK.md` written (Q1-05, spec-only, no deploy): the Uni v4 hook is
