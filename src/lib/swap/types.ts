@@ -54,7 +54,11 @@ export type QuoteResult =
       buyAmount: string;
       /** Guaranteed minimum buy amount after slippage (base units). */
       minBuyAmount: string;
-      /** Price impact fraction (e.g. 0.0031 = 0.31%), if provided. */
+      /**
+       * Price impact in PERCENT (e.g. 0.42 = 0.42%), if provided. 0x v2's
+       * `priceImpact` is a percentage number; values >= 100 are defensively
+       * treated as fractions (x100) — see quote.server.ts (review fix F5).
+       */
       priceImpact?: number;
       fee: QuoteFee;
       route: QuoteRoute;
@@ -70,6 +74,15 @@ export type QuoteResult =
       gasFee?: string;
       /** Firm-quote quoteId (echoed back on /price re-check), if provided. */
       quoteId?: string;
+      /** 0x buy/sell/transfer tax detection (bps) for the traded tokens, if provided. */
+      sellTaxBps?: number;
+      buyTaxBps?: number;
+      transferTaxBps?: number;
+      /**
+       * The spender inside the Permit2 EIP-712 payload, when the quote uses
+       * Permit2. Safety cross-check: must equal `tx.to` (review fix F4).
+       */
+      permit2Spender?: string;
     }
   | {
       ok: false;
@@ -86,6 +99,8 @@ export type FoundToken = {
   name: string;
   decimals: number;
   native?: boolean;
+  /** false for community hits (DexScreener/CoinGecko fallback) — UI warns. */
+  verified?: boolean;
 };
 
 export type TokenSearchResult =

@@ -17,6 +17,8 @@
 
 import {
   BASE_CHAIN_ID,
+  FEE_CHAINS,
+  FEE_ENABLED,
   FEE_RECIPIENT,
   SWAP_FEE_BPS,
   SWAP_FEE_BPS_DISCOUNTED,
@@ -70,6 +72,7 @@ async function verifyHoldsWpit(chainId: number, taker: string): Promise<boolean>
 
 type ZeroXIssue = { liquidityAvailable?: boolean };
 type ZeroXFee = { amount?: string; token?: string } | null;
+type ZeroXTokenTax = { buyTaxBps?: number | null; sellTaxBps?: number | null; transferTaxBps?: number | null };
 type ZeroXResponse = {
   liquidityAvailable?: boolean;
   quoteId?: string;
@@ -83,7 +86,22 @@ type ZeroXResponse = {
   issues?: { allowance?: { spender?: string; actual?: string } | null } & ZeroXIssue;
   transaction?: { to?: string; data?: string; value?: string; gas?: string; gasPrice?: string };
   priceImpact?: string | number;
+  tokenMetadata?: { sellToken?: ZeroXTokenTax; buyToken?: ZeroXTokenTax };
+  permit2?: { message?: { spender?: string } };
 };
+
+/**
+ * Normalize 0x's price impact to PERCENT. v2 returns a percentage number
+ * (0.42 = 0.42%); pass it through and drop anything that cannot be a percent
+ * (<= 0, > 100, non-finite) rather than displaying a wrong number
+ * (review fix F5 — the previous code divided by 100 on an unverified unit
+ * assumption; the unit is percent per 0x v1/v2 semantics).
+ */
+export function normalizePriceImpact(raw: string | number | null | undefined): number | undefined {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || n > 100) return undefined;
+  return n;
+}
 
 function toResult(
   json: ZeroXResponse,
@@ -92,6 +110,7 @@ function toResult(
   sellToken: string,
   wantTx: boolean,
   chainId: number,
+  feeCharged: boolean,
 ): QuoteResult {
   if (json.liquidityAvailable === false) {
     return { ok: false, error: "No liquidity route for this pair/size right now.", noRoute: true };
@@ -104,10 +123,9 @@ function toResult(
     .map((f) => f.source)
     .filter((x): x is string => Boolean(x));
   const uniqueSources = Array.from(new Set(sources));
-  const impact =
-    json.priceImpact !== undefined && json.priceImpact !== null
-      ? Number(json.priceImpact) / 100
-      : undefined;
+  // F5: 0x v2 returns priceImpact as a PERCENT number (0.42 = 0.42%).
+  // Defensive: a value >= 100 cannot be a percent, treat it as a fraction.
+  const impact = normalizePriceImpact(json.priceImpact);
 
   const tx =
     wantTx && json.transaction?.to && json.transaction?.data
@@ -128,10 +146,10 @@ function toResult(
     minBuyAmount: json.minBuyAmount ?? buyAmount,
     priceImpact: Number.isFinite(impact) ? impact : undefined,
     fee: {
-      bps: feeBps,
-      discounted: WPIT_LIVE && Boolean(holdsWpit) && feeBps < SWAP_FEE_BPS,
+      bps: feeCharged ? feeBps : 0,
+      discounted: feeCharged && WPIT_LIVE && Boolean(holdsWpit) && feeBps < SWAP_FEE_BPS,
       token: json.fees?.integratorFee?.token ?? sellToken,
-      amount: json.fees?.integratorFee?.amount,
+      amount: feeCharged ? json.fees?.integratorFee?.amount : undefined,
     },
     route: { sources: uniqueSources, hops: sources.length },
     tx,
@@ -140,6 +158,13 @@ function toResult(
     gas: json.transaction?.gas ?? json.gas,
     gasFee: json.totalNetworkFee,
     quoteId: json.quoteId,
+    sellTaxBps: json.tokenMetadata?.sellToken?.sellTaxBps ?? undefined,
+    buyTaxBps: json.tokenMetadata?.buyToken?.buyTaxBps ?? undefined,
+    transferTaxBps:
+      json.tokenMetadata?.sellToken?.transferTaxBps ??
+      json.tokenMetadata?.buyToken?.transferTaxBps ??
+      undefined,
+    permit2Spender: json.permit2?.message?.spender ?? undefined,
   };
 }
 
@@ -155,10 +180,10 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
       error: "Spot router not configured (missing ZEROX_API_KEY). Set it to enable live swaps.",
     };
   }
-  if (!FEE_RECIPIENT) {
+  if (!FEE_ENABLED) {
     return {
       ok: false,
-      error: "Fee wallet not configured (missing VITE_FEE_RECIPIENT).",
+      error: "Fee wallet not configured (VITE_FEE_RECIPIENT must be a valid address).",
     };
   }
   if (!req.sellAmount || req.sellAmount === "0") {
@@ -181,6 +206,10 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
     holdsWpit = await verifyHoldsWpit(chainId, req.taker);
   }
   const feeBps = feeBpsFor(holdsWpit);
+  // F7: the on-chain fee is only attached on chains whose fee recipient has
+  // been verified (FEE_CHAINS, default Base-only). Elsewhere no integrator fee
+  // is charged — an unverified recipient on another chain could strand fees.
+  const feeCharged = FEE_CHAINS.has(chainId);
 
   const params = new URLSearchParams({
     chainId: String(chainId),
@@ -188,12 +217,15 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
     buyToken: req.buyToken,
     sellAmount: req.sellAmount,
     slippageBps: String(req.slippageBps ?? SWAP_SLIPPAGE_BPS),
-    // WolfPit on-chain trading fee — paid directly to the WolfPit wallet.
-    swapFeeRecipient: FEE_RECIPIENT,
-    swapFeeBps: String(feeBps),
-    // Charge the fee in the token the user is selling.
-    swapFeeToken: req.sellToken,
   });
+  if (feeCharged) {
+    // WolfPit on-chain trading fee — paid directly to the WolfPit wallet.
+    // (FEE_ENABLED was verified above, so FEE_RECIPIENT is a valid address.)
+    params.set("swapFeeRecipient", FEE_RECIPIENT!);
+    params.set("swapFeeBps", String(feeBps));
+    // Charge the fee in the token the user is selling.
+    params.set("swapFeeToken", req.sellToken);
+  }
   if (req.taker) params.set("taker", req.taker);
 
   const endpoint = wantTx ? "quote" : "price";
@@ -220,5 +252,5 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
     return { ok: false, error: msg, noRoute: res.status === 400 };
   }
 
-  return toResult(json, feeBps, holdsWpit, req.sellToken, wantTx, chainId);
+  return toResult(json, feeBps, holdsWpit, req.sellToken, wantTx, chainId, feeCharged);
 }

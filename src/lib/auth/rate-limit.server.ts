@@ -7,12 +7,27 @@
  * — Neon in production, PGLite in preview), so the window is SHARED across
  * every instance. Both dimensions are throttled:
  *
- *   - per IP      (x-forwarded-for / cf-connecting-ip)   20 POSTs / 15 min
- *   - per account (email from the auth POST body)         5 POSTs / 15 min
- *   - per IP+account pair (staggered)                     5 POSTs / 15 min
+ *   - per IP      (cf-connecting-ip, then x-forwarded-for)   20 POSTs / 15 min
+ *   - per account (email from the auth POST body)             5 POSTs / 15 min
+ *   - per IP+account pair (staggered)                         5 POSTs / 15 min
  *
- * Fail-closed: if the store is unreachable the guard returns 503 rather than
- * letting the retry through — auth cannot work without the database anyway.
+ * FAILURES ONLY (review fix, 2026-08-30): the guard is split into a read-only
+ * preflight (`guardAuthRequest`) and a post-dispatch `record(res)` step that
+ * bumps the counters ONLY when the auth response is a failure (>= 400) and
+ * RESETS them on success. The previous design bumped every POST before Better
+ * Auth verified anything — an attacker could lock a victim's account out of
+ * login with 5 bare POSTs (no password needed), and successful logins
+ * self-locked (5 logins in 15 min across devices). The admin login guard
+ * already used the check-then-record pattern; the /api/auth/* path now does
+ * too.
+ *
+ * Fail-closed preflight: if the store is unreachable the guard returns 503
+ * rather than letting the retry through — auth cannot work without the
+ * database anyway.
+ *
+ * Rows are pruned opportunistically (see bumpCount): any row whose window is
+ * older than the previous one is deleted, so rotating attacker keys cannot
+ * grow the table without bound (migrations/0003 adds the window_start index).
  *
  * Wiring: `guardAuthRequest` is called by the `/api/auth/*` mount and by the
  * sign-in popup initiation (`popup.server.ts`) before Better Auth processes
@@ -54,11 +69,19 @@ export interface RequestLike {
   headers: { get(name: string): string | null };
 }
 
+/**
+ * Best-effort caller IP. Prefers `cf-connecting-ip` (set by Cloudflare, not
+ * spoofable by the client) over the first `x-forwarded-for` hop (spoofable
+ * when the origin is reachable directly or the proxy appends instead of
+ * overwriting). Truncated defensively.
+ */
 export function clientIp(request: RequestLike | null | undefined): string | undefined {
   if (!request) return undefined;
+  const cf = request.headers.get("cf-connecting-ip")?.trim();
+  if (cf) return cf.slice(0, 64);
   const fwd = request.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim() || undefined;
-  return request.headers.get("cf-connecting-ip")?.trim() || undefined;
+  if (fwd) return fwd.split(",")[0]!.trim().slice(0, 64) || undefined;
+  return undefined;
 }
 
 /** Minimal query surface (both pg and PGLite satisfy `.query(text, params)`). */
@@ -80,7 +103,12 @@ async function readCount(run: QueryRunner, id: string, bucket: number): Promise<
   return Number(rows[0]?.count ?? 0);
 }
 
-/** Atomic increment (upsert); true when the row is over `max` after the bump. */
+/**
+ * Atomic increment (upsert); true when the row is over `max` after the bump.
+ * Also deletes rows whose window is older than the previous one — every key
+ * lives at most ~2 windows, so the table cannot grow without bound
+ * (attacker-rotated keys included). Cheap: `window_start` is indexed (0003).
+ */
 async function bumpCount(
   run: QueryRunner,
   id: string,
@@ -99,6 +127,11 @@ async function bumpCount(
      returning count`,
     [id, kind, key, bucket],
   )) as { count: number }[];
+  await run("delete from wolfpit_rate_limit where window_start < $1", [bucket - 1]).catch(
+    () => {
+      /* pruning is best-effort */
+    },
+  );
   return Number(rows[0]?.count ?? max + 1) > max;
 }
 
@@ -111,6 +144,27 @@ async function withSql<T>(fn: (run: QueryRunner) => Promise<T>): Promise<T> {
   const { getSql } = await import("../db");
   const sql = await getSql();
   return fn(sql.query.bind(sql) as QueryRunner);
+}
+
+/**
+ * Generic shared-window throttle for non-auth server surfaces (e.g. the 0x
+ * proxy server fns in src/lib/swap — quota protection, not security).
+ * Unlike the auth guards this is FAIL-OPEN on store errors: a DB hiccup must
+ * not take down live swaps, and the cost of a missed throttle is API-quota
+ * spend, not account compromise. Returns true when over the limit.
+ */
+export async function bumpLimit(
+  kind: string,
+  key: string,
+  max: number,
+  windowSec = 60,
+): Promise<boolean> {
+  const bucket = Math.floor(Date.now() / 1000 / windowSec);
+  try {
+    return await withSql((run) => bumpCount(run, `${kind}:${key}`, kind, key, max, bucket));
+  } catch {
+    return false; // fail-open: allow the request rather than break the feature
+  }
 }
 
 function tooManyResponse() {
@@ -127,13 +181,34 @@ function storeErrorResponse() {
   });
 }
 
-/** Return a 429/503 Response when the request must be throttled, else null. */
-export async function guardAuthRequest(request: Request): Promise<Response | null> {
+export type AuthGuard =
+  | { blocked: Response }
+  | {
+      blocked: null;
+      /** Call after the auth dispatch: bumps on failure, resets on success. */
+      record: (response: Response) => Promise<void>;
+    };
+
+/**
+ * Read-only preflight for the credential-auth surface. Does NOT bump counters
+ * (that is what `record` is for) — a wrong-password attempt only counts after
+ * Better Auth has actually rejected it. Returns a 429/503 Response when the
+ * request must be throttled, else `blocked: null` + the post-dispatch `record`.
+ * `run` is injectable for tests (defaults to the app database).
+ */
+export async function guardAuthRequest(
+  request: Request,
+  opts: { run?: QueryRunner; now?: () => number } = {},
+): Promise<AuthGuard> {
+  const now = opts.now ?? (() => Date.now());
   const url = new URL(request.url);
-  if (request.method !== "POST") return null;
+  if (request.method !== "POST") return { blocked: null, record: async () => {} };
   // Credential/initiation endpoints only; callback GETs are browser navigations.
   const sensitive = /\/sign-in\/|\/sign-up\/|oauth2\/authorize/.test(url.pathname);
-  if (!sensitive) return null;
+  if (!sensitive) return { blocked: null, record: async () => {} };
+
+  // Resolve the store lazily — only credential POSTs touch the database.
+  const runStore = opts.run ?? (await withSql<QueryRunner>(async (run) => run));
 
   const ip = clientIp(request) ?? "unknown";
 
@@ -148,25 +223,60 @@ export async function guardAuthRequest(request: Request): Promise<Response | nul
   }
 
   const bumpFor = (kind: string, key: string, max: number, bucket: number) =>
-    withSql((run) => bumpCount(run, `${kind}:${key}`, kind, key, max, bucket));
+    bumpCount(runStore, `${kind}:${key}`, kind, key, max, bucket);
+
+  // Preflight is READ-ONLY: over-limit only, no counting.
+  const over = async (kind: string, key: string, max: number, bucket: number) => {
+    const c = await readCount(runStore, `${kind}:${key}`, bucket);
+    console.error("OVER", kind, key, c, max, bucket);
+    return c >= max;
+  };
 
   try {
-    const bucket = bucketAt(() => Date.now());
-    if (await bumpFor("ip", ip, RL_MAX_IP, bucket)) return tooManyResponse();
+    const bucket = bucketAt(now);
+    if (await over("ip", ip, RL_MAX_IP, bucket)) return { blocked: tooManyResponse() };
     if (email) {
-      if (await bumpFor("acct", email, RL_MAX_ACCT, bucket)) return tooManyResponse();
-      if (await bumpFor("pair", `${ip}:${email}`, RL_MAX_PAIR, bucket)) return tooManyResponse();
+      if (await over("acct", email, RL_MAX_ACCT, bucket)) return { blocked: tooManyResponse() };
+      if (await over("pair", `${ip}:${email}`, RL_MAX_PAIR, bucket)) return { blocked: tooManyResponse() };
     }
-    return null;
+    return {
+      blocked: null,
+      record: async (response: Response): Promise<void> => {
+        // Failure (>= 400): count it. Success (2xx/3xx): clear the counters so
+        // legit multi-device logins never self-lock and the window is honest.
+        if (response.status >= 400) {
+          try {
+            const b = bucketAt(now);
+            await bumpFor("ip", ip, RL_MAX_IP, b);
+            if (email) {
+              await bumpFor("acct", email, RL_MAX_ACCT, b);
+              await bumpFor("pair", `${ip}:${email}`, RL_MAX_PAIR, b);
+            }
+          } catch {
+            /* a failed record must not change the auth outcome */
+          }
+        } else {
+          try {
+            await deleteRow(runStore, `ip:${ip}`);
+            if (email) {
+              await deleteRow(runStore, `acct:${email}`);
+              await deleteRow(runStore, `pair:${ip}:${email}`);
+            }
+          } catch {
+            /* best-effort reset */
+          }
+        }
+      },
+    };
   } catch {
-    return storeErrorResponse(); // fail-closed
+    return { blocked: storeErrorResponse() }; // fail-closed
   }
 }
 
 /** Convenience for server-function middleware: throws RateLimitedError. */
 export async function assertNotRateLimited(request: Request): Promise<void> {
-  const blocked = await guardAuthRequest(request);
-  if (blocked) throw blocked.status === 429 ? new RateLimitedError() : new RateLimitStoreError();
+  const g = await guardAuthRequest(request);
+  if (g.blocked) throw g.blocked.status === 429 ? new RateLimitedError() : new RateLimitStoreError();
 }
 
 /**

@@ -152,6 +152,8 @@ async function aggregatorSearch(chainId: number, q: string): Promise<FoundToken[
         symbol: t.symbol!,
         name: t.name ?? t.symbol!,
         decimals: t.decimals!,
+        // Indexed by 0x's curated token list — trustworthy enough to verify.
+        verified: true,
       }));
   } catch {
     return [];
@@ -191,15 +193,41 @@ async function dexScreenerSearch(chainId: number, q: string): Promise<FoundToken
     }
     const top = [...best.values()].sort((a, b) => b.liq - a.liq).slice(0, 8);
     const metas = await Promise.all(
-      top.map(async (t) => {
+      top.map(async (t): Promise<FoundToken | null> => {
         const meta = await readErc20Meta(chainId, t.address);
-        return meta ? { chainId, address: t.address, symbol: t.symbol, name: t.name, decimals: meta.decimals } : null;
+        return meta
+          ? { chainId, address: t.address, symbol: t.symbol, name: t.name, decimals: meta.decimals, verified: false }
+          : null;
       }),
     );
     return metas.filter((x): x is FoundToken => x !== null);
   } catch {
     return [];
   }
+}
+
+/** Symbol/name substring match (the same predicate the upstream uses). */
+function tokenMatches(t: FoundToken, ql: string): boolean {
+  return t.symbol.toLowerCase().includes(ql) || t.name.toLowerCase().includes(ql);
+}
+
+/**
+ * Reuse cached results of a shorter PREFIX query. Typing sequences ("u",
+ * "us", "usd", "usdc") produce overlapping upstream queries; a token matching
+ * "usdc" also matches "usd", so filtering the cached prefix result set is
+ * EXACT (not an approximation) for symbol/name-contains matching. Only fires
+ * for queries of length >= 4 with a cached prefix of length >= 3.
+ */
+function cachedPrefix(chainId: number, q: string): { hits: FoundToken[]; via: SearchSource } | null {
+  const ql = q.toLowerCase();
+  const maxLen = Math.min(ql.length - 1, 32);
+  for (let len = maxLen; len >= 3; len -= 1) {
+    const c = searchCache.get(`${chainId}:${ql.slice(0, len)}`);
+    if (!c || Date.now() - c.at >= CACHE_TTL_MS) continue;
+    const filtered = c.hits.filter((t) => tokenMatches(t, ql));
+    if (filtered.length) return { hits: filtered, via: c.via };
+  }
+  return null;
 }
 
 export async function searchTokensImpl(chainId: number, qRaw: string): Promise<TokenSearchResult> {
@@ -215,7 +243,7 @@ export async function searchTokensImpl(chainId: number, qRaw: string): Promise<T
     native.symbol.toLowerCase().includes(q.toLowerCase()) ||
     native.name.toLowerCase().includes(q.toLowerCase())
   ) {
-    out.push({ chainId, ...native });
+    out.push({ chainId, ...native, verified: true });
   }
 
   if (ADDRESS_RE.test(q)) {
@@ -246,29 +274,41 @@ export async function searchTokensImpl(chainId: number, qRaw: string): Promise<T
     hits = cached.hits;
     via = cached.via;
   } else {
-    hits = await aggregatorSearch(chainId, q);
-    if (hits.length) {
-      via = "aggregator";
-    } else {
-      hits = await dexScreenerSearch(chainId, q);
+    // Typing "usdc" fires "u", "us", "usd", "usdc" as separate queries; each
+    // unique query hits upstream (0x Tokens / DexScreener / CoinGecko).
+    // Substring matching means a longer query's results are a SUBSET of its
+    // prefix's — reuse the cached prefix results filtered locally and only go
+    // upstream when nothing matches locally (review fix F10).
+    const prefixHit = cachedPrefix(chainId, q);
+    if (prefixHit) {
+      hits = prefixHit.hits;
+      via = prefixHit.via;
+    }
+    if (!hits.length) {
+      hits = await aggregatorSearch(chainId, q);
       if (hits.length) {
-        via = "dexscreener";
+        via = "aggregator";
       } else {
-        const cg = await coinGeckoSearch(chainId, q);
-        if (cg.length) {
-          via = "coingecko";
-          hits = cg;
+        hits = await dexScreenerSearch(chainId, q);
+        if (hits.length) {
+          via = "dexscreener";
+        } else {
+          const cg = await coinGeckoSearch(chainId, q);
+          if (cg.length) {
+            via = "coingecko";
+            hits = cg;
+          }
         }
-      }
-      // Thin pair-index results (quote-side tokens often miss the top-30
-      // pair set)? Merge in CoinGecko platform hits, deduped by address.
-      if (hits.length && hits.length < 3) {
-        const cg = await coinGeckoSearch(chainId, q);
-        const seen = new Set(hits.map((t) => t.address.toLowerCase()));
-        for (const t of cg) {
-          if (!seen.has(t.address.toLowerCase())) {
-            hits.push(t);
-            seen.add(t.address.toLowerCase());
+        // Thin pair-index results (quote-side tokens often miss the top-30
+        // pair set)? Merge in CoinGecko platform hits, deduped by address.
+        if (hits.length && hits.length < 3) {
+          const cg = await coinGeckoSearch(chainId, q);
+          const seen = new Set(hits.map((t) => t.address.toLowerCase()));
+          for (const t of cg) {
+            if (!seen.has(t.address.toLowerCase())) {
+              hits.push(t);
+              seen.add(t.address.toLowerCase());
+            }
           }
         }
       }
@@ -328,9 +368,9 @@ async function coinGeckoSearch(chainId: number, q: string): Promise<FoundToken[]
     if (!found.length) return [];
     // Fill real decimals on-chain (a wrong guess would corrupt amount math).
     const metas = await Promise.all(
-      found.map(async (t) => {
+      found.map(async (t): Promise<FoundToken | null> => {
         const meta = await readErc20Meta(chainId, t.address);
-        return meta ? { ...t, decimals: meta.decimals } : null;
+        return meta ? { ...t, chainId, decimals: meta.decimals, verified: false } : null;
       }),
     );
     return metas.filter((x): x is FoundToken => x !== null);

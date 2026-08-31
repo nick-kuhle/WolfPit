@@ -157,10 +157,7 @@ export function getProvider(): EthProvider | null {
   return pickProvider();
 }
 
-/**
- * Ensure the wallet is on Base (8453), prompting a network switch / add if not.
- * Returns true when the wallet ends up on Base.
- */
+/** Canonical app URL for wallet callbacks (https in prod, current tab in dev). */
 export function dappUrl() {
   if (typeof window === "undefined") return "https://wolfpit-protocol.vercel.app";
   return window.location.href;

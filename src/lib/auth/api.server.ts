@@ -14,7 +14,11 @@ import { guardAuthRequest } from "./rate-limit.server";
 
 /** Rate-limit, then dispatch to Better Auth. Never throws for client errors. */
 export async function handleAuthApiRequest(request: Request): Promise<Response> {
-  const blocked = await guardAuthRequest(request);
-  if (blocked) return blocked;
-  return auth.handler(request);
+  const guard = await guardAuthRequest(request);
+  if (guard.blocked) return guard.blocked;
+  const res = await auth.handler(request);
+  // Count failures / reset on success — AFTER Better Auth has verified, so
+  // wrong-password attempts are the only thing that consumes the window.
+  await guard.record(res);
+  return res;
 }

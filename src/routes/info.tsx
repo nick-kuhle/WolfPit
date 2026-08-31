@@ -34,7 +34,9 @@ function InfoPage() {
             transaction</strong> as your swap and sent directly to WolfPit. It is separate from
             network gas (paid to Base validators) and from the DEX liquidity provider fee that is
             already baked into the aggregator's quoted price. Your quote always shows the exact fee,
-            the minimum you will receive after slippage, and the route taken.
+            the minimum you will receive after slippage, and the route taken. The fee is charged on
+            chains whose recipient wallet has been verified (Base today) — on other chains the fee
+            row reads "None on this chain".
           </p>
         </Section>
 

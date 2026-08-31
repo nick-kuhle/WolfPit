@@ -68,8 +68,39 @@ export const SWAP_FEE_BPS_DISCOUNTED = Math.round(SWAP_FEE_BPS * (1 - SWAP_FEE_D
 /** Default slippage tolerance (bps) applied to aggregator quotes. */
 export const SWAP_SLIPPAGE_BPS = Math.round(numEnv("VITE_SWAP_SLIPPAGE_BPS", 50, 1, 500));
 
+/**
+ * Slippage tolerance bounds — ONE source of truth for the UI and the server.
+ * The UI clamps custom entries to this range and the server validator clamps
+ * to the same constants, so the tolerance a user sees is always the tolerance
+ * that executes (review fix F2: the UI previously allowed up to 50% while the
+ * server silently clamped to 5%).
+ */
+export const SLIPPAGE_MIN_BPS = 1;
+export const SLIPPAGE_MAX_BPS = 500;
+
 /** WolfPit wallet that receives the on-chain trading fee ("directly to WolfPit"). */
 export const FEE_RECIPIENT = envVar("VITE_FEE_RECIPIENT");
+
+/**
+ * Chains on which the WolfPit trading fee is collected. The fee is paid
+ * on-chain to `VITE_FEE_RECIPIENT` on the swap's chain — an address that
+ * exists on Base may have NO owner on other chains (e.g. a Base-only Safe),
+ * which would strand fees. Default Base-only: on other chains no integrator
+ * fee is charged until the operator has verified the recipient there and
+ * extends this list (review fix F7).
+ * Override with VITE_FEE_CHAINS (comma-separated chain ids, e.g. "8453,1").
+ */
+export function feeChains(): Set<number> {
+  const raw = envVar("VITE_FEE_CHAINS");
+  const out = new Set<number>([BASE_CHAIN_ID]);
+  if (!raw) return out;
+  for (const part of raw.split(",")) {
+    const id = Number(part.trim());
+    if (Number.isInteger(id) && id > 0) out.add(id);
+  }
+  return out;
+}
+export const FEE_CHAINS = feeChains();
 
 /**
  * WPIT token address. Undefined until WPIT ships — while undefined, the discount
@@ -119,6 +150,13 @@ export type SpotToken = {
   decimals: number;
   /** true for the chain-native asset (ETH/BNB/POL/…), which needs no approval. */
   native?: boolean;
+  /**
+   * Whether the address is a KNOWN, curated token (offline-verified) or came
+   * from the aggregator index. `false` for community hits (DexScreener /
+   * CoinGecko fallback) — the UI shows a warning for unverified picks
+   * (review fix F6).
+   */
+  verified?: boolean;
 };
 
 /**
@@ -127,10 +165,27 @@ export type SpotToken = {
  * token-search.ts and the token picker in swap-card.tsx.
  */
 export const SPOT_TOKENS: SpotToken[] = [
-  { symbol: "ETH", name: "Ether", address: BASE_TOKENS.ETH, decimals: 18, native: true },
-  { symbol: "WETH", name: "Wrapped Ether", address: BASE_TOKENS.WETH, decimals: 18 },
-  { symbol: "USDC", name: "USD Coin", address: BASE_TOKENS.USDC, decimals: 6 },
+  { symbol: "ETH", name: "Ether", address: BASE_TOKENS.ETH, decimals: 18, native: true, verified: true },
+  { symbol: "WETH", name: "Wrapped Ether", address: BASE_TOKENS.WETH, decimals: 18, verified: true },
+  { symbol: "USDC", name: "USD Coin", address: BASE_TOKENS.USDC, decimals: 6, verified: true },
 ];
+
+/**
+ * Curated default BUY token per chain, used when a non-Base chain is selected
+ * so the pair is never a degenerate sell==buy (review fix F14). Only
+ * addresses that are well-known canonical deployments are listed; chains not
+ * listed fall back to the previous native→native default.
+ * (USDC addresses verified against chain docs: Ethereum, Arbitrum, Optimism,
+ * Polygon, BNB, Avalanche + Base from BASE_TOKENS.)
+ */
+export const DEFAULT_BUY_TOKENS: Record<number, SpotToken> = {
+  1: { symbol: "USDC", name: "USD Coin", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6, verified: true },
+  42161: { symbol: "USDC", name: "USD Coin", address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6, verified: true },
+  10: { symbol: "USDC", name: "USD Coin", address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", decimals: 6, verified: true },
+  137: { symbol: "USDC", name: "USD Coin", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6, verified: true },
+  56: { symbol: "USDC", name: "USD Coin", address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18, verified: true },
+  43114: { symbol: "USDC", name: "USD Coin", address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6, verified: true },
+};
 
 /** Slippage-tolerance presets shown in the UI (bps). */
 export const SLIPPAGE_PRESETS = [10, 30, 50, 100] as const;

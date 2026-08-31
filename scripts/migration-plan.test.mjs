@@ -68,10 +68,11 @@ test("the sign-in schema ships outside the globbed directory (throttle is always
   const migrationsDir = join(projectRoot(), "migrations");
   const rootFiles = readdirSync(migrationsDir).filter(isMigrationFile);
   // The Better Auth sign-in schema is OPT-IN: nothing but the always-on
-  // throttle table may ship at the migrations/ root, or the glob would apply
-  // sign-in tables to apps that never asked for them.
+  // throttle table (+ its prune index) may ship at the migrations/ root, or
+  // the glob would apply sign-in tables to apps that never asked for them.
+  const THROTTLE_ONLY = new Set(["0002_wolfpit_rate_limit.sql", "0003_rate_limit_prune.sql"]);
   assert.deepEqual(
-    rootFiles.filter((f) => f !== "0002_wolfpit_rate_limit.sql"),
+    rootFiles.filter((f) => !THROTTLE_ONLY.has(f)),
     [],
     "unexpected non-throttle migration at migrations/ root",
   );
@@ -82,6 +83,10 @@ test("the sign-in schema ships outside the globbed directory (throttle is always
   assert.ok(
     rootFiles.includes("0002_wolfpit_rate_limit.sql"),
     "always-on throttle migration missing at migrations/ root",
+  );
+  assert.ok(
+    rootFiles.includes("0003_rate_limit_prune.sql"),
+    "always-on throttle prune migration missing at migrations/ root",
   );
   const authNames = authMigrationNames();
   // Both the Better Auth schema and the F14 rate-limit table must ship there —

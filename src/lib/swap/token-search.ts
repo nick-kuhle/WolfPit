@@ -17,6 +17,18 @@ export const searchChainTokens = createServerFn({ method: "GET" })
     return { chainId, q };
   })
   .handler(async ({ data }): Promise<TokenSearchResult> => {
+    // F10: search is an upstream-quota surface too (0x Tokens index,
+    // DexScreener's shared 300/min). Throttle per IP; fail-open.
+    try {
+      const { getRequest } = await import("@tanstack/react-start/server");
+      const { clientIp, bumpLimit } = await import("../auth/rate-limit.server");
+      const ip = clientIp(getRequest());
+      if (await bumpLimit("rpcs", ip ?? "unknown", 60, 60)) {
+        return { ok: false, error: "Search rate limit reached. Try again in a moment." };
+      }
+    } catch {
+      /* fail-open: a store error must not break token search */
+    }
     const { searchTokensImpl } = await import("./token-search-impl");
     return searchTokensImpl(data.chainId, data.q);
   });

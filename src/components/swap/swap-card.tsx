@@ -7,7 +7,10 @@ import { chainById, nativeTokenOf } from "@/lib/swap/chains";
 import { SWAP_CHAINS } from "@/lib/swap/chains";
 import { searchChainTokens } from "@/lib/swap/token-search";
 import {
+  FEE_CHAINS,
   FEE_ENABLED,
+  SLIPPAGE_MAX_BPS,
+  SLIPPAGE_MIN_BPS,
   SLIPPAGE_PRESETS,
   SPOT_TOKENS,
   WPIT_LIVE,
@@ -187,6 +190,22 @@ export function SwapWidget({ swap }: { swap: ReturnType<typeof useSwap> }) {
           </div>
         </div>
 
+        {/* F6: unverified community tokens and transfer/sell-tax warnings.
+             The address is only as trustworthy as the search source that
+             surfaced it — say so before the user commits real funds. */}
+        {state.sell.verified === false || state.buy.verified === false ? (
+          <p className="mx-4 mb-3 rounded-lg border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10px] text-warn">
+            Community token — not on the verified list. Double-check the contract address
+            before swapping.
+          </p>
+        ) : null}
+        {q && q.ok && ((q.transferTaxBps ?? 0) > 0 || (q.sellTaxBps ?? 0) > 0) ? (
+          <p className="mx-4 mb-3 rounded-lg border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10px] text-warn">
+            Warning: this token charges a transfer/sell fee of{" "}
+            {(((q.transferTaxBps ?? q.sellTaxBps) ?? 0) / 100).toFixed(2)}% on every trade.
+          </p>
+        ) : null}
+
         {/* DETAILS + KNOBS */}
         <div className="px-4 py-4">
           <div className="space-y-1.5 rounded-xl border border-border/70 bg-surface/50 px-3 py-2.5 font-mono text-[11px]">
@@ -204,6 +223,11 @@ export function SwapWidget({ swap }: { swap: ReturnType<typeof useSwap> }) {
                 ? q.route.sources.map((s) => s.replace(/_/g, " ")).join(" + ")
                 : "Best of aggregated liquidity"}
             </Detail>
+            {!FEE_CHAINS.has(state.chainId) ? (
+              <Detail k="Trading fee">
+                <span className="text-up">None on this chain</span>
+              </Detail>
+            ) : (
             <Detail k={`Trading fee (${bpsToPct(fee.bps)})`}>
               <span className="flex items-center gap-1.5">
                 {fee.discounted ? (
@@ -218,11 +242,12 @@ export function SwapWidget({ swap }: { swap: ReturnType<typeof useSwap> }) {
                 {feeAmt ? <span className="text-subtle">≈ {fmtNum(feeAmt)} {state.sell.symbol}</span> : null}
               </span>
             </Detail>
+            )}
             <Detail k="Min received">{q && q.ok ? `${fmtNum(minOut)} ${state.buy.symbol}` : "—"}</Detail>
             {q && q.ok && q.priceImpact !== undefined ? (
               <Detail k="Price impact">
-                <span className={cn(q.priceImpact > 0.03 ? "text-warn" : "text-muted")}>
-                  {(q.priceImpact * 100).toFixed(2)}%
+                <span className={cn(q.priceImpact > 3 ? "text-warn" : "text-muted")}>
+                  {q.priceImpact.toFixed(2)}%
                 </span>
               </Detail>
             ) : null}
@@ -397,7 +422,12 @@ function SlippageCustom({ value, onChange }: { value: number; onChange: (v: numb
       onSubmit={(e) => {
         e.preventDefault();
         const pct = Number(draft);
-        if (Number.isFinite(pct) && pct > 0 && pct <= 50) onChange(Math.round(pct * 100));
+        if (Number.isFinite(pct) && pct > 0) {
+          // Clamp to the SAME bounds the server enforces (config
+          // SLIPPAGE_MIN/MAX_BPS): the tolerance shown is the tolerance used.
+          const bps = Math.round(pct * 100);
+          onChange(Math.min(SLIPPAGE_MAX_BPS, Math.max(SLIPPAGE_MIN_BPS, bps)));
+        }
         setOpen(false);
         setDraft("");
       }}
@@ -416,6 +446,7 @@ function SlippageCustom({ value, onChange }: { value: number; onChange: (v: numb
         aria-label="Custom slippage percent"
       />
       <span className="text-subtle">%</span>
+      <span className="text-[9px] text-subtle">0.01–{SLIPPAGE_MAX_BPS / 100}%</span>
     </form>
   );
 }
@@ -444,6 +475,14 @@ function TokenPicker({
     const query = q.trim();
     const seqNow = ++seq.current;
     const t = window.setTimeout(async () => {
+      // One-char (non-address) queries hit upstream for little value — the
+      // server already offers the native asset; skip (review fix F10).
+      if (query.length === 1 && !/^0x[0-9a-fA-F]{40}$/.test(query)) {
+        if (seqNow !== seq.current) return;
+        setRows([]);
+        setBusy(false);
+        return;
+      }
       setBusy(true);
       setErr(null);
       try {
@@ -503,7 +542,16 @@ function TokenPicker({
             <button
               key={t.address}
               type="button"
-              onClick={() => onPick({ symbol: t.symbol, name: t.name, address: t.address, decimals: t.decimals, native: t.native })}
+              onClick={() =>
+                onPick({
+                  symbol: t.symbol,
+                  name: t.name,
+                  address: t.address,
+                  decimals: t.decimals,
+                  native: t.native,
+                  verified: t.verified,
+                })
+              }
               className="flex w-full items-center justify-between gap-3 border-b border-border/60 px-4 py-3 text-left hover:bg-elevated"
             >
               <div className="flex min-w-0 items-center gap-2">
@@ -516,6 +564,10 @@ function TokenPicker({
                 </div>
               </div>
               <div className="shrink-0 text-right font-mono text-[10px] text-subtle">
+                <span className={t.verified === false ? "text-warn" : "text-up"}>
+                  {t.verified === false ? "unverified" : "verified"}
+                </span>
+                {" · "}
                 {t.native ? "native" : `${t.address.slice(0, 6)}…${t.address.slice(-4)}`}
               </div>
             </button>

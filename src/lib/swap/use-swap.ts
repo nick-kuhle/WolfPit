@@ -10,11 +10,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { spotQuote } from "./actions";
-import { BASE_CHAIN_ID, SWAP_SLIPPAGE_BPS, WPIT_TOKEN, feeFor, type SpotToken } from "./config";
+import { BASE_CHAIN_ID, DEFAULT_BUY_TOKENS, SWAP_SLIPPAGE_BPS, WPIT_TOKEN, feeFor, type SpotToken } from "./config";
 import { DEFAULT_CHAIN_ID, chainById, ensureChain, nativeTokenOf } from "./chains";
 import type { QuoteResult } from "./types";
 import {
   approveToken,
+  assertSafeSwapTarget,
   fromBaseUnits,
   sendSwapTx,
   toBaseUnits,
@@ -61,18 +62,18 @@ function shortAmt(v: string): string {
 }
 
 function baseQuickPicks(chainId: number): { sell: SpotToken; buy: SpotToken } {
-  if (chainId === DEFAULT_CHAIN_ID) {
-    return {
-      sell: { symbol: "ETH", name: "Ether", address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", decimals: 18, native: true },
-      buy: { symbol: "USDC", name: "USD Coin", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
-    };
-  }
-  const native = nativeTokenOf(chainId);
-  if (native) return { sell: { ...native }, buy: { ...native } };
-  return {
-    sell: { symbol: "ETH", name: "Ether", address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", decimals: 18, native: true },
-    buy: { symbol: "USDC", name: "USD Coin", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+  const native = nativeTokenOf(chainId) ?? {
+    symbol: "ETH",
+    name: "Ether",
+    address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    decimals: 18,
+    native: true,
   };
+  // F14: never default to a degenerate sell==buy pair — sell the native asset
+  // for a curated per-chain USDC when one is known, else the native itself
+  // (the user then picks the buy side).
+  const buy = DEFAULT_BUY_TOKENS[chainId] ?? { ...native };
+  return { sell: { ...native, verified: true }, buy: { ...buy, verified: buy.verified ?? true } };
 }
 
 export function useSwap() {
@@ -249,6 +250,24 @@ export function useSwap() {
         return;
       }
 
+      // F4: pin the two fund-moving decisions to known contracts BEFORE the
+      // user signs — approval spender must be 0x Permit2/AllowanceHolder, the
+      // tx target must be a deployed contract matching the permit spender.
+      try {
+        await assertSafeSwapTarget(chainId, firm.tx, {
+          sellNative: Boolean(sell.native),
+          sellToken: sell.address,
+          buyToken: buy.address,
+          sellAmount,
+          allowanceTarget: firm.allowanceTarget,
+          permit2Spender: firm.permit2Spender,
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Safety check failed.");
+        setPhase("error");
+        return;
+      }
+
       // ERC-20 approval (native assets need none).
       if (!sell.native && firm.allowanceTarget) {
         const need = BigInt(firm.allowanceAmount ?? sellAmount);
@@ -260,21 +279,70 @@ export function useSwap() {
         }
       }
 
+      // F3: the approval round-trip can take tens of seconds — the firm quote
+      // fetched before it is stale by then. Re-fetch the quote AFTER approval
+      // so the executed min-out / permit deadline are fresh, and show it.
+      setPhase("quoting");
+      const fresh = await spotQuote({
+        data: {
+          chainId,
+          sellToken: sell.address,
+          buyToken: buy.address,
+          sellAmount,
+          taker: owner,
+          slippageBps,
+          holdsWpit: holds,
+        },
+      });
+      setQuote(fresh);
+      if (!fresh.ok) {
+        setError(fresh.error);
+        setPhase("error");
+        return;
+      }
+      if (!fresh.tx) {
+        setError("Aggregator returned no executable transaction.");
+        setPhase("error");
+        return;
+      }
+      // The refreshed quote is what we actually send — re-verify it too.
+      try {
+        await assertSafeSwapTarget(chainId, fresh.tx, {
+          sellNative: Boolean(sell.native),
+          sellToken: sell.address,
+          buyToken: buy.address,
+          sellAmount,
+          allowanceTarget: fresh.allowanceTarget,
+          permit2Spender: fresh.permit2Spender,
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Safety check failed.");
+        setPhase("error");
+        return;
+      }
+
       setPhase("swapping");
-      const hash = await sendSwapTx(provider, owner, chainId, firm.tx);
+      const hash = await sendSwapTx(provider, owner, chainId, fresh.tx);
       setTxHash(hash);
       setPhase("confirming");
       ping("Swap sent · settling on-chain", "brass");
-      const ok = await waitForReceipt(chainId, hash);
-      if (!ok) {
+      const receipt = await waitForReceipt(chainId, hash);
+      if (receipt === "reverted") {
         setError("Transaction reverted on-chain.");
+        setPhase("error");
+        return;
+      }
+      if (receipt === "timeout") {
+        setError(
+          "Transaction not confirmed yet — check the explorer and re-submit if needed.",
+        );
         setPhase("error");
         return;
       }
       setPhase("done");
       // Uniform success notification: confetti pit-ticket, same as every fill.
       ping(
-        `Swap settled · ${shortAmt(fromBaseUnits(sellAmount, sell.decimals))} ${sell.symbol} → ${shortAmt(fromBaseUnits(firm.buyAmount, buy.decimals))} ${buy.symbol}`,
+        `Swap settled · ${shortAmt(fromBaseUnits(sellAmount, sell.decimals))} ${sell.symbol} → ${shortAmt(fromBaseUnits(fresh.buyAmount, buy.decimals))} ${buy.symbol}`,
         "up",
         true,
         "Fill",

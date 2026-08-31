@@ -156,7 +156,7 @@ function MoreSheet({ open, onClose, onExited }: { open: boolean; onClose: () => 
             Pit
           </p>
           <Row icon="☻" label="Profile" hint={wallet.address ? truncAddr(wallet.address) : "Connect wallet to trade"} onClick={() => go("/profile")} delay={90} />
-          <Row icon="⇄" label="Spot" hint="Live swaps on Base" onClick={() => go("/swap")} delay={105} />
+          <Row icon="⇄" label="Spot" hint="Live swaps · 16 chains" onClick={() => go("/swap")} delay={105} />
           <Row icon="♞" label="Racetrack" hint="Horses · dogs · every 2 minutes" onClick={() => go("/games")} delay={120} />
           <Row icon="★" label="Watch" hint="Tape, gainers, chains" onClick={() => go("/watch")} delay={150} />
           <Row icon="◎" label="Pools" hint="12% APR junior" onClick={() => go("/stake")} delay={180} />

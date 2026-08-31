@@ -89,7 +89,7 @@ function TradePage() {
                   mode === "live" ? "bg-brass text-bg" : "text-muted hover:text-fg",
                 )}
               >
-                Live · Base
+                Live · on-chain
               </button>
             </div>
             <p

@@ -154,3 +154,49 @@ Deploy anything. Uni v4. Hyperliquid. Raise α.
 - Tape (α, util, drills, forge):
   -
 ```
+
+## 2026-08-30 (Sun) — review-wave fixes, round 2 (external review)
+
+All 14 findings from the second external review (WOLFPIT-REVIEW2.md) are fixed:
+
+- F1 auth lockout DoS: `/api/auth/*` guard is now preflight (read-only) +
+  post-dispatch `record(res)` — counters move only on real auth failures
+  (>= 400) and reset on success; bare POSTs can no longer lock an account,
+  and legit multi-device logins never self-lock.
+- F2 slippage divergence: `SLIPPAGE_MIN/MAX_BPS` (1–500) is the single source
+  of truth in `config.ts`; the UI clamps custom entries to it (with a
+  0.01–5.00% hint) and the server validator uses the same constants.
+- F3 stale quote: `execute()` re-fetches the firm quote AFTER the approval
+  round-trip and sends (and re-verifies) the fresh one.
+- F4 aggregator trust: `assertSafeSwapTarget` pins the approval spender to 0x
+  Permit2/AllowanceHolder (per hardfork), requires `tx.to` to be a deployed
+  contract, cross-checks the Permit2 spender == tx.to, and validates value +
+  calldata shape. Unit-tested (src/lib/swap/safety.test.ts).
+- F5 price impact: normalized as PERCENT (0x v2 semantics), values that
+  cannot be percents are dropped; the old unverified /100 guess is gone.
+- F6 unverified tokens: search results carry `verified`; picker shows
+  verified/unverified, swap card warns on unverified legs and on
+  transfer/sell tax reported by the aggregator (tokenMetadata now surfaced).
+- F7 fee recipient: fee collection is chain-gated (`VITE_FEE_CHAINS`,
+  default Base-only) so fees can't land on an uncontrolled address; UI shows
+  "None on this chain" elsewhere; /info copy updated.
+- F8 rate-limit table growth: bumpCount prunes rows older than the previous
+  window; migrations/0003 adds the window_start index (both migrator paths).
+- F9 IP trust: `clientIp` prefers cf-connecting-ip over x-forwarded-for.
+- F10 0x quota DoS: spotQuote (120/min) and searchChainTokens (60/min) are
+  throttled per IP via the shared DB (fail-open), the token picker skips
+  one-char non-address queries, and search reuses cached PREFIX results
+  (filtered locally) instead of hitting upstream per keystroke.
+- F11 receipt wait bounded: waitForReceipt returns success/reverted/timeout
+  after 120 s; UI explains the timeout instead of spinning forever.
+- F12 dead code: switchToBase (already removed in the round-1 commit) had a
+  stale doc comment — cleaned.
+- F13 env validation: quote.server gates on `FEE_ENABLED` (valid address)
+  instead of truthiness.
+- F14 degenerate pairs: per-chain curated default buy tokens (USDC on the
+  majors) so a non-Base chain never opens as sell==buy; the toggle label and
+  dock hint now say "on-chain / 16 chains" instead of Base-only.
+
+Tests: rate-limit suite 13/13 (new auth-guard tests incl. reset-on-success,
+failure-only counting, pruning), swap safety suite 11/11, engine 87/87,
+forge 36/36, cargo 11/11, tsc/eslint/build clean.
