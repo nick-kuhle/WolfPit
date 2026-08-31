@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import {
   optionQuote,
   quoteInForBaseOut,
   strikeGrid,
+  tokenPx,
   usedMargin,
 } from "@/lib/wolfpit/engine";
 import { MAX_LOT } from "@/lib/wolfpit/limits";
@@ -122,20 +123,25 @@ export function OrderTicket({
   const est = (() => {
     if (product === "spot") {
       const pool = s.pools[poolId];
-      if (!pool) return { label: "—", usd: 0 };
+      if (!pool) return { label: "—", usd: 0, amt: 0, sym: "USDC" };
+      const px = tokenPx(s, pool.quote) || 0;
       if (side === "buy") {
         const quote = quoteInForBaseOut(pool, n);
-        if (!Number.isFinite(quote)) return { label: "Too large for the pool", usd: Number.POSITIVE_INFINITY };
-        return { label: `Debit ${fmtUsd(quote)} ${pool.quote}`, usd: quote };
+        if (!Number.isFinite(quote)) return { label: "Too large for the pool", usd: Number.POSITIVE_INFINITY, amt: 0, sym: pool.quote };
+        // Quote-native amount + its USD value — the quote leg is not always a
+        // dollar token (e.g. WPIT/ETH pools); never format tokens as dollars.
+        return { label: `Debit ${fmtQty(quote)} ${pool.quote}`, usd: quote * px, amt: quote, sym: pool.quote };
       }
       const out = n * (pool.quoteReserve / pool.baseReserve) * (1 - pool.feeBps / 10_000);
-      return { label: `Credit ~${fmtUsd(out)} ${pool.quote}`, usd: 0 };
+      return { label: `Credit ~${fmtQty(out)} ${pool.quote}`, usd: 0, amt: out, sym: pool.quote };
     }
     if (product === "future") {
       const lev = rate > 0 ? 1 / rate : 0;
       return {
         label: `IM ${fmtUsd(im)} · ${(lev).toFixed(1)}× · liq ${fmtPx(liq)}`,
         usd: im + size * spot * 0.0005,
+        amt: im + size * spot * 0.0005,
+        sym: "USDC",
       };
     }
     const debit = (q?.ask ?? 0) * n * miniQty(under);
@@ -199,7 +205,12 @@ export function OrderTicket({
     setReview(false);
   }
 
-  const editor = sheet || product !== "option";
+  /** Cost-of-trade copy: quote-native + USD for spot, USD otherwise. */
+  const costLabel = !Number.isFinite(est.usd)
+    ? "—"
+    : product === "spot"
+      ? `${fmtQty(est.amt || 0)} ${est.sym} · ${fmtUsd(side === "sell" ? -est.usd : est.usd)}`
+      : fmtUsd(est.usd);
 
   return (
     <div className="relative flex min-h-full flex-col bg-panel lg:h-full lg:min-h-0">
@@ -349,8 +360,8 @@ export function OrderTicket({
                   <div className="min-w-0 flex-1 font-display text-3xl tabular-nums text-fg">
                     {Number.isFinite(est.usd)
                       ? side === "buy"
-                        ? fmtUsd(est.usd)
-                        : fmtUsd(spotOut)
+                        ? fmtQty(est.amt || 0)
+                        : fmtQty(spotOut)
                       : "—"}
                   </div>
                   <div className="pressable flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-border bg-elevated px-3 font-medium">
@@ -438,9 +449,7 @@ export function OrderTicket({
               <div className="flex items-center justify-between gap-3">
                 <span className="text-subtle">Cost of trade</span>
                 <span className={cn(side === "sell" && product === "spot" ? "text-up" : "text-fg")}>
-                  {Number.isFinite(est.usd)
-                    ? fmtUsd(side === "sell" && product === "spot" ? -est.usd : est.usd)
-                    : "—"}
+                  {costLabel}
                 </span>
               </div>
             </div>
@@ -514,7 +523,16 @@ export function OrderTicket({
                   <Row k="Price" v={kind === "mkt" ? `${fmtPx(spot)} mark` : fmtPx(fillPx)} />
                   <Row k="Quantity" v={product === "spot" ? `${fmtQty(n)} ${under}` : `${fmtQty(n)} contract${n === 1 ? "" : "s"}`} />
                   {product === "future" ? <Row k="Underlying" v={`${fmtQty(size)} ${under}`} /> : null}
-                  <Row k={side === "sell" && product === "spot" ? "Credit" : "Debit / cost"} v={Number.isFinite(est.usd) ? fmtUsd(est.usd) : "—"} />
+                  <Row
+                    k={side === "sell" && product === "spot" ? "Credit" : "Debit / cost"}
+                    v={
+                      !Number.isFinite(est.usd)
+                        ? "—"
+                        : product === "spot"
+                          ? `${fmtQty(est.amt || 0)} ${est.sym} (${fmtUsd(est.usd)})`
+                          : fmtUsd(est.usd)
+                    }
+                  />
                   {product === "future" ? (
                     <>
                       <Row k="Initial margin" v={`${fmtUsd(im)}  (${(rate * 100).toFixed(0)}%)`} />
@@ -641,7 +659,12 @@ function Stepper({
       <button type="button" className="pressable h-8 w-8 rounded-full border border-border" onClick={() => onChange(Math.max(0, n - step).toFixed(d))}>
         −
       </button>
-      <input className="h-8 w-20 rounded-full border border-border bg-elevated text-center font-mono text-sm" value={value} onChange={(e) => onChange(e.target.value)} />
+      <input
+        className="h-8 w-20 rounded-full border border-border bg-elevated text-center font-mono text-sm"
+        value={value}
+        inputMode="decimal"
+        onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
+      />
       <button type="button" className="pressable h-8 w-8 rounded-full border border-border" onClick={() => onChange((n + step).toFixed(d))}>
         +
       </button>
