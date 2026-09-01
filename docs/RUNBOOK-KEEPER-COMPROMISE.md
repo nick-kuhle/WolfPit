@@ -16,15 +16,21 @@
 
 | Key | Held by | Powers that matter here |
 | --- | --- | --- |
-| **owner** | multisig | `setOperator`, `pause`, `setReleaseDelay`, `vetoRelease`, `convertWpitInsurance`, allowlists |
-| **operator** | keeper hot key | `writeCall/Put`, `openShort/Long`, `releaseCall/Put`, `queueRelease*`, `exec`, `pause` |
+| **owner** | multisig | `setOperator`, `pause` (both directions), `setReleaseDelay`, `vetoRelease`, `convertWpitInsurance`, allowlists, instant `revokeTarget`/`revokeSelector`/`revokeAllowance` |
+| **operator** | keeper hot key | `writeCall/Put`, `openShort/Long`, `releaseCall/Put`, `queueRelease*`, `exec`, `pause(true)` only |
 
 The operator can **pause** (fail-closed watcher needs it) but can never
-un-allowlist itself, move allowances, or touch insurance ledgers. Since
-WP-05 / #12, the OWNER's own drain surface is constrained too: router and
-selector allowlist changes and allowance grants sit behind a 2-day
-`ADMIN_TIMELOCK`, and allowances are capped per token — so a compromised
-operator cannot be handed a new drain path quickly even by a rushed owner.
+**resume**, un-allowlist itself, move allowances, or touch insurance ledgers
+(audit C-3: `pause(false)` is owner-only, so a compromised key cannot undo
+the halt behind the watcher's back). Since WP-05 / #12, the OWNER's own
+drain surface is constrained too: router and selector allowlist changes and
+allowance grants sit behind a 2-day `ADMIN_TIMELOCK`, and allowances are
+capped per token — so a compromised operator cannot be handed a new drain
+path quickly even by a rushed owner. The asymmetry is deliberate (audit
+C-2): grants are slow, but `revokeTarget`, `revokeSelector` and
+`revokeAllowance` are **instant** owner calls, so incident response has a
+same-block kill switch for a malicious router — including revoking the
+allowance it would pull through directly, without `exec`.
 
 ## Defenses (armed in this order)
 
@@ -73,13 +79,17 @@ operator cannot be handed a new drain path quickly even by a rushed owner.
    withdrawals stay available; nothing strands.
 2. `vetoRelease()` — clears anything sitting in the release queue.
 3. `setOperator(newKey)` — rotate to a fresh key from a clean machine. The
-   old key is dead the moment this lands.
+   old key is dead the moment this lands. If a router looks involved, kill it
+   the same block: `revokeAllowance(token, router)` for every grant,
+   `revokeTarget(router)` — no timelock on the kill direction (C-2).
 4. Reconcile: compare the off-chain book against on-chain `reservedEth`/
    `reservedUsdc`. If cover was released behind the book, re-reserve via
    `writeCall`/`writePut` (as the new operator) **before** resuming, so every
    outstanding option is collateralized again. `reconcileBalances()` checks
-   the token side.
-5. `pause(false)` only after (4) balances to zero drift.
+   the token side — and now refuses to sync the book past the α law (C-1):
+   if it reverts `UtilCap`, unwind reserves first, never the other way round.
+5. `pause(false)` only after (4) balances to zero drift. The owner signs it —
+   the compromised key cannot (C-3).
 
 Total on-chain cost of the response is three multisig txs; nothing in it
 requires the compromised key's cooperation.

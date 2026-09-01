@@ -230,8 +230,11 @@ contract DealerVaultTest {
         vault.pause(false); // owner resumes
     }
 
-    /// C1 regression: a distinct operator (keeper hot key) can fail closed
-    ///        and resume — production pause must not revert NotOwner.
+    /// C1 regression: a distinct operator (keeper hot key) can fail closed —
+    ///        production pause must not revert NotOwner. Audit C-3 adds the
+    ///        asymmetry: the same key must NOT be able to resume, or a
+    ///        compromised keeper unpause would silently undo the runbook's
+    ///        step 1. Only the owner resumes.
     function testOperatorCanFailClosedPause() public {
         address keeper = address(0xBAD0);
         vault.setOperator(keeper); // owner wires the keeper key
@@ -242,7 +245,15 @@ contract DealerVaultTest {
             revert("expected pause: live ops blocked");
         } catch {}
         vm.prank(keeper);
-        vault.pause(false); // keeper resumes after review
+        (bool ok, bytes memory why) = address(vault).call(abi.encodeWithSelector(vault.pause.selector, false));
+        require(!ok, "operator resume must revert");
+        bytes4 sel;
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.NotOwner.selector, "explicit NotOwner on operator resume");
+        require(vault.paused(), "still paused - the key cannot undo the halt");
+        vault.pause(false); // owner resumes after review
         require(!vault.paused(), "resumed");
     }
 
@@ -358,6 +369,33 @@ contract DealerVaultTest {
         try vault.reconcileBalances() {
             revert("expected NotOperator");
         } catch {}
+    }
+
+    /// Audit C-1: exec + reconcile must not silently break the inventory law.
+    ///        A hedge sale can keep real balances AT/above insurance+reserved
+    ///        (the only floor `exec` enforces) while pushing utilisation past
+    ///        α — the book-sync is where that breach would land, so the sync
+    ///        itself enforces the law, and the ledger stays untouched on a
+    ///        refused reconcile.
+    function testReconcileEnforcesInventoryLaw() public {
+        SwapRouter router = _routerFixture();
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(40 ether); // reservedEth 40 of 100 WETH: exactly at α
+        // The keeper hedge-sells 20 free WETH through the allowlisted router.
+        // Real WETH 80 >= reserved 40, so the exec floors hold and the swap
+        // EXECUTES — exec cannot see the book. But 40/80 = 50% > α.
+        vault.exec(address(router), abi.encodeWithSignature("sell(uint256)", 20 ether));
+        try vault.reconcileBalances() {
+            revert("expected UtilCap: reconcile would sync the book past alpha");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.UtilCap.selector, "must revert UtilCap");
+        }
+        require(vault.ethBal() == 100 ether, "ledger untouched on a refused sync");
+        // Recovery is monotonic, never wedged: unwind cover first, then sync.
+        vault.releaseCall(20 ether); // reservedEth 40 -> 20; 20/80 = 25% ≤ α
+        vault.reconcileBalances();
+        require(vault.ethBal() == 80 ether, "synced the sale after the unwind");
+        require(vault.reservedEth() * 10_000 <= vault.ethBal() * vault.ALPHA_BPS(), "inventory law holds after sync");
     }
 
     /// Junior slash order is now reachable: vault pulls staked WPIT into
@@ -835,6 +873,42 @@ contract DealerVaultTest {
         vm.prank(OP);
         (ok,) = address(vault).call(abi.encodeWithSelector(vault.queueReleaseCall.selector, 1 ether));
         require(!ok, "queue beyond reserved book rejected");
+    }
+
+    /// Audit C-4: a release past the reserved book reports its own error, and
+    ///        a zero-size release reverts even with an EMPTY book (the old
+    ///        `size > reserved` check let releaseCall(0) no-op through when
+    ///        nothing was reserved). Precise errors are what a watcher's
+    ///        revert-triage keys on.
+    function testReleaseErrorPrecision() public {
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(5 ether);
+        (bool ok, bytes memory why) = address(vault).call(abi.encodeWithSelector(vault.releaseCall.selector, 6 ether));
+        require(!ok, "over-book release must revert");
+        bytes4 sel;
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.ReleaseTooLarge.selector, "over-book reports ReleaseTooLarge");
+        (ok, why) = address(vault).call(abi.encodeWithSelector(vault.releaseCall.selector, uint256(0)));
+        require(!ok, "zero release must revert");
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.Zero.selector, "zero reports Zero");
+
+        (ok, why) = address(vault).call(abi.encodeWithSelector(vault.releasePut.selector, uint256(1)));
+        require(!ok, "put release with an empty USDC book must revert");
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.ReleaseTooLarge.selector, "same precision on the USDC leg");
+        (ok, why) = address(vault).call(abi.encodeWithSelector(vault.queueReleasePut.selector, uint256(1)));
+        require(!ok, "queueing a release the book cannot cover must revert");
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.ReleaseTooLarge.selector, "queue side reports the same error");
     }
 
     /// Review of 819c255: arming the timelock must BIND what is already

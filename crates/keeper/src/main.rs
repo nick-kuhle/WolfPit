@@ -11,6 +11,12 @@
 //!     NEVER exits: it pauses best-effort and retries with backoff — a watcher
 //!     that dies on a transient error is not fail-closed.
 //!
+//! Audit C-3: the pause key halves are asymmetric on-chain. The OPERATOR (this
+//! key) can `pause(true)` only; `pause(false)` is owner-only, so a compromised
+//! keeper cannot un-halt behind the watcher's back. The `Pause { v: false }`
+//! command remains for the owner's own tooling but reverts NotOwner if signed
+//! by the operator key.
+//!
 //! Without a key, `status` still reads the chain from a plain RPC URL, and
 //! every command dry-run encodes its calldata.
 
@@ -125,7 +131,9 @@ enum Cmd {
     },
     /// Reconcile internal counters with real token balances (operator).
     Reconcile,
-    /// Pause(true) / un-pause(false) (operator).
+    /// Pause(true) / un-pause(false). Halt: operator or owner. Resume:
+    /// owner-only since audit C-3 — an operator-signed `pause false` reverts
+    /// NotOwner by design.
     Pause { v: bool },
     /// Release a previously reserved call size (operator).
     ReleaseCall { size_eth: String },

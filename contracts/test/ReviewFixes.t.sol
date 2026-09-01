@@ -188,7 +188,9 @@ contract ReviewFixesTest {
         SimplePair p = new SimplePair(IERC20(address(weth)), IERC20(address(usdc)), 30);
         require(address(p.token0()) == address(weth), "typed as IERC20");
         require(address(p.token1()) == address(usdc), "typed as IERC20");
-        require(IERC20(address(weth)).decimals() == 18, "standard ERC-20 surface reachable");
+        // audit C-5: decimals is queried on the concrete token, not the
+        // vault's minimal IERC20 surface (which dropped the never-used member).
+        require(weth.decimals() == 18, "standard ERC-20 surface reachable");
     }
 
     // ------------------------------------------------------------- WP-06 / #11
@@ -649,5 +651,69 @@ contract Wp05DrainPathTest {
             require(bytes4(why) == DealerVault.NotOwner.selector, "must revert NotOwner");
         }
         require(vault.adminReadyAt(vault.allowTargetId(address(r), true)) == 0, "nothing queued");
+    }
+
+    // -------------------------------------------------------- instant revoke
+
+    /// Audit C-2: the kill direction of the allowlist must NOT wait out the
+    ///        2-day queue. In a router incident the owner removes the target,
+    ///        the selector and — critically, because a live ERC-20 allowance
+    ///        pulls WITHOUT touching `exec` — the allowance, all in one block.
+    function testRevocationsAreInstant() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        vault.queueAllowTarget(address(r), true);
+        vault.queueAllowSelector(TwoFaceRouter.hedge.selector, true);
+        vault.queueSetAllowance(IERC20(address(weth)), address(r), 10 ether);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowTarget(address(r), true);
+        vault.allowSelector(TwoFaceRouter.hedge.selector, true);
+        vault.setAllowance(IERC20(address(weth)), address(r), 10 ether);
+        vault.exec(address(r), abi.encodeWithSelector(TwoFaceRouter.hedge.selector, 1 ether));
+
+        // No queue, no warp — all three revocations land right now.
+        vault.revokeTarget(address(r));
+        vault.revokeSelector(TwoFaceRouter.hedge.selector);
+        vault.revokeAllowance(IERC20(address(weth)), address(r));
+
+        require(!vault.allowedTarget(address(r)), "target gone same-block");
+        require(!vault.allowedSelector(TwoFaceRouter.hedge.selector), "selector gone same-block");
+        require(
+            weth.allowance(address(vault), address(r)) == 0,
+            "allowance zeroed - the direct transferFrom pull is closed"
+        );
+        try vault.exec(address(r), abi.encodeWithSelector(TwoFaceRouter.hedge.selector, 1 ether)) {
+            revert("expected BadTarget after instant revoke");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.BadTarget.selector, "must revert BadTarget");
+        }
+    }
+
+    /// The instant direction stays owner-only: a compromised keeper key must
+    ///        not strip the very allowlists the owner relies on, and the
+    ///        timelock on GRANTS is untouched (risk-up slow, risk-down fast).
+    function testRevocationsAreOwnerOnly() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        vm.prank(ALICE);
+        try vault.revokeTarget(address(r)) {
+            revert("expected NotOwner");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotOwner.selector, "must revert NotOwner");
+        }
+        vm.prank(ALICE);
+        try vault.revokeSelector(TwoFaceRouter.hedge.selector) {
+            revert("expected NotOwner");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotOwner.selector, "must revert NotOwner");
+        }
+        vm.prank(ALICE);
+        try vault.revokeAllowance(IERC20(address(weth)), address(r)) {
+            revert("expected NotOwner");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotOwner.selector, "must revert NotOwner");
+        }
+        // Idempotent: revoking what was never granted is a no-op, not a
+        // revert — incident tooling must not wedge on a stale address.
+        vault.revokeTarget(address(r));
+        require(!vault.allowedTarget(address(r)), "still not allowed");
     }
 }
