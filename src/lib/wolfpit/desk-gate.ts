@@ -1,0 +1,47 @@
+import { createServerFn } from "@tanstack/react-start";
+
+/**
+ * Desk gate (WP-07 / #13, extended beyond spot).
+ *
+ * 2026-08-31: `checkTradingAllowed` was wired to exactly ONE caller,
+ * `spotQuote`. The futures, options and race desks accept orders entirely in
+ * the browser (`src/lib/wolfpit/store.ts` -> `engine.ts`), so an operator who
+ * paused the book stopped spot and nothing else. The pause switch was telling
+ * the truth about one desk and lying about three.
+ *
+ * Every desk now asks the server before it will accept an order. The paper
+ * desks are play money, but the rule is the rule: a halt means a halt, and the
+ * same code path carries the geo-fence, which is a compliance boundary rather
+ * than a convenience. When these desks move on-chain the gate is already in
+ * front of them.
+ *
+ * The client cannot be trusted with this decision — that is the whole point —
+ * so `deskOpen` reads server state on every call and the caller must treat a
+ * failure as "no order".
+ */
+export type DeskProduct = "spot" | "future" | "option" | "race";
+
+/** Products that exist. Adding one here forces it through the gate. */
+export const DESK_PRODUCTS: readonly DeskProduct[] = ["spot", "future", "option", "race"] as const;
+
+export type DeskGateResult =
+  | { ok: true }
+  | { ok: false; code: "paused" | "geo" | "policy-unavailable"; error: string };
+
+/**
+ * Coerce caller input to a known product. An unknown value is gated as the
+ * STRICTEST thing we have rather than waved through: a typo in a caller must
+ * never become an ungated desk.
+ */
+export function normalizeProduct(raw: unknown): DeskProduct {
+  return DESK_PRODUCTS.find((x) => x === raw) ?? "option";
+}
+
+export const deskOpen = createServerFn({ method: "GET" })
+  .validator((d: { product?: string }): { product: DeskProduct } => ({
+    product: normalizeProduct(d?.product),
+  }))
+  .handler(async ({ data }): Promise<DeskGateResult> => {
+    const { checkTradingAllowed } = await import("@/lib/admin/policy.server");
+    return checkTradingAllowed({ products: [data.product] });
+  });

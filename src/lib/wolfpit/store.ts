@@ -29,6 +29,7 @@ import type { BetMarket, EngineState, FutSide, OptType, PoolId, RaceKind, Workin
 import { useAdmin } from "@/lib/admin/config";
 import { PIT_OPEN, compBoard } from "./comp";
 import { ping } from "./alerts";
+import { deskOpen, type DeskProduct } from "./desk-gate";
 import { sanitizeState } from "./sanitize";
 import { useWallet } from "@/lib/wallet/session";
 import { marketClosedReason } from "./features";
@@ -58,11 +59,12 @@ type Actions = {
   rehydrate: () => void;
   step: (dtSec: number) => void;
   setSpeed: (n: 1 | 10 | 60) => void;
-  buySpot: (pool: PoolId, usd: number) => void;
-  sellSpot: (pool: PoolId, baseAmt: number) => void;
-  openFut: (side: FutSide, contracts: number, expiry: number) => void;
+  /* Order entry is ASYNC: every desk confirms with the server gate first. */
+  buySpot: (pool: PoolId, usd: number) => Promise<void>;
+  sellSpot: (pool: PoolId, baseAmt: number) => Promise<void>;
+  openFut: (side: FutSide, contracts: number, expiry: number) => Promise<void>;
   closeFut: (id: string) => void;
-  openOpt: (type: OptType, strike: number, expiry: number, contracts: number) => void;
+  openOpt: (type: OptType, strike: number, expiry: number, contracts: number) => Promise<void>;
   lpAdd: (pool: PoolId, usd: number) => void;
   lpRemove: (pool: PoolId, shares: number) => void;
   closeOpt: (id: string) => void;
@@ -95,10 +97,34 @@ type Actions = {
 
 type WolfStore = EngineState & Actions;
 
+/**
+ * Fast LOCAL pre-check. This mirror is a courtesy (instant feedback, no
+ * round-trip); it is not the decision. `serverGate` below is.
+ */
 function gated(): string | null {
   if (useAdmin.getState().listingsPaused) return "Listings paused by pit ops.";
   if (useAdmin.getState().geoFenceUs) return "US geo-fence on. Futures and options hidden.";
   return null;
+}
+
+/**
+ * Ask the SERVER whether this desk may accept an order (WP-07 / #13).
+ *
+ * 2026-08-31: `gated()` alone read `useAdmin`, i.e. client state a user can
+ * edit in devtools, so pausing the book stopped spot quotes and nothing else.
+ * Every desk now confirms with the server, which owns the pause and the
+ * geo-fence in the shared policy store.
+ *
+ * Unreachable server => REFUSE. An order the desk cannot confirm is an order
+ * that does not exist; the same rule the hedge follows.
+ */
+async function serverGate(product: DeskProduct): Promise<string | null> {
+  try {
+    const r = await deskOpen({ data: { product } });
+    return r.ok ? null : r.error;
+  } catch {
+    return "Cannot reach the trading desk right now. Order not placed.";
+  }
 }
 
 function apply(result: EngineState | string, set: (p: Partial<WolfStore>) => void, sent = false) {
@@ -145,13 +171,35 @@ export const useWolf = create<WolfStore>()(
         });
       },
       setSpeed: (simSpeed) => set({ simSpeed }),
-      buySpot: (pool, usd) => apply(tradeSpot(get(), pool, "buy", usd), set),
-      sellSpot: (pool, baseAmt) => apply(tradeSpot(get(), pool, "sell", baseAmt), set),
-      openFut: (side, contracts, expiry) => {
+      buySpot: async (pool, usd) => {
+        const s = gated() ?? (await serverGate("spot"));
+        if (s) {
+          set({ lastError: s });
+          ping(s, "down");
+          return;
+        }
+        apply(tradeSpot(get(), pool, "buy", usd), set);
+      },
+      sellSpot: async (pool, baseAmt) => {
+        const s = gated() ?? (await serverGate("spot"));
+        if (s) {
+          set({ lastError: s });
+          ping(s, "down");
+          return;
+        }
+        apply(tradeSpot(get(), pool, "sell", baseAmt), set);
+      },
+      openFut: async (side, contracts, expiry) => {
         const g = gated() ?? marketClosedReason("future");
         if (g) {
           set({ lastError: g });
           ping(g, "down");
+          return;
+        }
+        const s = await serverGate("future");
+        if (s) {
+          set({ lastError: s });
+          ping(s, "down");
           return;
         }
         apply(tradeFuture(get(), side, contracts, expiry), set);
@@ -164,11 +212,17 @@ export const useWolf = create<WolfStore>()(
         apply(closeOption(get(), id), set);
         if (!get().lastError) ping("Option closed", "brass", true, "Fill");
       },
-      openOpt: (type, strike, expiry, contracts) => {
+      openOpt: async (type, strike, expiry, contracts) => {
         const g = gated() ?? marketClosedReason("option");
         if (g) {
           set({ lastError: g });
           ping(g, "down");
+          return;
+        }
+        const s = await serverGate("option");
+        if (s) {
+          set({ lastError: s });
+          ping(s, "down");
           return;
         }
         apply(buyOption(get(), type, strike, expiry, contracts), set);
