@@ -19,10 +19,24 @@ import { resolve } from "node:path";
 
 const ENTRY = resolve(process.cwd(), ".vercel/output/functions/__server.func/index.mjs");
 
-/** Routes that must respond. 3xx counts: /admin redirects to /admin/login. */
+/**
+ * Routes that must respond, and markup that must be in the response.
+ *
+ * `contains` guards controls that can fail by rendering NOTHING — a class of
+ * bug no unit test catches, because the component returns null perfectly
+ * happily. The mode toggle shipped invisible on every page exactly this way:
+ * it hid modes it could not serve, the list collapsed to one entry, and the
+ * whole control disappeared with no error anywhere.
+ *
+ * 3xx counts for /admin: it redirects to /admin/login.
+ */
+const TOGGLE = 'aria-label="Trading mode"';
 const ROUTES = [
-  { path: "/", expect: [200] },
-  { path: "/trade", expect: [200] },
+  { path: "/", expect: [200], contains: [TOGGLE, ">Sim<", ">Testnet<", ">Live<"] },
+  { path: "/trade", expect: [200], contains: [TOGGLE] },
+  { path: "/pools", expect: [200], contains: [TOGGLE] },
+  { path: "/stake", expect: [200], contains: [TOGGLE] },
+  { path: "/games", expect: [200], contains: [TOGGLE] },
   { path: "/admin", expect: [200, 301, 302, 307, 308] },
   { path: "/admin/login", expect: [200] },
 ];
@@ -56,17 +70,25 @@ async function main() {
     const url = `${ORIGIN}${route.path}`;
     let status = 0;
     let detail = "";
+    let missing = [];
     try {
       const res = await handler.fetch(new Request(url, { headers: { accept: "text/html" } }), {
         waitUntil() {},
       });
       status = res.status;
-      if (!route.expect.includes(status)) detail = (await res.text()).slice(0, 300);
+      const statusOk = route.expect.includes(status);
+      if (!statusOk) {
+        detail = (await res.text()).slice(0, 300);
+      } else if (route.contains?.length) {
+        const html = await res.text();
+        missing = route.contains.filter((needle) => !html.includes(needle));
+      }
     } catch (e) {
       detail = e?.stack ?? String(e);
     }
-    const ok = route.expect.includes(status);
-    console.log(`[ssr-smoke] ${ok ? "ok  " : "FAIL"} ${route.path} -> ${status || "threw"}`);
+    const ok = route.expect.includes(status) && missing.length === 0;
+    const note = missing.length ? ` — missing from the HTML: ${missing.join(", ")}` : "";
+    console.log(`[ssr-smoke] ${ok ? "ok  " : "FAIL"} ${route.path} -> ${status || "threw"}${note}`);
     if (!ok) {
       failed++;
       if (detail) console.error(detail);

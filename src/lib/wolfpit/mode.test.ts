@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MODES, MODE_CHAIN, MODE_COPY, availableModes, normalizeMode } from "./mode-config";
+import { MODES, MODE_CHAIN, MODE_COPY, availableModes, modeStatuses, normalizeMode } from "./mode-config";
 
 /*
  * The mode selector decides which chain a user's money goes to, so its rules
@@ -32,15 +32,42 @@ test("normalizeMode refuses anything it does not know", () => {
   }
 });
 
-test("a mode whose contracts are not configured is not offered", () => {
+test("the toggle always lists all three modes, ready or not", () => {
+  // This is the regression that matters: the selector used to hide modes it
+  // could not serve, so a deployment with no Sepolia contracts collapsed to
+  // one entry and the toggle rendered NOTHING on every page.
+  const nothingDeployed = modeStatuses({});
+  assert.deepEqual(nothingDeployed.map((s) => s.mode), ["sim", "testnet", "live"]);
+  assert.equal(nothingDeployed.length, MODES.length, "never fewer tabs than modes");
+});
+
+test("sim and live are ready with no contracts configured at all", () => {
+  const s = modeStatuses({});
+  // Live spot runs through the aggregator behind spotQuote and has never
+  // needed a vault address. Gating it on VITE_VAULT disabled a working path.
+  assert.equal(s.find((x) => x.mode === "live")?.ready, true, "live needs no vault");
+  assert.equal(s.find((x) => x.mode === "sim")?.ready, true, "sim needs nothing");
+});
+
+test("testnet is shown but not selectable until Sepolia is deployed", () => {
+  const before = modeStatuses({}).find((x) => x.mode === "testnet");
+  assert.equal(before?.ready, false);
+  assert.match(before?.reason ?? "", /not deployed/i, "the reason is legible to a human");
+
   const V = "0x1234567890abcdef1234567890abcdef12345678";
-  assert.deepEqual(availableModes({}), ["sim"], "nothing deployed: sim only");
-  assert.deepEqual(availableModes({ testnetVault: V }), ["sim", "testnet"]);
-  assert.deepEqual(availableModes({ liveVault: V }), ["sim", "live"]);
-  assert.deepEqual(availableModes({ testnetVault: V, liveVault: V }), ["sim", "testnet", "live"]);
+  const after = modeStatuses({ testnetVault: V }).find((x) => x.mode === "testnet");
+  assert.equal(after?.ready, true, "configuring the vault opens the tab");
+  assert.equal(after?.reason, undefined);
+
   // Junk in the env must not open a tab that cannot work.
-  assert.deepEqual(availableModes({ testnetVault: "not-an-address" }), ["sim"]);
-  assert.deepEqual(availableModes({ liveVault: "0x123" }), ["sim"]);
+  assert.equal(modeStatuses({ testnetVault: "not-an-address" }).find((x) => x.mode === "testnet")?.ready, false);
+  assert.equal(modeStatuses({ testnetVault: "0x123" }).find((x) => x.mode === "testnet")?.ready, false);
+});
+
+test("availableModes lists only what a user may switch into", () => {
+  const V = "0x1234567890abcdef1234567890abcdef12345678";
+  assert.deepEqual(availableModes({}), ["sim", "live"]);
+  assert.deepEqual(availableModes({ testnetVault: V }), ["sim", "testnet", "live"]);
 });
 
 test("retiring the testnet is a one-line change", () => {

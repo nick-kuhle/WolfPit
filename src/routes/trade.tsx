@@ -1,5 +1,4 @@
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { Desk } from "@/components/desk/desk";
 import { ProductGate } from "@/components/product-gate";
 import { Shell } from "@/components/shell";
@@ -10,95 +9,56 @@ import { useSwap } from "@/lib/swap/use-swap";
 import { SWAP_CHAINS } from "@/lib/swap/chains";
 import { SWAP_FEE_BPS, bpsToPct } from "@/lib/swap/config";
 import { cn } from "@/lib/utils";
+import { useMode } from "@/lib/wolfpit/mode";
 
 /**
- * The trade page hosts BOTH desks behind one toggle:
+ * The trade page hosts the desks:
  *   • Simulation — the paper desk ($100k play money, full engine).
  *   • Live       — real, non-custodial on-chain swaps on Base (0x aggregator).
+ *   • Testnet    — Base Sepolia; selectable once the contracts are deployed.
  *
- * The mode lives in the URL (?mode=sim|live, shareable + back-button works) and
- * the last choice is remembered in localStorage. URL wins over storage;
- * first-paint default is Simulation (paper) — real funds are always opt-in.
+ * The mode itself is NOT owned here. This page used to keep its own two-way
+ * toggle with its own state and its own localStorage write, which meant that
+ * after the app-wide selector arrived there were two switches that could
+ * disagree with each other. `ModeProvider` owns it now; this page reads it.
+ *
+ * `?mode=` is still validated so shared links keep working — the provider
+ * reads it on mount, then mirrors the choice to the URL and localStorage.
  */
 export const Route = createFileRoute("/trade")({
-  validateSearch: (s: Record<string, unknown>): { mode?: "sim" | "live" } => ({
-    mode: s.mode === "live" ? "live" : s.mode === "sim" ? "sim" : undefined,
+  validateSearch: (s: Record<string, unknown>): { mode?: "sim" | "testnet" | "live" } => ({
+    mode: s.mode === "live" ? "live" : s.mode === "testnet" ? "testnet" : s.mode === "sim" ? "sim" : undefined,
   }),
   component: TradePage,
 });
 
-type Mode = "sim" | "live";
-const MODE_KEY = "wolfpit.trade-mode";
-
 function TradePage() {
-  const urlMode = Route.useSearch().mode;
-  // Initial render derives from the URL (server + client agree → no hydration
-  // mismatch, and shared ?mode=live links render live immediately).
-  const [mode, setMode] = useState<Mode>(urlMode === "live" ? "live" : "sim");
-  const nav = useNavigate();
-
-  // No URL param? Restore the saved preference after hydration.
-  useEffect(() => {
-    if (urlMode) return;
-    try {
-      if (window.localStorage.getItem(MODE_KEY) === "live") setMode("live");
-    } catch {
-      /* storage unavailable — stay on paper */
-    }
-  }, [urlMode]);
-
-  function choose(next: Mode) {
-    setMode(next);
-    try {
-      window.localStorage.setItem(MODE_KEY, next);
-    } catch {
-      /* storage unavailable — URL still carries the mode */
-    }
-    void nav({ to: "/trade", search: { mode: next }, replace: true });
-  }
+  const { mode } = useMode();
 
   return (
     <Shell desk>
       <ProductGate product="desk">
         <div className="flex h-full min-h-0 flex-col">
+          {/*
+            The mode tabs used to live here. They are in the app shell now
+            (ModeToggle), so every page has them and there is exactly one
+            switch. This bar keeps the per-desk status line only.
+          */}
           <div className="z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border bg-panel px-3 py-2">
-            <div
-              role="tablist"
-              aria-label="Trading mode"
-              className="flex items-center gap-1 rounded-full border border-brass/45 bg-elevated p-0.5 font-mono text-[10px] uppercase tracking-wider"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "sim"}
-                onClick={() => choose("sim")}
-                className={cn(
-                  "pressable rounded-full px-3 py-1.5 transition-colors",
-                  mode === "sim" ? "bg-brass text-bg" : "text-muted hover:text-fg",
-                )}
-              >
-                Simulation
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "live"}
-                onClick={() => choose("live")}
-                className={cn(
-                  "pressable rounded-full px-3 py-1.5 transition-colors",
-                  mode === "live" ? "bg-brass text-bg" : "text-muted hover:text-fg",
-                )}
-              >
-                Live · on-chain
-              </button>
-            </div>
+            <p className="truncate font-mono text-[10px] uppercase tracking-wider text-subtle">
+              {mode === "sim" ? "Simulation desk" : mode === "testnet" ? "Base Sepolia desk" : "Live spot"}
+            </p>
             <p
               className={cn(
                 "truncate font-mono text-[10px] uppercase tracking-wider",
-                mode === "live" ? "text-warn" : "text-subtle",
+                mode === "live" ? "text-warn" : mode === "testnet" ? "text-brass" : "text-subtle",
               )}
             >
-              {mode === "live" ? "Mainnet · real funds · non-custodial" : "Paper · $100k play money"}
+              {mode === "live"
+                ? "Mainnet · real funds · non-custodial"
+                : mode === "testnet"
+                  ? "Base Sepolia · test tokens · no real value"
+                  : "Paper · $100k play money"}
             </p>
           </div>
 
@@ -106,12 +66,36 @@ function TradePage() {
             <div className="min-h-0 flex-1">
               <Desk pane="trade" />
             </div>
+          ) : mode === "testnet" ? (
+            <TestnetPane />
           ) : (
             <LiveSpotPane />
           )}
         </div>
       </ProductGate>
     </Shell>
+  );
+}
+
+/**
+ * Base Sepolia is deployed (the tab is only selectable when
+ * VITE_VAULT_SEPOLIA is set) but no order actually routes on-chain yet — that
+ * is Phase 4. Say so, rather than showing a paper desk under a testnet label
+ * and letting someone believe their fills touched Sepolia.
+ */
+function TestnetPane() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+      <div className="max-w-md rounded-[var(--radius-lg)] border border-brass/40 bg-brass/5 p-5 text-center">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-brass">Base Sepolia</p>
+        <h2 className="mt-2 text-lg font-medium">Contracts are live. Order routing is not.</h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          The desk contracts are deployed on Sepolia and the admin panel can mint test tokens against them. Routing
+          orders to the vault from this page lands in Phase 4 — until then this tab deliberately shows nothing to
+          trade, rather than a paper fill dressed up as a testnet one.
+        </p>
+      </div>
+    </div>
   );
 }
 

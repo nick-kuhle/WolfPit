@@ -37,19 +37,39 @@ export function normalizeMode(raw: unknown): Mode | undefined {
   return MODES.find((m) => m === raw);
 }
 
+/** A mode plus whether this deployment can actually serve it. */
+export type ModeStatus = { mode: Mode; ready: boolean; reason?: string };
+
+const isAddr = (v?: string) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v.trim());
+
 /**
- * Which modes this deployment offers. A mode whose contracts are not
- * configured is NOT shown: a tab that cannot work is worse than no tab.
- * `sim` is always available.
+ * Status of EVERY mode. All three are always listed: the toggle shows the
+ * whole map and marks which stops are open, instead of hiding the closed ones.
+ *
+ * Hiding them is how this shipped invisible — with no Sepolia contracts
+ * configured the list collapsed to one entry and the toggle rendered nothing
+ * on every page.
+ *
+ * - `sim` is always ready; it is the paper engine and needs nothing.
+ * - `live` is always ready. Spot swaps run through the aggregator behind the
+ *   `spotQuote` server fn and have never needed a vault address. Gating it on
+ *   VITE_VAULT was simply wrong: it disabled a path that works today.
+ * - `testnet` needs the contracts from `DeploySepolia.s.sol`. Until
+ *   VITE_VAULT_SEPOLIA is set it is shown but not selectable, with the reason
+ *   stated — a visible "not yet" beats a tab that silently does nothing.
  */
-export function availableModes(env: {
-  testnetVault?: string;
-  liveVault?: string;
-}): Mode[] {
-  const isAddr = (v?: string) => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v.trim());
-  return MODES.filter((m) => {
-    if (m === "sim") return true;
-    if (m === "testnet") return isAddr(env.testnetVault);
-    return isAddr(env.liveVault);
+export function modeStatuses(env: { testnetVault?: string }): ModeStatus[] {
+  return MODES.map((mode) => {
+    if (mode === "testnet" && !isAddr(env.testnetVault)) {
+      return { mode, ready: false, reason: "Base Sepolia contracts are not deployed yet." };
+    }
+    return { mode, ready: true };
   });
+}
+
+/** Modes a user may actually switch into. */
+export function availableModes(env: { testnetVault?: string }): Mode[] {
+  return modeStatuses(env)
+    .filter((s) => s.ready)
+    .map((s) => s.mode);
 }

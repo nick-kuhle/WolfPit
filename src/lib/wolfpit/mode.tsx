@@ -3,9 +3,10 @@ import {
   MODE_CHAIN,
   MODE_COPY,
   MODE_KEY,
-  availableModes,
+  modeStatuses,
   normalizeMode,
   type Mode,
+  type ModeStatus,
 } from "./mode-config";
 
 /**
@@ -15,6 +16,8 @@ import {
 type Ctx = {
   mode: Mode;
   setMode: (m: Mode) => void;
+  /** Every mode, with whether this deployment can serve it. */
+  statuses: ModeStatus[];
   available: Mode[];
   chain: (typeof MODE_CHAIN)[Mode];
   copy: (typeof MODE_COPY)[Mode];
@@ -32,14 +35,8 @@ function readEnv(key: string): string | undefined {
 }
 
 export function ModeProvider({ children }: { children: ReactNode }) {
-  const available = useMemo(
-    () =>
-      availableModes({
-        testnetVault: readEnv("VITE_VAULT_SEPOLIA"),
-        liveVault: readEnv("VITE_VAULT"),
-      }),
-    [],
-  );
+  const statuses = useMemo(() => modeStatuses({ testnetVault: readEnv("VITE_VAULT_SEPOLIA") }), []);
+  const available = useMemo(() => statuses.filter((s) => s.ready).map((s) => s.mode), [statuses]);
 
   // Start at sim on both server and client so hydration cannot mismatch; the
   // effect below upgrades to the URL/stored mode once mounted.
@@ -75,8 +72,8 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<Ctx>(
-    () => ({ mode, setMode, available, chain: MODE_CHAIN[mode], copy: MODE_COPY[mode] }),
-    [mode, setMode, available],
+    () => ({ mode, setMode, statuses, available, chain: MODE_CHAIN[mode], copy: MODE_COPY[mode] }),
+    [mode, setMode, statuses, available],
   );
   return <ModeContext.Provider value={value}>{children}</ModeContext.Provider>;
 }
@@ -88,6 +85,7 @@ export function useMode(): Ctx {
     ctx ?? {
       mode: "sim",
       setMode: () => {},
+      statuses: modeStatuses({}),
       available: ["sim"],
       chain: MODE_CHAIN.sim,
       copy: MODE_COPY.sim,
