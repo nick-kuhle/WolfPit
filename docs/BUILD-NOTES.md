@@ -6,6 +6,51 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Sun, night) — testnet launch, phases 0-3
+
+Four phases toward putting the desk on Base Sepolia. Details and the runbook:
+[TESTNET-LAUNCH.md](./TESTNET-LAUNCH.md).
+
+**Phase 0 — the pause only ever stopped one desk.** `checkTradingAllowed` had
+exactly one caller in the whole repo: `spotQuote`. Futures, options and the race
+were gated by `gated()` in the client store, which reads `useAdmin` —
+localStorage state any user can edit. So the admin pause halted spot quotes and
+left three desks accepting orders, while the panel implied it had stopped
+everything. Order entry is now async and every desk calls the new
+`deskOpen({product})` server fn first. Unreachable server = refused; an unknown
+product is gated as the strictest one. The desks are still paper — the gate is
+in front of them now so it does not have to be retrofitted the day real money
+arrives.
+
+**Phase 1 — one mode selector.** Sim / Testnet / Live moved out of `/trade`
+local state into `ModeProvider` + a toggle in the shell, so it is on every
+route. A mode whose vault is not configured is not offered, and a stored mode
+that is no longer available is ignored on load. Retiring the testnet is one
+line: delete `"testnet"` from `MODES` in `mode-config.ts` and the type narrows
+under everything that touches it.
+
+**Phase 2 — `DeploySepolia.s.sol` + `SeedSepolia.s.sol`.** Tokens with mainnet
+decimals, WPIT, oracle, vault, three pools, farm, stake; prints a paste-ready
+`VITE_*` block. Found while writing it: **`SimplePair` had no way to transfer
+ownership**, so the fee switch would have stayed with the deploy key forever.
+Added `setOwner` (zero rejected — a zero owner freezes `setFeeBps`) with four
+tests. Both scripts hit `Stack too deep` and are structured around storage
+structs rather than locals.
+
+**Phase 3 — dev controls, browser-signed.** Mint/oracle/pool controls in
+`/admin` that build calldata only; the operator's wallet signs. The server holds
+no key, so a compromise of this app yields a form, not a mint. On mainnet the
+panel renders `null` and every builder refuses chain 8453 by name — absent, not
+disabled. Approvals are bounded to the exact amount and pool adds carry a real
+deadline, same discipline as WP-05 / #12.
+
+**Also:** `npm test` listed its test files by hand, so both new suites ran zero
+times until the list was edited. It is a glob now (`src/**/*.test.ts`) — 261
+tests, up from 247, of which 14 are new and 4 were previously invisible to CI by
+construction.
+
+---
+
 ## 2026-08-31 (Sun, later still) — "Importing a module script failed" after a deploy
 
 Operator opened /admin in a tab that predated a redeploy and got the app's
