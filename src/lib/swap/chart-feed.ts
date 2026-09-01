@@ -37,6 +37,7 @@ import { CHAINS, hasSymbolFeed } from "@/lib/wolfpit/market";
 import type { SpotToken } from "./config";
 
 /** Stablecoins we price *against* rather than chart. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const STABLE_SYMBOLS = new Set([
   "USDC",
   "USDBC",
@@ -109,8 +110,10 @@ export function pickSubject<T extends { symbol: string }>(sell: T, buy: T): { su
 }
 
 /** 0x sentinel for the chain-native asset. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const NATIVE_SENTINEL = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function isNativeAddress(address: string): boolean {
   const a = address.trim().toLowerCase();
   return a === NATIVE_SENTINEL || a === "0x0000000000000000000000000000000000000000";

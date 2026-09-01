@@ -41,10 +41,13 @@
  * ADMIN PANEL section below).
  */
 export const RL_WINDOW_SEC = 15 * 60;
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const RL_MAX_IP = 20;
 export const RL_MAX_ACCT = 5;
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const RL_MAX_PAIR = 5;
 
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export class RateLimitedError extends Error {
   readonly status = 429;
   constructor() {
@@ -53,6 +56,7 @@ export class RateLimitedError extends Error {
   }
 }
 
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export class RateLimitStoreError extends Error {
   readonly status = 503;
   constructor() {
@@ -297,6 +301,7 @@ export async function guardAuthRequest(
 }
 
 /** Convenience for server-function middleware: throws RateLimitedError. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export async function assertNotRateLimited(request: Request): Promise<void> {
   const g = await guardAuthRequest(request);
   if (g.blocked) throw g.blocked.status === 429 ? new RateLimitedError() : new RateLimitStoreError();
@@ -306,6 +311,7 @@ export async function assertNotRateLimited(request: Request): Promise<void> {
  * IP-only check for non-POST surfaces such as the sign-in popup initiation
  * (`/auth/popup` is a GET that starts an OAuth flow). True = throttled.
  */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export async function throttledByIp(request: Request): Promise<boolean> {
   const ip = clientIp(request) ?? "unknown";
   try {
@@ -317,6 +323,7 @@ export async function throttledByIp(request: Request): Promise<boolean> {
 }
 
 /** The caller's IP, or undefined when unknown (for logging/audit). */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function callerIp(request: RequestLike | null | undefined): string | undefined {
   return clientIp(request);
 }

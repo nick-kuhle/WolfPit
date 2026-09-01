@@ -1,4 +1,13 @@
 /**
+ * PLANNED — DESIGNED, NOT YET WIRED. Nothing in `src/` imports this module
+ * today; knip listing it as an unused file is expected and correct. It is
+ * part of the credential-auth surface kept intact by deliberate decision
+ * (docs/BUILD-NOTES.md: "Planned auth modules kept intact"), pending the
+ * launch that turns auth on. Read the module header below before wiring it
+ * in — the threat model (cookie isolation, popup flow, failures-only
+ * throttling) is load-bearing.
+ */
+/**
  * Live-preview sign-in popup — server-only (NEVER import from the client).
  *
  * The sandbox preview runs the app in a partitioned iframe, so OAuth must happen

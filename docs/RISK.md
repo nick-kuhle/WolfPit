@@ -26,9 +26,16 @@ Sign: users buy calls/puts and long/short futures. Vault is the other side. Spot
 | \|ν\| | ≤ 15% NAV | stop writing |
 | OI / expiry | ≤ 25% vault ETH | that expiry blank |
 | OI / strike | ≤ 10% vault ETH | that strike blank |
-| User IM / MM | 25% / 12.5% (4×) | isolate; liq |
+| User IM / MM | IM = 25% base, rising with utilization → ≤ 75%; MM = IM ÷ 2 (so 12.5% at base) | isolate; liq |
 | Single fill | ≤ 10% remaining band | split or reject |
 | Circuit | 5m \|return\| > 3 × IV × √(5/525600) | halt **new shorts** 15m |
+
+IM is not a flat 25%: `imRate()` adds a utilization term (size vs vault cover,
+and size vs pool depth), clamped to [25%, 75%] — the desk charges more
+precisely when booking is most dangerous. MM is **derived from the position's
+own IM**, `clamp(IM/2, 8%, 60%)` (`posMmRate`), not an independent flat 12.5%:
+a position that paid up for size keeps the same 4× IM:MM leverage ratio it was
+charged at entry. (Flat values below are the BASE rates; audit E-3.)
 
 σ in the gamma cash test is **IV**, not hope.
 
