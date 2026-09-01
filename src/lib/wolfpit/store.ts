@@ -79,7 +79,6 @@ type Actions = {
     candles: EngineState["candles"];
     /** Dedicated long-history vol series; see getVolHistory in market.ts. */
     volCandles?: EngineState["candles"];
-    btc?: number;
     at: number;
     source: string;
     ethBid?: number;
@@ -375,7 +374,6 @@ export const useWolf = create<WolfStore>()(
         ethBid: s.ethBid,
         ethAsk: s.ethAsk,
         wpit: s.wpit,
-        btc: s.btc,
         liveAt: s.liveAt,
         liveSource: s.liveSource,
         iv: s.iv,

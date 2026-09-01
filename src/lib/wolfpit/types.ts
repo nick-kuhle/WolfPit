@@ -185,7 +185,6 @@ export type EngineState = {
   rvLive: boolean;
   candles: Candle[];
   wpitCandles: Candle[];
-  btc: number;
   liveAt: number;
   liveSource: string;
   account: PaperAccount;

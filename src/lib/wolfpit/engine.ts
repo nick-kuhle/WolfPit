@@ -25,7 +25,6 @@ import {
   bsPut,
   bsVega,
   clamp,
-  ewmaRv,
   ewmaRvAdaptive,
   RV_MIN_BARS,
   ivSmile,
@@ -90,7 +89,6 @@ export function initialState(now = T0): EngineState {
     ethBid: eth,
     ethAsk: eth,
     wpit,
-    btc: 0,
     liveAt: 0,
     liveSource: "sim-fallback",
     iv: 0.62,
@@ -247,7 +245,6 @@ export function applyLive(
     candles: EngineState["candles"];
     /** Dedicated long-history series for the vol estimate; see market.ts. */
     volCandles?: EngineState["candles"];
-    btc?: number;
     at: number;
     source: string;
     ethBid?: number;
@@ -284,7 +281,6 @@ export function applyLive(
     eth,
     ethBid: clamp(feed.ethBid && feed.ethBid > 0 ? feed.ethBid : eth, ETH_MIN, ETH_MAX),
     ethAsk: clamp(feed.ethAsk && feed.ethAsk > 0 ? feed.ethAsk : eth, ETH_MIN, ETH_MAX),
-    btc: feed.btc ?? s.btc,
     candles: feed.candles,
     volCandles: feed.volCandles && feed.volCandles.length > 0 ? feed.volCandles : s.volCandles,
     rvBars: est.quality.bars,
