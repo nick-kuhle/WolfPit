@@ -3,12 +3,17 @@ import { createServerFn } from "@tanstack/react-start";
 export const adminLogin = createServerFn({ method: "POST" })
   .validator((d: { user: string; pass: string }) => d)
   .handler(async ({ data }) => {
-    const { verifyPassword, setAdminCookie } = await import("./session.server");
+    const { verifyPassword, setAdminCookie, adminAuthStatus } = await import("./session.server");
     const { clientIp, checkAdminLogin, recordAdminLoginFailure, resetAdminLogin } = await import(
       "../auth/rate-limit.server"
     );
     const { getRequest } = await import("@tanstack/react-start/server");
     const user = data.user.trim();
+
+    // Configuration is not a credential failure: say so, rather than throwing
+    // and leaving the page silent. Fail closed either way — nobody signs in.
+    const configured = adminAuthStatus();
+    if (!configured.ok) return { ok: false as const, error: configured.error };
 
     // Request plumbing: getRequest() IS available from server-function handlers
     // (the auth isolation middleware already relies on it), so the throttle
@@ -59,9 +64,12 @@ export const adminLogout = createServerFn({ method: "POST" }).handler(async () =
 });
 
 export const adminWhoami = createServerFn({ method: "GET" }).handler(async () => {
-  const { readAdminUser } = await import("./session.server");
+  const { readAdminUser, adminAuthStatus } = await import("./session.server");
   const user = readAdminUser();
-  return { user };
+  // `configured` lets the sign-in page tell an operator that no credentials
+  // exist on this deployment BEFORE they type a password that cannot work.
+  const status = adminAuthStatus();
+  return { user, configured: status.ok, configError: status.ok ? null : status.error };
 });
 
 /* ------------------------------------------------------------------ *

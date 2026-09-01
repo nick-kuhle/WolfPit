@@ -6,6 +6,50 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Sun, later) — admin sign-in did nothing, silently
+
+Operator report: "it's not signing me in, and it doesn't give me an error."
+Exactly that — no error, no session, just a button that flickered.
+
+**Cause.** Two halves, both ours:
+
+1. `session.server.ts` THREW for a *configuration* problem: in production
+   `adminCredentials()` throws when `ADMIN_USER`/`ADMIN_PASS` are unset, and
+   `secret()` throws when `ADMIN_SESSION_SECRET` is missing, short, or the
+   shipped dev default.
+2. `admin.login.tsx` called `adminLogin()` as `void fn().then(...).finally(...)`
+   — **no `.catch`**. So the rejection went nowhere: `.then` was skipped,
+   `.finally` cleared the spinner, and the operator saw nothing at all. From
+   the seat, "this deployment has no admin configured" was indistinguishable
+   from "wrong password".
+
+**Fix.** Configuration is a question, not an exception:
+
+- `adminAuthStatus()` reports `{ok:false, error}` naming every missing
+  variable, without throwing. `adminLogin` returns it; `adminWhoami` now
+  returns `{user, configured, configError}` so the page can warn BEFORE a
+  password is typed that cannot work.
+- `readAdminUser()` split into cookie plumbing + pure `verifyAdminToken()`,
+  which returns null (never throws) when the secret is unavailable. An
+  unverifiable cookie is "no session", not a 500.
+- Both promise chains in the login route got `.catch`. The dev-default
+  `admin / admin` hint on the page was replaced — it is misleading on a
+  deployed box that has no such account.
+- `mintAdminToken` exported so the token rules are testable at all.
+
+7 new tests (`session.server.test.ts`): missing vars are all named; status
+never throws; a weak or dev-default secret is rejected by name; tokens
+round-trip, tamper to null, expire to null; and a validly-minted token
+presented to a secret-less deployment resolves to null rather than throwing.
+
+**Same lesson as this morning's outage, one layer up.** A control that fails
+without saying so is worse than one that fails loudly: the pause gate refused
+every order while claiming a store problem nobody could see, and sign-in
+refused every operator while claiming nothing at all. Fail closed, then
+explain.
+
+---
+
 ## 2026-08-31 (Sun) — PROD OUTAGE: every quote refused. Cause, fix, and two follow-ups
 
 **Symptom.** Live app returned "Trading policy unavailable. Orders are refused

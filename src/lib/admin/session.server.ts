@@ -50,6 +50,38 @@ function adminCredentials() {
   return { user, pass };
 }
 
+/**
+ * Is admin sign-in usable on this deployment? Same rules as `secret()` and
+ * `adminCredentials()`, but as a QUESTION rather than a throw.
+ *
+ * 2026-08-31: the login form called `adminLogin()` with no `.catch`, so when
+ * these env vars were missing in production the handler threw, the promise
+ * rejected, and the page did NOTHING — no error, no sign-in, just a button
+ * that flickered. A control that fails silently is worse than one that fails
+ * loudly: the operator cannot tell "wrong password" from "this deployment has
+ * no admin configured". Callers now ask first and report the reason.
+ */
+export function adminAuthStatus(): { ok: true } | { ok: false; error: string } {
+  const missing: string[] = [];
+  const s = process.env.ADMIN_SESSION_SECRET;
+  const user = process.env.ADMIN_USER;
+  const pass = process.env.ADMIN_PASS;
+  if (isProd() || process.env.VITE_AUTH_ENABLED !== "false") {
+    if (!user) missing.push("ADMIN_USER");
+    if (!pass) missing.push("ADMIN_PASS");
+  }
+  if (isProd() && !(s && s.length >= SECRET_MIN_LEN && s !== DEV_SECRET)) {
+    missing.push(
+      s ? "ADMIN_SESSION_SECRET (must be >= 32 chars and not the dev default)" : "ADMIN_SESSION_SECRET",
+    );
+  }
+  if (missing.length === 0) return { ok: true };
+  return {
+    ok: false,
+    error: `Admin sign-in is not configured on this deployment. Missing: ${missing.join(", ")}.`,
+  };
+}
+
 function hmac(payload: string) {
   return createHmac("sha256", secret()).update(payload).digest("hex");
 }
@@ -66,21 +98,40 @@ export function verifyPassword(user: string, pass: string) {
   return eq(user, c.user) && eq(pass, c.pass);
 }
 
-function mintAdminToken(user: string) {
+/** Exported for tests: mint a token the way `setAdminCookie` does. */
+export function mintAdminToken(user: string) {
   const exp = Date.now() + MAX_AGE * 1000;
   const payload = `${user}.${exp}`;
   return `${payload}.${hmac(payload)}`;
 }
 
 export function readAdminUser(): string | null {
-  const raw = getCookie(COOKIE);
+  return verifyAdminToken(getCookie(COOKIE));
+}
+
+/**
+ * Verify a presented session token. Pure: no request context, so it is unit
+ * testable — which is how the "unverifiable cookie must be null, not a throw"
+ * rule is now held by a test rather than by hope.
+ */
+export function verifyAdminToken(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const parts = raw.split(".");
   if (parts.length !== 3) return null;
   const [user, expStr, sig] = parts;
   if (!user || !expStr || !sig) return null;
   const payload = `${user}.${expStr}`;
-  if (!eq(sig, hmac(payload))) return null;
+  // `hmac()` throws when the signing secret is missing in production. A
+  // presented cookie that cannot be verified is simply NOT a session — resolve
+  // it to null instead of rejecting the caller's promise, which is how the
+  // admin page ended up rendering nothing at all.
+  let expected: string;
+  try {
+    expected = hmac(payload);
+  } catch {
+    return null;
+  }
+  if (!eq(sig, expected)) return null;
   if (Number(expStr) < Date.now()) return null;
   return user;
 }
