@@ -6,6 +6,44 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-09-01 (Tue) — audit P1/P2 close: B4 timelock + runbook, B6 conversion, median oracle
+
+- **B4 (operator = #1 threat).** `DealerVault` gets an owner-armed **release
+  timelock**: `setReleaseDelay(≤1d)` (launch default 0 = keeper flow
+  unchanged); armed, the operator must `queueReleaseCall/Put` and wait out
+  the eta — re-queueing replaces the entry and restarts the clock, the owner
+  bypasses and can `vetoRelease()`. Distinct from WP-05's `ADMIN_TIMELOCK`
+  (owner allowlist surface, fixed 2d) — this gates the OPERATOR's release
+  flow. Keeper: `queue-release-call` / `queue-release-put` commands +
+  **monitor reconciliation floors** (`--min-reserved-eth/--min-reserved-usdc`,
+  pause when on-chain reserved falls BELOW the off-chain book — the direction
+  the naked checks can't see). Response sequence:
+  `docs/RUNBOOK-KEEPER-COMPROMISE.md` (linked from RISK.md), which also leans
+  on WP-05: a compromised operator can't be handed a new drain path in under
+  2 days even by a rushed owner.
+- **B6.** `insuranceWpit` is no longer dead value: owner-only
+  `convertWpitInsurance(wpit, router, data, minOut)` realizes junior WPIT
+  into REAL `insuranceUsdc` — WP-05 parity end to end (timelocked target +
+  selector allowlists, capped WPIT allowance), delta-accounted (only the
+  insurance ledger's WPIT may be sold), exec cover floors, proceeds arm
+  `haltShortGamma()`. Ledger relabeled in natspec: WPIT is informational
+  until converted. **Oracle:** new `oracle/MedianOracle.sol` — median of 2–3
+  `ethUsdc()` sources, quorum 2, band-checked midpoint for pairs, fail-closed
+  0 everywhere (single-source Chainlink was the last oracle SPOF; Uni v3 TWAP
+  adapter as source B needs fork tests → Q1). `ChainlinkOracle.setOwner(0)`
+  now rejected.
+- forge **96/96** (was 84: +5 timelock/conversion, +7 oracle), cargo **15/15**
+  (was 13), TS 219/219, tsc/eslint/clippy/build clean. Hygiene: `env.example`
+  keeper block now names `WOLFPIT_KEEPER_KEY` + `WOLFPIT_KEEPER_KEY_FILE`
+  (the old `WOLFPIT_KEY` never existed in the keeper); `.nvmrc` 22.12 pins
+  dev to the CI/engines Node. Flake fix in `quant.test.ts`: the `gbm()`
+  helper drew from UNSEEDED `Math.random` while the "unbiased on a deep
+  series" assertion is a ±15% band on an estimate with ~±9% sampling noise —
+  it failed a few percent of runs (reproduced once locally). Now seeded with
+  the same LCG as `gbmPath`; the dispersion comparison passes distinct
+  per-run seeds so its independent-draws claim still holds. 5× green,
+  bit-identical.
+
 ## 2026-08-31 (Mon) — live swap chart drew a fabricated series for any non-CEX token
 
 Reported from production (`wolfpit-protocol.vercel.app`): selling ETH for

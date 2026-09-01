@@ -91,6 +91,28 @@ interface Vm {
     function stopPrank() external;
 }
 
+/// @notice Mock router selling WPIT for USDC — the owner's conversion path
+///         from junior-tranche WPIT insurance into real USDC insurance.
+contract WpitSwapRouter {
+    MockERC20 public immutable wpit;
+    MockERC20 public immutable usdc;
+    uint256 public price = 1e6; // 1 USDC per 1e18 WPIT
+
+    constructor(MockERC20 w, MockERC20 u) {
+        wpit = w;
+        usdc = u;
+    }
+
+    function setPrice(uint256 p) external {
+        price = p;
+    }
+
+    function sell(uint256 amt) external {
+        wpit.transferFrom(msg.sender, address(this), amt);
+        usdc.transfer(msg.sender, (amt * price) / 1e18);
+    }
+}
+
 contract DealerVaultTest {
     Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
     MockERC20 usdc;
@@ -722,5 +744,194 @@ contract DealerVaultTest {
         stake.unstake(1_000 ether);
         require(wpit.balanceOf(ALICE) == 1_000 ether, "full exit");
         vm.stopPrank();
+    }
+
+    // ------------------------------------------------------------ B4: release timelock
+
+    /// B4 (audit): with `releaseDelay` armed, the OPERATOR cannot unwind the
+    ///        reserved book in one shot — releases must be queued, wait out
+    ///        the delay, and the owner can veto the queue. The vault has no
+    ///        on-chain position registry, so the delay is the watcher/owner
+    ///        reaction window against a compromised keeper hot key.
+    function testReleaseTimelockQueueMatureConsume() public {
+        address OP = address(0x0B5);
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(10 ether);
+        vault.setOperator(OP);
+        vault.setReleaseDelay(300);
+        // Immediate release now fails for the operator...
+        vm.prank(OP);
+        (bool ok, bytes memory why) = address(vault).call(abi.encodeWithSelector(vault.releaseCall.selector, 1 ether));
+        require(!ok, "unqueued release must revert");
+        bytes4 sel;
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.ReleaseNotReady.selector, "explicit ReleaseNotReady");
+        // ...queueing alone is not enough before the eta...
+        vm.prank(OP);
+        vault.queueReleaseCall(2 ether);
+        vm.prank(OP);
+        (ok,) = address(vault).call(abi.encodeWithSelector(vault.releaseCall.selector, 1 ether));
+        require(!ok, "queued but immature must revert");
+        // ...after the delay the queue is consumable, exactly once.
+        vm.warp(block.timestamp + 300);
+        vm.startPrank(OP);
+        vault.releaseCall(1 ether);
+        require(vault.reservedEth() == 9 ether, "release booked");
+        require(vault.queuedReleaseEth() == 1 ether, "queue partially consumed");
+        vault.releaseCall(1 ether); // consumes the rest
+        (ok,) = address(vault).call(abi.encodeWithSelector(vault.releaseCall.selector, 1 ether));
+        require(!ok, "empty queue must revert");
+        vm.stopPrank();
+        require(vault.reservedEth() == 8 ether, "only the queued amount released");
+    }
+
+    /// The owner (multisig) bypasses the queue — an emergency unwind or a
+    ///        veto must never be rate-limited for the trust root.
+    function testReleaseTimelockOwnerVetoAndBypass() public {
+        address OP = address(0x0B5);
+        vault.creditInsurance(20_000e6);
+        vault.writePut(1 ether, 4_000e6); // locks 4_000 USDC
+        vault.setOperator(OP);
+        vault.setReleaseDelay(300);
+        vm.prank(OP);
+        vault.queueReleasePut(4_000e6);
+        vault.vetoRelease(); // owner kills the pending queue
+        vm.warp(block.timestamp + 301);
+        vm.prank(OP);
+        (bool ok, bytes memory why) = address(vault).call(abi.encodeWithSelector(vault.releasePut.selector, 4_000e6));
+        require(!ok, "vetoed queue must revert");
+        bytes4 sel;
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.ReleaseNotReady.selector, "explicit ReleaseNotReady after veto");
+        // Owner releases immediately, no queue.
+        vault.releasePut(4_000e6);
+        require(vault.reservedUsdc() == 0, "owner bypasses the timelock");
+    }
+
+    /// Delay 0 (launch default) keeps the keeper's single-tx flow byte-for-
+    ///        byte; the delay itself is owner-only and capped at 1 day.
+    function testReleaseDelayDefaultsAndBounds() public {
+        address OP = address(0x0B5);
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(5 ether);
+        vault.setOperator(OP);
+        vm.prank(OP);
+        vault.releaseCall(5 ether); // no delay set: immediate, no queue needed
+        require(vault.reservedEth() == 0, "delay-0 release is immediate");
+        (bool ok,) = address(vault).call(abi.encodeWithSelector(vault.setReleaseDelay.selector, 1 days + 1));
+        require(!ok, "delay above MAX_RELEASE_DELAY rejected");
+        vm.prank(OP);
+        (ok,) = address(vault).call(abi.encodeWithSelector(vault.setReleaseDelay.selector, 300));
+        require(!ok, "operator cannot arm/disarm the timelock");
+        // Queue sanity: zero or over-book queueing rejects.
+        vault.setReleaseDelay(300);
+        vm.prank(OP);
+        (ok,) = address(vault).call(abi.encodeWithSelector(vault.queueReleaseCall.selector, uint256(0)));
+        require(!ok, "zero queue rejected");
+        vm.prank(OP);
+        (ok,) = address(vault).call(abi.encodeWithSelector(vault.queueReleaseCall.selector, 1 ether));
+        require(!ok, "queue beyond reserved book rejected");
+    }
+
+    // ------------------------------------------------------------ B6: WPIT insurance conversion
+
+    /// B6 (audit): `insuranceWpit` was dead value — credited by slashes and
+    ///        the farm tax but never counted by `haltShortGamma()`. The owner
+    ///        can now realize it into USDC through an allowlisted router; the
+    ///        converted USDC arms the halt check for real. Wiring goes through
+    ///        the WP-05 controls: timelocked target + selector allowlists and
+    ///        a timelocked, capped WPIT allowance.
+    function testConvertWpitInsuranceArmsHaltCheck() public {
+        MockERC20 wpit = new MockERC20("WolfPit", "WPIT", 18);
+        WpitSwapRouter router = new WpitSwapRouter(wpit, usdc);
+        usdc.mint(address(router), 1_000_000e6);
+        // Junior tranche funded: tokens in the vault + ledger credit (the
+        // slash path does both; done directly here).
+        wpit.mint(address(vault), 50_000e18);
+        vault.creditInsuranceWpit(50_000e18);
+        require(vault.haltShortGamma(), "WPIT alone does not arm the halt check");
+        _wireRouter(address(router), WpitSwapRouter.sell.selector);
+        // WPIT has no default allowance cap (fail closed) — raising it is
+        // itself a timelocked action, like any other grant.
+        vault.queueSetAllowanceCap(IERC20(address(wpit)), 100_000e18);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.setAllowanceCap(IERC20(address(wpit)), 100_000e18);
+        _setAllowance(IERC20(address(wpit)), address(router), 100_000e18);
+        vault.convertWpitInsurance(
+            IERC20(address(wpit)),
+            address(router),
+            abi.encodeWithSignature("sell(uint256)", 10_000e18),
+            10_000e6
+        );
+        require(vault.insuranceWpit() == 40_000e18, "WPIT ledger debited");
+        require(vault.insuranceUsdc() == 10_000e6, "USDC ledger credited with proceeds");
+        require(vault.usdcBal() == 400_000e6, "trading ledger untouched (no shares minted)");
+        require(!vault.haltShortGamma(), "converted insurance arms the halt check");
+        vault.reconcileBalances();
+        require(vault.usdcBal() == 400_000e6, "reconcile still segregates the grown insurance");
+    }
+
+    /// Conversion guards: only the insurance ledger's WPIT may be sold, only
+    ///        through an allowlisted router + selector (WP-05 parity), only
+    ///        by the owner, never the vault's own legs, and slippage floors
+    ///        hold.
+    function testConvertWpitInsuranceGuards() public {
+        MockERC20 wpit = new MockERC20("WolfPit", "WPIT", 18);
+        WpitSwapRouter router = new WpitSwapRouter(wpit, usdc);
+        usdc.mint(address(router), 1_000_000e6);
+        // Vault physically holds MORE WPIT than the insurance ledger owns.
+        wpit.mint(address(vault), 100_000e18);
+        vault.creditInsuranceWpit(50_000e18);
+        bytes memory sellHalf = abi.encodeWithSignature("sell(uint256)", 50_000e18);
+        // Not allowlisted yet.
+        (bool ok,) = address(vault).call(
+            abi.encodeWithSelector(vault.convertWpitInsurance.selector, address(wpit), address(router), sellHalf, 0)
+        );
+        require(!ok, "unlisted router rejected");
+        _allowTarget(address(router), true);
+        // Router allowlisted but the selector is not (WP-05 parity with exec).
+        (ok,) = address(vault).call(
+            abi.encodeWithSelector(vault.convertWpitInsurance.selector, address(wpit), address(router), sellHalf, 0)
+        );
+        require(!ok, "unlisted selector rejected");
+        _allowSelector(WpitSwapRouter.sell.selector, true);
+        vault.queueSetAllowanceCap(IERC20(address(wpit)), 100_000e18);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.setAllowanceCap(IERC20(address(wpit)), 100_000e18);
+        _setAllowance(IERC20(address(wpit)), address(router), 100_000e18);
+        // Operator (non-owner) cannot convert.
+        vault.setOperator(address(0x0B5));
+        vm.prank(address(0x0B5));
+        (ok,) = address(vault).call(
+            abi.encodeWithSelector(vault.convertWpitInsurance.selector, address(wpit), address(router), sellHalf, 0)
+        );
+        require(!ok, "operator cannot convert junior collateral");
+        // Selling beyond the insurance ledger (vault holds it, ledger doesn't).
+        (ok,) = address(vault).call(
+            abi.encodeWithSelector(
+                vault.convertWpitInsurance.selector,
+                address(wpit),
+                address(router),
+                abi.encodeWithSignature("sell(uint256)", 60_000e18),
+                0
+            )
+        );
+        require(!ok, "cannot sell WPIT the insurance ledger does not own");
+        // Slippage floor.
+        (ok,) = address(vault).call(
+            abi.encodeWithSelector(vault.convertWpitInsurance.selector, address(wpit), address(router), sellHalf, 50_001e6)
+        );
+        require(!ok, "minOut floor enforced");
+        // The vault's own legs can never pose as the WPIT being sold.
+        (ok,) = address(vault).call(
+            abi.encodeWithSelector(vault.convertWpitInsurance.selector, address(usdc), address(router), sellHalf, 0)
+        );
+        require(!ok, "usdc-as-wpit rejected");
+        require(vault.insuranceWpit() == 50_000e18, "ledger intact after rejected attempts");
+        require(vault.insuranceUsdc() == 0, "no phantom USDC credit");
     }
 }

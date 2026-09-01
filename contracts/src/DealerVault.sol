@@ -46,6 +46,9 @@ contract DealerVault {
     ///         inflation to ~$1 per round trip (ERC4626-style offset).
     uint256 public constant VIRTUAL_SHARES = 1e6;
     uint256 public constant VIRTUAL_NAV = 1e6;
+    /// @notice Upper bound on the owner-set release timelock — a delay longer
+    ///         than a day would let a hostile owner strand the keeper's book.
+    uint256 public constant MAX_RELEASE_DELAY = 1 days;
 
     IERC20 public immutable usdc;
     IERC20 public immutable weth;
@@ -66,7 +69,27 @@ contract DealerVault {
     uint256 public shares;
     bool public paused;
     uint256 public insuranceUsdc;
+    /// @notice Junior-tranche WPIT ledger (slashes + Farm's 1% harvest tax).
+    ///         NOT counted by `haltShortGamma()` — WPIT is informational value
+    ///         until the owner realizes it into USDC via
+    ///         `convertWpitInsurance` (only converted USDC arms the halt).
     uint256 public insuranceWpit;
+
+    /// @notice Operator release timelock (seconds). 0 at launch = releases are
+    ///         immediate (keeper single-tx flow). Once the fail-closed watcher
+    ///         runs, the owner sets a delay: the operator must then QUEUE a
+    ///         release and wait it out, giving the watcher/owner a veto window
+    ///         against a compromised keeper key unwinding the reserved book
+    ///         (the vault has no on-chain position registry — see RISK.md).
+    ///         The owner bypasses the queue: the multisig is the trust root.
+    ///         Distinct from ADMIN_TIMELOCK (WP-05): that one gates the
+    ///         owner's allowlist surface at a fixed 2 days; this one gates the
+    ///         OPERATOR's release flow and is owner-tunable (risk ops cadence).
+    uint256 public releaseDelay;
+    uint256 public queuedReleaseEth;
+    uint256 public queuedReleaseEthEta;
+    uint256 public queuedReleaseUsdc;
+    uint256 public queuedReleaseUsdcEta;
 
     mapping(address => uint256) public shareOf;
     /// @notice DEX aggregator routers `exec` may call (owner-set).
@@ -111,6 +134,8 @@ contract DealerVault {
     error AllowanceTooLarge();
     error BadSelector();
     error BadCalldata();
+    error ReleaseNotReady();
+    error DelayTooLong();
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -129,6 +154,10 @@ contract DealerVault {
     event AdminCancelled(bytes32 indexed id);
     event SelectorAllowed(bytes4 indexed selector, bool allowed);
     event AllowanceCapSet(address indexed token, uint256 previous, uint256 next);
+    event ReleaseDelaySet(uint256 previous, uint256 next);
+    event ReleaseQueued(bytes4 indexed sig, uint256 amt, uint256 eta);
+    event ReleaseVetoed(uint256 ethAmt, uint256 usdcLock);
+    event InsuranceWpitConverted(uint256 wpitSpent, uint256 usdcGained);
 
     uint256 private _lock = 1;
 
@@ -264,6 +293,57 @@ contract DealerVault {
         uint256 slashed = IStake(stake).slash(amt);
         insuranceWpit += slashed; // stake caps at its own total
         emit InsuranceCredited(0, slashed);
+    }
+
+    /// @notice Realize junior-tranche WPIT into REAL insurance USDC through an
+    ///         owner-allowlisted router. `insuranceWpit` is otherwise dead
+    ///         value: `haltShortGamma()` counts only `insuranceUsdc`, so a
+    ///         slashed junior tranche looked "funded" while the halt trigger
+    ///         ignored it. Balance-delta accounting: only WPIT the insurance
+    ///         ledger owns may be sold, proceeds are credited to
+    ///         `insuranceUsdc` (never `usdcBal` — no shares are minted), and
+    ///         the exec cover floors re-verify that the router did not touch
+    ///         trading cover. Owner-only: converting junior collateral is a
+    ///         treasury decision, not a keeper hot-key power.
+    ///         WP-05 parity: the router AND the selector must be allowlisted
+    ///         (both behind ADMIN_TIMELOCK), and the router's WPIT allowance
+    ///         is bounded by `allowanceCap` like any other grant — this
+    ///         function adds no new drain surface beyond what `exec` already
+    ///         has.
+    function convertWpitInsurance(IERC20 wpit, address router, bytes calldata data, uint256 minOutUsdc)
+        external
+        onlyOwner
+        nonReentrant
+    {
+        if (!allowedTarget[router]) revert BadTarget();
+        if (data.length < 4) revert BadCalldata();
+        if (!allowedSelector[bytes4(data[:4])]) revert BadSelector();
+        // The two vault legs must never masquerade as the WPIT being sold —
+        // delta accounting on usdc/weth themselves would corrupt the ledgers.
+        if (address(wpit) == address(usdc) || address(wpit) == address(weth)) revert BadTarget();
+        uint256 wBefore = wpit.balanceOf(address(this));
+        uint256 uBefore = usdc.balanceOf(address(this));
+        (bool ok, bytes memory ret) = router.call(data);
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+        uint256 wAfter = wpit.balanceOf(address(this));
+        uint256 uAfter = usdc.balanceOf(address(this));
+        if (wAfter >= wBefore) revert SwapSize(); // nothing sold
+        uint256 spent = wBefore - wAfter;
+        if (spent > insuranceWpit) revert SwapSize(); // only the insurance ledger may be sold
+        if (uAfter < uBefore || uAfter - uBefore < minOutUsdc) revert Slippage();
+        uint256 gained = uAfter - uBefore;
+        insuranceWpit -= spent;
+        insuranceUsdc += gained;
+        // exec parity: real balances must still back insurance AND reserves.
+        if (uAfter < insuranceUsdc) revert InsuranceSpent();
+        if (uAfter - insuranceUsdc < reservedUsdc) revert CoverSpent();
+        if (weth.balanceOf(address(this)) < reservedEth) revert CoverSpent();
+        emit InsuranceWpitConverted(spent, gained);
+        emit InsuranceCredited(gained, 0);
     }
 
     // --------------------------------------------------- aggregator spot route
@@ -659,13 +739,70 @@ contract DealerVault {
 
     function releaseCall(uint256 size) external live onlyOperator nonReentrant {
         if (size > reservedEth) revert Zero();
+        _consumeReleaseQueue(true, size);
         reservedEth -= size;
         emit RiskReleased(this.releaseCall.selector, size);
     }
 
     function releasePut(uint256 lock) external live onlyOperator nonReentrant {
         if (lock > reservedUsdc) revert Zero();
+        _consumeReleaseQueue(false, lock);
         reservedUsdc -= lock;
         emit RiskReleased(this.releasePut.selector, lock);
+    }
+
+    // ------------------------------------------------------------ release timelock
+
+    /// @notice Owner arms the release timelock (0 disables — launch default).
+    ///         With a delay set, the OPERATOR must `queueRelease*` and wait it
+    ///         out before `releaseCall`/`releasePut` succeed; the OWNER
+    ///         bypasses the queue (multisig = trust root, and an emergency
+    ///         full unwind must never be rate-limited for the owner).
+    function setReleaseDelay(uint256 d) external onlyOwner {
+        if (d > MAX_RELEASE_DELAY) revert DelayTooLong();
+        emit ReleaseDelaySet(releaseDelay, d);
+        releaseDelay = d;
+    }
+
+    /// @notice Queue an ETH-side release. Re-queueing REPLACES the pending
+    ///         entry and restarts the clock — a compromised key cannot stack
+    ///         a large release behind an innocuous one.
+    function queueReleaseCall(uint256 size) external live onlyOperator {
+        if (size == 0 || size > reservedEth) revert Zero();
+        queuedReleaseEth = size;
+        queuedReleaseEthEta = block.timestamp + releaseDelay;
+        emit ReleaseQueued(this.releaseCall.selector, size, queuedReleaseEthEta);
+    }
+
+    /// @notice Queue a USDC-side release (same replace-and-restart rule).
+    function queueReleasePut(uint256 lock) external live onlyOperator {
+        if (lock == 0 || lock > reservedUsdc) revert Zero();
+        queuedReleaseUsdc = lock;
+        queuedReleaseUsdcEta = block.timestamp + releaseDelay;
+        emit ReleaseQueued(this.releasePut.selector, lock, queuedReleaseUsdcEta);
+    }
+
+    /// @notice Owner cancels everything pending in the release queue — the
+    ///         veto half of the timelock (see the keeper-compromise runbook).
+    function vetoRelease() external onlyOwner {
+        emit ReleaseVetoed(queuedReleaseEth, queuedReleaseUsdc);
+        queuedReleaseEth = 0;
+        queuedReleaseEthEta = 0;
+        queuedReleaseUsdc = 0;
+        queuedReleaseUsdcEta = 0;
+    }
+
+    /// @dev Enforce the timelock on an operator release. No-op when the delay
+    ///      is 0 (launch) or the caller is the owner. Otherwise the release
+    ///      must fit inside a MATURED queue entry, which it consumes.
+    function _consumeReleaseQueue(bool ethSide, uint256 amt) internal {
+        if (releaseDelay == 0 || msg.sender == owner) return;
+        if (ethSide) {
+            if (queuedReleaseEth < amt || block.timestamp < queuedReleaseEthEta) revert ReleaseNotReady();
+            queuedReleaseEth -= amt;
+        } else {
+            if (queuedReleaseUsdc < amt || block.timestamp < queuedReleaseUsdcEta) revert ReleaseNotReady();
+            queuedReleaseUsdc -= amt;
+        }
     }
 }

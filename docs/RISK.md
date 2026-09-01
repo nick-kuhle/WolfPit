@@ -147,3 +147,12 @@ cannot drift back through a "cleanup":
 | `gammaCash1h` | 2× textbook ½·Γ·S²·σ²·Δt | #27 / M-04 |
 | `insuranceRatio` at NAV ≤ 0 | `0`, not `1` | #21 / M-06 |
 | Deployable cash | `usdc − reservedUsdc − escrowUsdc` | #23 / M-07 |
+
+## Operator-key compromise
+
+The keeper hot key is the #1 threat (audit B4): it can release cover under
+written options and the naked checks never fire. Defenses (release timelock +
+owner veto, monitor reconciliation floors, alerting — layered on the WP-05
+admin timelock, selector allowlist and allowance caps) and the exact multisig
+response sequence live in
+[RUNBOOK-KEEPER-COMPROMISE.md](./RUNBOOK-KEEPER-COMPROMISE.md).

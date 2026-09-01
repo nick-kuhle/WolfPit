@@ -28,6 +28,7 @@ contract ChainlinkOracle {
     error Stale();
     error BadRound();
     error OutOfBand();
+    error ZeroAddress();
 
     event OwnerSet(address indexed previous, address indexed next);
     event BandSet(uint256 minUsdc, uint256 maxUsdc);
@@ -44,6 +45,7 @@ contract ChainlinkOracle {
     }
 
     function setOwner(address next) external onlyOwner {
+        if (next == address(0)) revert ZeroAddress(); // a zero owner bricks setBand forever
         emit OwnerSet(owner, next);
         owner = next;
     }

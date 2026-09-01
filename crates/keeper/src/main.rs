@@ -43,6 +43,9 @@ sol! {
         function writePut(uint256 size, uint256 strike) external;
         function releaseCall(uint256 size) external;
         function releasePut(uint256 lock) external;
+        function queueReleaseCall(uint256 size) external;
+        function queueReleasePut(uint256 lock) external;
+        function releaseDelay() external view returns (uint256);
         function openLong(uint256 size) external;
         function openShort(uint256 size, address router, bytes data, uint256 minOutUsdc) external;
         function reconcileBalances() external;
@@ -78,6 +81,17 @@ struct Args {
     /// Monitor loop: seconds between checks (0 = 30s default).
     #[arg(long, default_value = "0")]
     interval: u64,
+    /// Monitor reconciliation floor (whole ETH): pause if on-chain
+    /// `reservedEth` ever falls BELOW this — an unauthorized `releaseCall`
+    /// understating the book (audit B4: the vault has no position registry,
+    /// so only the keeper's own book knows what SHOULD be reserved). Floors,
+    /// not exact matches: legitimate new writes may grow the book mid-loop.
+    #[arg(long)]
+    min_reserved_eth: Option<String>,
+    /// Monitor reconciliation floor (whole USDC): pause if on-chain
+    /// `reservedUsdc` falls below this (unauthorized `releasePut`).
+    #[arg(long)]
+    min_reserved_usdc: Option<String>,
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -115,6 +129,11 @@ enum Cmd {
     Pause { v: bool },
     /// Release a previously reserved call size (operator).
     ReleaseCall { size_eth: String },
+    /// Queue an ETH-side release for the timelock (needed once the owner
+    /// arms `releaseDelay`; replaces any pending queue entry).
+    QueueReleaseCall { size_eth: String },
+    /// Queue a USDC-side release for the timelock.
+    QueueReleasePut { lock_usdc: String },
     /// Pulse: read state each interval; fail closed — pause when halted.
     Monitor,
 }
@@ -389,8 +408,36 @@ async fn run(args: &Args) -> Result<()> {
             tx.get_receipt().await?;
             Ok(())
         }
+        Cmd::QueueReleaseCall { size_eth } => {
+            let size = wei(size_eth.clone())?;
+            let cd = IDealerVault::queueReleaseCallCall { size }.abi_encode();
+            println!("queueReleaseCall({size_eth} ETH) calldata: 0x{}", to_hex(&cd));
+            let delay = c.releaseDelay().call().await?;
+            let tx = c.queueReleaseCall(size).send().await?;
+            println!("sent queueReleaseCall tx: {} (matures in {delay}s)", tx.tx_hash());
+            tx.get_receipt().await?;
+            Ok(())
+        }
+        Cmd::QueueReleasePut { lock_usdc } => {
+            let lock = usdc(lock_usdc.clone())?;
+            let cd = IDealerVault::queueReleasePutCall { lock }.abi_encode();
+            println!("queueReleasePut({lock_usdc} USDC) calldata: 0x{}", to_hex(&cd));
+            let delay = c.releaseDelay().call().await?;
+            let tx = c.queueReleasePut(lock).send().await?;
+            println!("sent queueReleasePut tx: {} (matures in {delay}s)", tx.tx_hash());
+            tx.get_receipt().await?;
+            Ok(())
+        }
         Cmd::Monitor => {
             let step = if args.interval == 0 { 30 } else { args.interval };
+            let floor_eth = match &args.min_reserved_eth {
+                Some(v) => Some(wei(v.clone())?),
+                None => None,
+            };
+            let floor_usdc = match &args.min_reserved_usdc {
+                Some(v) => Some(usdc(v.clone())?),
+                None => None,
+            };
             let mut fails: u32 = 0;
             loop {
                 // One read pass. On ANY RPC error the monitor cannot prove the
@@ -402,16 +449,25 @@ async fn run(args: &Args) -> Result<()> {
                 let res: Result<bool> = async {
                     let paused = c.paused().call().await?;
                     let halt = c.haltShortGamma().call().await?;
-                    let naked_eth = c.reservedEth().call().await? > c.ethBal().call().await?;
-                    let naked_usdc = c.reservedUsdc().call().await? > c.usdcBal().call().await?;
-                    if monitor_should_pause(paused, halt, naked_eth, naked_usdc) {
+                    let reserved_eth = c.reservedEth().call().await?;
+                    let reserved_usdc = c.reservedUsdc().call().await?;
+                    let naked_eth = reserved_eth > c.ethBal().call().await?;
+                    let naked_usdc = reserved_usdc > c.usdcBal().call().await?;
+                    // B4 reconciliation: reserved UNDERSTATED (a release the
+                    // keeper's book does not know about) is invisible to the
+                    // naked checks — compare against the operator's floors.
+                    let under_floor = reserved_under_floor(reserved_eth, floor_eth)
+                        || reserved_under_floor(reserved_usdc, floor_usdc);
+                    if monitor_should_pause(paused, halt, naked_eth, naked_usdc, under_floor) {
                         let tx = c.pause(true).send().await?;
                         println!("HALT -> pause() tx {}", tx.tx_hash());
                         tx.get_receipt().await?;
                         println!("vault paused on-chain");
                         return Ok(true);
                     }
-                    println!("ok: paused={paused} halt={halt} naked_eth={naked_eth} naked_usdc={naked_usdc}");
+                    println!(
+                        "ok: paused={paused} halt={halt} naked_eth={naked_eth} naked_usdc={naked_usdc} under_floor={under_floor}"
+                    );
                     Ok(false)
                 }
                 .await;
@@ -433,9 +489,21 @@ async fn run(args: &Args) -> Result<()> {
 }
 
 /// Fail-closed predicate: pause unless we can PROVE the vault is safe (not
-/// halted, cover covers reservations, and we are not already paused).
-fn monitor_should_pause(paused: bool, halt: bool, naked_eth: bool, naked_usdc: bool) -> bool {
-    (halt || naked_eth || naked_usdc) && !paused
+/// halted, cover covers reservations, the reserved book is not understated
+/// below the operator's floors, and we are not already paused).
+fn monitor_should_pause(paused: bool, halt: bool, naked_eth: bool, naked_usdc: bool, under_floor: bool) -> bool {
+    (halt || naked_eth || naked_usdc || under_floor) && !paused
+}
+
+/// B4 reconciliation predicate: with no floor configured nothing is checked;
+/// with one, an on-chain reserved value BELOW it means someone released cover
+/// the keeper's book still counts on — the dangerous, otherwise-invisible
+/// direction (a growing book is legitimate trading, never flagged).
+fn reserved_under_floor(reserved: U256, floor: Option<U256>) -> bool {
+    match floor {
+        Some(f) => reserved < f,
+        None => false,
+    }
 }
 
 /// Exponential backoff for transient RPC failures: step · 2^(fails−1), capped
@@ -520,12 +588,33 @@ mod tests {
 
     #[test]
     fn monitor_pauses_only_when_halted_or_naked_and_not_paused() {
-        assert!(!monitor_should_pause(false, false, false, false));
-        assert!(monitor_should_pause(false, true, false, false));
-        assert!(monitor_should_pause(false, false, true, false));
-        assert!(monitor_should_pause(false, false, false, true));
-        assert!(!monitor_should_pause(true, true, false, false), "already paused: no spam");
-        assert!(!monitor_should_pause(true, false, false, false));
+        assert!(!monitor_should_pause(false, false, false, false, false));
+        assert!(monitor_should_pause(false, true, false, false, false));
+        assert!(monitor_should_pause(false, false, true, false, false));
+        assert!(monitor_should_pause(false, false, false, true, false));
+        assert!(monitor_should_pause(false, false, false, false, true), "understated book pauses");
+        assert!(!monitor_should_pause(true, true, false, false, false), "already paused: no spam");
+        assert!(!monitor_should_pause(true, false, false, false, true), "already paused: no spam");
+        assert!(!monitor_should_pause(true, false, false, false, false));
+    }
+
+    #[test]
+    fn queue_release_encodes_amounts() {
+        let d = IDealerVault::queueReleaseCallCall { size: U256::from(1u8) }.abi_encode();
+        assert_eq!(&d[..4], IDealerVault::queueReleaseCallCall::SELECTOR);
+        assert_eq!(d.len(), 4 + 32);
+        let d = IDealerVault::queueReleasePutCall { lock: U256::from(1u8) }.abi_encode();
+        assert_eq!(&d[..4], IDealerVault::queueReleasePutCall::SELECTOR);
+        assert_eq!(d.len(), 4 + 32);
+    }
+
+    #[test]
+    fn reserved_floor_flags_only_understatement() {
+        let floor = Some(U256::from(10u64));
+        assert!(!reserved_under_floor(U256::from(10u64), floor), "at the floor: fine");
+        assert!(!reserved_under_floor(U256::from(11u64), floor), "grown book: legitimate");
+        assert!(reserved_under_floor(U256::from(9u64), floor), "below floor: released behind our back");
+        assert!(!reserved_under_floor(U256::ZERO, None), "no floor configured: no check");
     }
 
     #[test]

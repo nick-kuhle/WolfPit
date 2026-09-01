@@ -11,11 +11,13 @@ cargo test --manifest-path crates/keeper/Cargo.toml
 
 | Contract | Role |
 | --- | --- |
-| `DealerVault` | Cover, α=0.40, pause, insurance halt |
+| `DealerVault` | Cover, α=0.40, pause, insurance halt, admin + release timelocks |
 | `SimplePair` | x·y=k TEST pools (WPIT-USDC, WPIT-ETH) |
 | `Farm` | Gauges 70/20/10, harvest tax 1% |
 | `Stake` | First-loss WPIT |
 | `WPIT` | TEST token, cap, minter |
+| `oracle/ChainlinkOracle` | ETH/USD adapter — stale/band fail-closed |
+| `oracle/MedianOracle` | Median of 2–3 sources, quorum + deviation fail-closed (v1.1) |
 | `HOOK.md` | **Uni v4 hook SPEC** (Q1-05) — depth lens + dynamic fee, no deploy |
 
 No ERC-1155 series yet (Q1). The Uniswap v4 hook is **spec'd in [HOOK.md](./HOOK.md)** (Q1-05, no deploy); implementation is Q1-12.

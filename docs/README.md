@@ -12,6 +12,7 @@ Canonical copies for GitHub. In-app: `/plan`.
 | [FARM.md](./FARM.md) | Token + GTM |
 | [MM.md](./MM.md) | Head of quant |
 | [RISK.md](./RISK.md) | Head of quant + security |
+| [RUNBOOK-KEEPER-COMPROMISE.md](./RUNBOOK-KEEPER-COMPROMISE.md) | Security — operator-key compromise (audit B4) |
 | [Q1.md](./Q1.md) | Dev team — Sep–Nov 2026 |
 | [drills/](./drills/) | D1–D5 recorded |
 | [BUILD-NOTES.md](./BUILD-NOTES.md) | Append-only log |

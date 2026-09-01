@@ -411,8 +411,14 @@ import {
   RV_MIN_BARS,
 } from "./math.ts";
 
-/** A GBM series of `bars` bars at `barSec` spacing, known annual sigma. */
-function gbm(bars: number, barSec: number, sigma = TRUE_SIGMA, s0 = 4000) {
+/** A GBM series of `bars` bars at `barSec` spacing, known annual sigma.
+ *  Seeded (same LCG as `gbmPath` above): the "unbiased on a deep series"
+ *  assertion is a ±15% band on an estimate whose sampling noise is ~±9%, so
+ *  an UNSEEDED draw fails a few percent of runs — a flake, not a signal. A
+ *  fixed seed makes the test pin one representative draw; callers that need
+ *  independent draws (the dispersion comparison) pass their own seeds. */
+function gbm(bars: number, barSec: number, sigma = TRUE_SIGMA, s0 = 4000, seed = 0xc0ffee) {
+  const r = rng(seed);
   const out: { t: number; c: number }[] = [];
   let s = s0;
   const dt = barSec / (365.25 * 24 * 3600);
@@ -420,8 +426,8 @@ function gbm(bars: number, barSec: number, sigma = TRUE_SIGMA, s0 = 4000) {
   for (let i = 1; i < bars; i++) {
     let u = 0;
     let v = 0;
-    while (u === 0) u = Math.random();
-    while (v === 0) v = Math.random();
+    while (u === 0) u = r();
+    while (v === 0) v = r();
     const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
     s *= Math.exp(-0.5 * sigma * sigma * dt + sigma * Math.sqrt(dt) * z);
     out.push({ t: i * barSec * 1000, c: s });
@@ -510,8 +516,9 @@ describe("CANDLE_LIMITS — half-life is chosen from the history in hand", () =>
     const shallow: number[] = [];
     const deep: number[] = [];
     for (let i = 0; i < runs; i++) {
-      shallow.push(ewmaRvAdaptive(gbm(300, 60)).rv / TRUE_SIGMA);
-      deep.push(ewmaRvAdaptive(gbm(1000, 3600)).rv / TRUE_SIGMA);
+      // Distinct seeds per run — the dispersion claim needs independent draws.
+      shallow.push(ewmaRvAdaptive(gbm(300, 60, TRUE_SIGMA, 4000, 1_000 + i)).rv / TRUE_SIGMA);
+      deep.push(ewmaRvAdaptive(gbm(1000, 3600, TRUE_SIGMA, 4000, 50_000 + i)).rv / TRUE_SIGMA);
     }
     const sdDeep = sd(deep);
     const sdShallow = sd(shallow);
