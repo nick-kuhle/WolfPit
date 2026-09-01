@@ -1,6 +1,7 @@
 import { createFileRoute, Link, Outlet, redirect, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/shell";
+import { DevWalletControls } from "@/components/admin/dev-wallet-controls";
 import { Button } from "@/components/ui/button";
 import { adminLogout, adminWhoami, getTradingPolicy, setTradingPolicy } from "@/lib/admin/actions";
 import { deployTestBook, useAdmin, type ContractBook } from "@/lib/admin/config";
@@ -182,6 +183,9 @@ function AdminDesk({ user }: { user: string }) {
             )}
           </label>
         </section>
+
+        {/* Testnet only: renders null on Base mainnet (dev-controls.ts). */}
+        <DevWalletControls />
 
         <section className="mt-4 rounded-[var(--radius-lg)] border border-border bg-surface p-4 sm:p-5">
           <h2 className="text-sm font-medium">Vault cover</h2>
