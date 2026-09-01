@@ -16,6 +16,8 @@
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test:engine": "npx tsx --test src/lib/wolfpit/engine.test.ts src/lib/wolfpit/drills.test.ts src/lib/wolfpit/games.test.ts src/lib/wolfpit/store.test.ts src/lib/wolfpit/quant.test.ts",
     "test:forge": "forge test --root contracts",
+    "test:ssr": "node scripts/ssr-smoke.mjs",
+    "verify": "npx tsc --noEmit && eslint . && npm test && npm run build && npm run test:ssr",
     "test": "node --test scripts/*.test.mjs && npx tsx --test \"src/**/*.test.ts\"",
     "lint": "eslint .",
     "format": "prettier --write .",

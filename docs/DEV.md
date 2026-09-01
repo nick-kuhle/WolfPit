@@ -38,4 +38,13 @@ All bands in `src/lib/wolfpit/risk.ts` and [RISK.md](./RISK.md). If the hedge ca
 - `npx tsc --noEmit`
 - `npm run test:engine`
 - `forge test --root contracts` if Solidity changed
+- `npm run build && npm run test:ssr` — **boots the built server bundle and
+  fetches real routes.** On 2026-08-31 a commit passed tsc, eslint, 261 unit
+  tests and the build, then took every route to HTTP 500: a `createServerFn`
+  had landed in the root bundle chunk and the SSR entry threw
+  `createSsrRpc is not a function` on import. Nothing in the bar imported the
+  bundle the server actually runs. A build that compiles is not a build that
+  boots.
+
+`npm run verify` runs the whole bar in order.
 - No yield copy. No purple. No `hedgeLater()`.

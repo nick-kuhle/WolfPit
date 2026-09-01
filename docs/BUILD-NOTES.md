@@ -6,6 +6,46 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Sun, night, later) — I took the site down for one deploy
+
+Pushed phases 0-3. Every route on production returned **HTTP 500**. Operator
+noticed before I did.
+
+**What happened.** The phase 0 desk gate defined a `createServerFn` in
+`src/lib/wolfpit/desk-gate.ts` and `store.ts` imported it statically. `store.ts`
+is reachable from `__root.tsx`, so the server-function RPC shim was emitted into
+the ROOT bundle chunk, where it evaluated before the Start runtime that defines
+`createSsrRpc`. The SSR entry threw `createSsrRpc is not a function` **on
+import**, so nothing rendered - not a bad route, the whole server.
+
+**Why the bar missed it.** `tsc --noEmit`, `eslint`, 261 unit tests and
+`npm run build` all passed, and every one of them is blind to this: none
+imports the bundle the server actually runs. `npm run build` exiting 0 means
+the code compiled, not that the process can serve a request. I had a
+behavioural probe recipe on file for the production deployment and did not run
+its equivalent locally before pushing.
+
+**Response.** Reproduced locally against the built bundle, bisected (70f013c
+boots 200, 10f299d does not), reverted the single offending commit, verified
+the revert boots BEFORE pushing it, and confirmed prod back at 200.
+
+**Fix.** The gate is back, with the import deferred to call time
+(`await import("./desk-gate")` inside `serverGate`), which keeps the shim out
+of the root chunk. Verified end-to-end against the built bundle: with the env
+kill switch set, all four desks refuse; with the geo-fence set, futures,
+options and the race refuse while spot is allowed, exactly as documented.
+
+**Permanent guard.** `scripts/ssr-smoke.mjs` (`npm run test:ssr`) boots the
+built bundle and fetches `/`, `/trade`, `/admin`, `/admin/login`. Negative-
+controlled: restored the broken import, confirmed the smoke test fails with the
+original error, then restored the fix. Added to the PR bar in DEV.md, and
+`npm run verify` now runs the whole bar in order.
+
+**The lesson, stated plainly:** a green build is not a running server, and the
+only way to know a deploy boots is to boot it.
+
+---
+
 ## 2026-08-31 (Sun, night) — testnet launch, phases 0-3
 
 Four phases toward putting the desk on Base Sepolia. Details and the runbook:
