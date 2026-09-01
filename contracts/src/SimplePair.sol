@@ -45,6 +45,8 @@ contract SimplePair {
     error MinOut();
     error MinShares();
 
+    event OwnerSet(address indexed previous, address indexed next);
+
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
@@ -65,6 +67,19 @@ contract SimplePair {
         token1 = t1;
         feeBps = feeBps_;
         owner = msg.sender;
+    }
+
+    /// @notice Hand the fee switch to its intended holder.
+    ///
+    ///         The constructor sets `owner = msg.sender`, which during a
+    ///         `forge script` broadcast is the deploying key. Without this the
+    ///         pool's only privileged control stays with a key that was meant
+    ///         to be temporary. Zero is rejected: a zero owner would freeze
+    ///         `setFeeBps` forever (same rule as ChainlinkOracle).
+    function setOwner(address next) external onlyOwner {
+        if (next == address(0)) revert Zero();
+        emit OwnerSet(owner, next);
+        owner = next;
     }
 
     function setFeeBps(uint256 bps) external onlyOwner {
