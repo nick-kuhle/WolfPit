@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
+import { ModeProvider } from "@/lib/wolfpit/mode";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { PitAlerts } from "@/components/pit-alerts";
 import { SimLoop } from "@/components/sim-loop";
@@ -42,10 +43,12 @@ export const Route = createRootRoute({
       <body className="bg-bg text-fg">
         <PreviewHostBridge />
         <AuthProvider>
+          <ModeProvider>
           <WalletHydrate />
           <SimLoop />
           <PitAlerts />
           <Outlet />
+        </ModeProvider>
         </AuthProvider>
         <Scripts />
       </body>

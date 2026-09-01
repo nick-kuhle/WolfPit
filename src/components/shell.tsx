@@ -5,6 +5,7 @@ import { WolfMark } from "@/components/mark";
 import { cn } from "@/lib/utils";
 import { chainLabel, chainState } from "@/lib/wolfpit/chain";
 import { truncAddr, useWallet } from "@/lib/wallet/session";
+import { ModeBanner, ModeToggle } from "@/components/mode-toggle";
 
 export function BrandLockup({ className, markClass }: { className?: string; markClass?: string }) {
   return (
@@ -41,10 +42,12 @@ export function Shell({ children, desk: _desk }: { children: ReactNode; desk?: b
           <ChainChip />
         </span>
         <DesktopNav pathname={pathname} />
+        {/* App-wide sim/testnet/live selector — one source of truth (mode.tsx). */}
+        <ModeToggle className="ml-auto lg:ml-0" />
         <Link
           to="/profile"
           className={cn(
-            "ml-auto flex h-11 items-center font-mono text-[11px] lg:ml-1",
+            "flex h-11 items-center font-mono text-[11px] lg:ml-1",
             address ? "text-brass" : "text-muted",
             pathname === "/profile" && "text-brass",
           )}
@@ -52,6 +55,7 @@ export function Shell({ children, desk: _desk }: { children: ReactNode; desk?: b
           {address ? truncAddr(address) : "Connect"}
         </Link>
       </header>
+      <ModeBanner />
       <SimBanner />
       <div className={cn("min-h-0 flex-1 overflow-x-hidden", pathname.startsWith("/admin") ? "" : "pb-[calc(4.6rem+env(safe-area-inset-bottom))] lg:pb-0")}>{children}</div>
       {pathname.startsWith("/admin") ? null : <PitDock />}
