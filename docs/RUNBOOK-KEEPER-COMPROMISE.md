@@ -37,6 +37,20 @@ operator cannot be handed a new drain path quickly even by a rushed owner.
    Launch default is `0` (immediate) so the keeper's single-tx flow is
    unchanged until the owner arms it. (Distinct from `ADMIN_TIMELOCK`: that
    gates the owner's allowlist surface; this gates the operator's releases.)
+
+   **`setReleaseDelay` clears whatever is pending** (emitting `ReleaseVetoed`),
+   because arming a control must bind the situation you are arming it *in*.
+   While the delay is 0 a queued entry carries `eta = block.timestamp`; without
+   the clear, a hostile operator who pre-queued the whole book would still be
+   able to consume it in the same block the owner armed the timelock, and
+   *raising* a delay would leave the shorter clock running. After arming (or
+   re-arming), the operator simply re-queues under the new delay. Practical
+   consequence for the desk: **arm the delay first, then queue** — a legitimate
+   release in flight when the owner changes the delay is dropped and must be
+   re-queued. Regression tests:
+   `testArmingTheDelayClearsAPreQueuedRelease`,
+   `testRaisingTheDelayRebindsAPendingRelease`,
+   `testDisarmingClearsAndRestoresImmediateReleases`.
 2. **Monitor reconciliation floors** — the watcher knows what *should* be
    reserved. Run it with floors from the off-chain book:
 

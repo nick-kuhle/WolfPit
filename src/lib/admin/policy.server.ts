@@ -19,7 +19,7 @@
  * for display and to avoid round-trips on obvious cases, but it is a mirror,
  * never the source of truth.
  *
- * FAIL-CLOSED, AND WHY THAT DIFFERS FROM THE RATE LIMITER
+ * FAIL-CLOSED, AND WHERE THAT RULE STOPS
  *
  * `rate-limit.server.ts` deliberately fails OPEN: a DB hiccup must not take
  * down live swaps, and the cost is quota. That reasoning does not transfer. If
@@ -28,6 +28,41 @@
  * and then gets "store unavailable, request allowed" has been handed the worst
  * possible failure mode. The cost of failing closed is a few seconds of refused
  * orders; the cost of failing open is trading while paused.
+ *
+ * That rule has a precondition this module originally missed, and it cost the
+ * live desk an outage (2026-09-01): **failing closed only protects a switch
+ * that exists.** With no `DATABASE_URL` the app falls back to PGLite, an
+ * in-process Postgres whose `.wasm`/`.data` assets are NOT emitted into the
+ * Vercel function bundle. Reproduced against `.vercel/output`:
+ *
+ *   [db] PGLite bootstrap failed: Error: ENOENT: no such file or directory,
+ *        open '.../__server.func/_libs/pglite.data'
+ *
+ * So every `getPolicy()` threw, every quote was refused, and the desk showed
+ * "Trading policy unavailable" to every visitor — while protecting a pause that
+ * no one could ever have set, because there was no shared store to set it in.
+ *
+ * The rule is therefore scoped to a DECLARED store:
+ *
+ *   - `DATABASE_URL` set (or a runner injected by the caller) → a shared store
+ *     exists. An unreadable store REFUSES orders. Unchanged.
+ *   - the table does not exist yet (SQLSTATE 42P01) → the migration has not
+ *     run, so no policy has ever been written. Nothing to protect: fall back to
+ *     the env policy and log loudly.
+ *   - no `DATABASE_URL` → there is no shared policy store at all. Policy comes
+ *     from the environment (below). A PGLite failure degrades to that instead
+ *     of refusing every order.
+ *
+ * ENV KILL SWITCH (works with zero database)
+ *
+ *   WOLFPIT_TRADING_PAUSED=1          pause everything
+ *   WOLFPIT_TRADING_PAUSED_REASON=…   shown to customers after "Trading is paused."
+ *   WOLFPIT_GEOFENCE_US=1             gate futures / options / race betting
+ *
+ * Env and database compose as a UNION of restrictions: either source can
+ * impose a pause, neither can lift the other's. A deploy-time env pause cannot
+ * be cleared by someone with database access, and a database pause cannot be
+ * cleared by a redeploy.
  *
  * GEO DETERMINATION
  *
@@ -39,7 +74,7 @@
  * proxy that does not set `cf-ipcountry`, or every request will be refused.
  * That is the intended direction of failure.
  */
-import { getSql } from "../db";
+import { getSql, hasSharedDatabase } from "../db";
 import { clientIp, type QueryRunner } from "../auth/rate-limit.server";
 
 /** Re-exported so callers (and tests) can name the injected runner type. */
@@ -63,11 +98,63 @@ const EMPTY_DETAIL = {
 /** Thrown when a request must be refused by policy. Carries a user-safe message. */
 export class PolicyBlockedError extends Error {
   readonly code: "paused" | "geo" | "policy-unavailable";
-  constructor(code: PolicyBlockedError["code"], message: string) {
+  /** Underlying store error, kept so callers can classify it (e.g. 42P01). */
+  readonly reason?: unknown;
+  constructor(code: PolicyBlockedError["code"], message: string, reason?: unknown) {
     super(message);
     this.name = "PolicyBlockedError";
     this.code = code;
+    this.reason = reason;
   }
+}
+
+const UNAVAILABLE_MSG = "Trading policy unavailable. Orders are refused until it can be read.";
+
+/* ------------------------------------------------------------------ *
+ * Environment policy — the kill switch that needs no database
+ * ------------------------------------------------------------------ */
+
+function envValue(name: string): string | undefined {
+  const v = typeof process !== "undefined" ? process.env?.[name] : undefined;
+  return v && v.trim() ? v.trim() : undefined;
+}
+
+function envFlag(name: string): boolean {
+  const v = envValue(name)?.toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+export type EnvPolicy = { listingsPaused: boolean; geoFenceUs: boolean; reason: string };
+
+/**
+ * Policy imposed by the deployment environment. Read on every call rather than
+ * memoized: a serverless instance can be recycled with new env, and this is
+ * cheap.
+ */
+export function envPolicy(): EnvPolicy {
+  return {
+    listingsPaused: envFlag("WOLFPIT_TRADING_PAUSED"),
+    geoFenceUs: envFlag("WOLFPIT_GEOFENCE_US"),
+    reason: envValue("WOLFPIT_TRADING_PAUSED_REASON") ?? "",
+  };
+}
+
+/**
+ * Postgres `undefined_table` (42P01): the migration has not been applied, so
+ * no policy row can exist. Distinct from "the store is down", which is the
+ * case that must refuse orders.
+ */
+export function isMissingTableError(err: unknown): boolean {
+  const seen = new Set<unknown>();
+  let cur: unknown = err;
+  while (cur && typeof cur === "object" && !seen.has(cur)) {
+    seen.add(cur);
+    const e = cur as { code?: unknown; message?: unknown; reason?: unknown; cause?: unknown };
+    if (e.code === "42P01") return true;
+    if (typeof e.message === "string" && /relation .*wolfpit_policy.* does not exist/i.test(e.message)) return true;
+    cur = e.reason ?? e.cause;
+  }
+  return false;
 }
 
 /**
@@ -85,11 +172,10 @@ export async function readPolicy(run: QueryRunner): Promise<Policy> {
       "select key, value, reason, updated_by, updated_at from wolfpit_policy where key = any($1)",
       [["listingsPaused", "geoFenceUs"]],
     )) as never;
-  } catch {
-    throw new PolicyBlockedError(
-      "policy-unavailable",
-      "Trading policy unavailable. Orders are refused until it can be read.",
-    );
+  } catch (err) {
+    // Keep the underlying error: the caller distinguishes "table not created
+    // yet" (nothing to protect) from "store is down" (refuse orders).
+    throw new PolicyBlockedError("policy-unavailable", UNAVAILABLE_MSG, err);
   }
   const detail: Policy["detail"] = {
     listingsPaused: { ...EMPTY_DETAIL },
@@ -144,17 +230,163 @@ async function prodRun(): Promise<QueryRunner> {
     sql.query<T>(text, params)) as QueryRunner;
 }
 
-/** Read the live policy from the app database. */
+/** Read the live policy from the app database. Throws when it cannot be read. */
 export async function getPolicy(): Promise<Policy> {
   return readPolicy(await prodRun());
 }
 
-/** Admin write to the app database. */
+/* ------------------------------------------------------------------ *
+ * Resolution — database ∪ environment, with a scoped fail-closed rule
+ * ------------------------------------------------------------------ */
+
+export type PolicyResolution = {
+  policy: Policy;
+  /** Where the answer came from. */
+  source: "database" | "env" | "default";
+  /**
+   * Present when a store read failed but the request was still answerable —
+   * i.e. there was no declared shared store, or its table does not exist yet.
+   * Never present when a declared, existing store simply failed: that refuses.
+   */
+  degraded?: { code: "no-store" | "missing-table"; detail: string };
+};
+
+const warned = new Set<string>();
+function warnOnce(key: string, message: string) {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.error(message);
+}
+
+function envDetail(reason: string) {
+  return { reason, updatedBy: "env", updatedAt: "" };
+}
+
+function describe(err: unknown): string {
+  const m = err instanceof Error ? err.message : String(err);
+  return m.split("\n")[0]!.slice(0, 200);
+}
+
+/**
+ * Resolve the effective policy.
+ *
+ * @param opts.run            Injected runner (tests, or a caller that owns the
+ *                            connection). Supplying one DECLARES a store, so
+ *                            its failures fail closed.
+ * @param opts.storeDeclared  Override the "is there a shared store" answer.
+ *                            Defaults to `run != null || DATABASE_URL is set`.
+ */
+export async function resolvePolicy(
+  opts: { run?: QueryRunner; storeDeclared?: boolean; env?: EnvPolicy } = {},
+): Promise<PolicyResolution> {
+  const env = opts.env ?? envPolicy();
+  const declared = opts.storeDeclared ?? (Boolean(opts.run) || hasSharedDatabase());
+
+  let stored: Policy | null = null;
+  let degraded: PolicyResolution["degraded"];
+  try {
+    stored = await readPolicy(opts.run ?? (await prodRun()));
+  } catch (err) {
+    const missingTable = isMissingTableError(err);
+    if (declared && !missingTable) {
+      // A shared store exists and is unreadable: we cannot prove trading is
+      // allowed, so we do not allow it.
+      throw err instanceof PolicyBlockedError
+        ? err
+        : new PolicyBlockedError("policy-unavailable", UNAVAILABLE_MSG, err);
+    }
+    degraded = { code: missingTable ? "missing-table" : "no-store", detail: describe(err) };
+    warnOnce(
+      degraded.code,
+      missingTable
+        ? `[policy] wolfpit_policy is missing — run migrations/0004_wolfpit_policy.sql. ` +
+            `Falling back to the environment policy. (${degraded.detail})`
+        : `[policy] no shared policy store (DATABASE_URL unset) and the local fallback is ` +
+            `unavailable. Using the environment policy; set DATABASE_URL to make the admin ` +
+            `pause switch binding. (${degraded.detail})`,
+    );
+  }
+
+  // Union of restrictions: either source can impose, neither can lift.
+  const listingsPaused = (stored?.listingsPaused ?? false) || env.listingsPaused;
+  const geoFenceUs = (stored?.geoFenceUs ?? false) || env.geoFenceUs;
+  const detail: Policy["detail"] = {
+    listingsPaused:
+      env.listingsPaused && !stored?.listingsPaused
+        ? envDetail(env.reason)
+        : (stored?.detail.listingsPaused ?? { ...EMPTY_DETAIL }),
+    geoFenceUs:
+      env.geoFenceUs && !stored?.geoFenceUs
+        ? envDetail("")
+        : (stored?.detail.geoFenceUs ?? { ...EMPTY_DETAIL }),
+  };
+
+  const source: PolicyResolution["source"] = stored
+    ? "database"
+    : env.listingsPaused || env.geoFenceUs
+      ? "env"
+      : "default";
+  return { policy: { listingsPaused, geoFenceUs, detail }, source, degraded };
+}
+
+/**
+ * Operator-facing status for the admin page. Never throws: an admin must be
+ * able to SEE that the switch is not backed by a shared store — the whole
+ * point of WP-07 was that a control nobody can rely on is not a control.
+ */
+export async function policyStatus(): Promise<{
+  policy: Policy;
+  source: PolicyResolution["source"] | "unavailable";
+  degraded?: PolicyResolution["degraded"];
+  /** True when a pause written here would bind every serverless instance. */
+  shared: boolean;
+  /** True when the admin toggle can persist a change. */
+  writable: boolean;
+  error?: string;
+}> {
+  const shared = hasSharedDatabase();
+  try {
+    const r = await resolvePolicy();
+    return { ...r, shared, writable: shared || !isProduction() };
+  } catch (err) {
+    const env = envPolicy();
+    return {
+      policy: {
+        listingsPaused: env.listingsPaused,
+        geoFenceUs: env.geoFenceUs,
+        detail: { listingsPaused: envDetail(env.reason), geoFenceUs: envDetail("") },
+      },
+      source: "unavailable",
+      shared,
+      writable: shared || !isProduction(),
+      error: err instanceof Error ? err.message : UNAVAILABLE_MSG,
+    };
+  }
+}
+
+function isProduction(): boolean {
+  return typeof process !== "undefined" && process.env?.NODE_ENV === "production";
+}
+
+/**
+ * Admin write to the app database.
+ *
+ * Refuses in production when no shared store is declared: writing to the
+ * per-instance PGLite fallback would report success, bind one lambda, and
+ * evaporate — exactly the "pause that paused nothing" failure WP-07 exists to
+ * prevent. Better to tell the operator the truth and point at the env switch.
+ */
 export async function setPolicy(
   key: PolicyKey,
   value: boolean,
   opts: { reason?: string; by?: string } = {},
 ): Promise<Policy> {
+  if (!hasSharedDatabase() && isProduction()) {
+    throw new Error(
+      "No shared policy store: set DATABASE_URL so a pause binds every instance. " +
+        "Until then use WOLFPIT_TRADING_PAUSED=1 (env) as the kill switch.",
+    );
+  }
   return writePolicy(await prodRun(), key, value, opts);
 }
 
@@ -184,19 +416,17 @@ export type GateResult =
 export async function checkTradingAllowed(opts: {
   products?: string[];
   headers?: { get(name: string): string | null } | null;
-  /** Injected for tests; defaults to the app database. */
+  /** Injected for tests; supplying one declares a store (see resolvePolicy). */
   run?: QueryRunner;
+  /** Override the store-declared decision (tests / callers that know better). */
+  storeDeclared?: boolean;
 }): Promise<GateResult> {
   let policy: Policy;
   try {
-    policy = opts.run ? await readPolicy(opts.run) : await getPolicy();
+    policy = (await resolvePolicy({ run: opts.run, storeDeclared: opts.storeDeclared })).policy;
   } catch (err) {
     if (err instanceof PolicyBlockedError) return { ok: false, code: err.code, error: err.message };
-    return {
-      ok: false,
-      code: "policy-unavailable",
-      error: "Trading policy unavailable. Orders are refused until it can be read.",
-    };
+    return { ok: false, code: "policy-unavailable", error: UNAVAILABLE_MSG };
   }
   if (policy.listingsPaused) {
     return {
@@ -231,6 +461,7 @@ export async function assertTradingAllowed(opts: {
   products?: string[];
   headers?: { get(name: string): string | null } | null;
   run?: QueryRunner;
+  storeDeclared?: boolean;
 }): Promise<void> {
   const r = await checkTradingAllowed(opts);
   if (!r.ok) throw new PolicyBlockedError(r.code, r.error);

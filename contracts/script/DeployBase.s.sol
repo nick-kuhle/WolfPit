@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {DealerVault, IERC20, IOracle} from "../src/DealerVault.sol";
 import {ChainlinkOracle} from "../src/oracle/ChainlinkOracle.sol";
+import {MedianOracle} from "../src/oracle/MedianOracle.sol";
 
 interface Vm {
     function envAddress(string calldata key) external returns (address);
@@ -15,6 +16,7 @@ interface Vm {
 
 interface Console {
     function log(string calldata label, address value) external;
+    function log(string calldata message) external;
 }
 
 /// @dev forge-std-free bindings.
@@ -31,9 +33,21 @@ Console constant console = Console(0x000000000000000000636F6e736F6c652e6c6f67);
  *     BASE_ORACLE_AGG   Chainlink ETH/USD aggregator on Base (data.chain.link → Base)
  *     BASE_OWNER        multisig that will own the vault
  *     BASE_OPERATOR     keeper hot key (risk accounting + exec swaps)
+ *   Optional — a SECOND price source, strongly recommended (v1.1 hardening):
+ *     BASE_ORACLE_AGG_2 a second Chainlink-shaped ETH/USD aggregator. When set,
+ *                       the vault is deployed behind `MedianOracle` instead of a
+ *                       single feed, so no ONE source can mark the book: two
+ *                       sources must agree inside `maxDevBps` or the oracle
+ *                       returns 0 and the vault halts risk.
+ *     BASE_ORACLE_SRC_3 an optional third source that ALREADY exposes
+ *                       `ethUsdc()` (e.g. a Uni v3 TWAP adapter). With three
+ *                       sources the median is taken, so one liar cannot move it.
  *   Defaults (canonical, verify before broadcast):
  *     BASE_USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (native USDC)
  *     BASE_WETH = 0x4200000000000000000000000000000000000006 (canonical WETH)
+ *
+ *   Oracle ownership is handed to BASE_OWNER before the script exits — the
+ *   deploying EOA must not keep `setBand` on a live price feed.
  *
  *   forge script contracts/script/DeployBase.s.sol --rpc-url $BASE_RPC_URL \
  *     --broadcast --verify --etherscan-api-key $ETHERSCAN_API_KEY
@@ -56,17 +70,53 @@ contract DeployBase {
         address operator = vm.envAddress("BASE_OPERATOR");
         address usdc = vm.envOr("BASE_USDC", NATIVE_USDC);
         address weth = vm.envOr("BASE_WETH", CANONICAL_WETH);
+        address agg2 = vm.envOr("BASE_ORACLE_AGG_2", address(0));
+        address src3 = vm.envOr("BASE_ORACLE_SRC_3", address(0));
 
         vm.startBroadcast();
         ChainlinkOracle oracle = new ChainlinkOracle(agg);
-        DealerVault vault =
-            new DealerVault(IERC20(usdc), IERC20(weth), IOracle(address(oracle)), owner, operator, true);
+
+        // One feed = one point of failure that marks the whole book. When a
+        // second source is configured, the vault reads the MEDIAN instead: two
+        // sources must agree inside the deviation band or the oracle returns 0
+        // and DealerVault halts risk-taking (`spot()` reverts BadOracle).
+        IOracle vaultOracle = IOracle(address(oracle));
+        ChainlinkOracle oracle2;
+        MedianOracle median;
+        if (agg2 != address(0)) {
+            oracle2 = new ChainlinkOracle(agg2);
+            median = new MedianOracle(address(oracle), address(oracle2), src3);
+            vaultOracle = IOracle(address(median));
+        }
+
+        DealerVault vault = new DealerVault(IERC20(usdc), IERC20(weth), vaultOracle, owner, operator, true);
+
+        // Hand every oracle admin to the multisig. `ChainlinkOracle`/
+        // `MedianOracle` set `owner = msg.sender` in their constructors — which
+        // under `startBroadcast` is the DEPLOYING EOA — so skipping this would
+        // leave a hot key holding `setBand` / `setMaxDevBps` on a live feed.
+        // Unconditional: when BASE_OWNER already is the broadcaster this is a
+        // no-op transfer to itself, never a silent skip.
+        oracle.setOwner(owner);
+        if (address(oracle2) != address(0)) oracle2.setOwner(owner);
+        if (address(median) != address(0)) median.setOwner(owner);
         vm.stopBroadcast();
 
         vm.label(address(oracle), "ChainlinkOracle");
         vm.label(address(vault), "DealerVault");
         // Terminal summary — copy into the desk config (VITE_VAULT etc.).
         console.log("oracle", address(oracle));
+        if (address(median) != address(0)) {
+            vm.label(address(oracle2), "ChainlinkOracle2");
+            vm.label(address(median), "MedianOracle");
+            console.log("oracle2", address(oracle2));
+            console.log("median (vault reads this)", address(median));
+            if (src3 != address(0)) console.log("source3", src3);
+        } else {
+            console.log(
+                "WARNING: single price source. Set BASE_ORACLE_AGG_2 to deploy behind MedianOracle before taking real risk."
+            );
+        }
         console.log("vault", address(vault));
         console.log("usdc", usdc);
         console.log("weth", weth);

@@ -758,10 +758,19 @@ contract DealerVault {
     ///         out before `releaseCall`/`releasePut` succeed; the OWNER
     ///         bypasses the queue (multisig = trust root, and an emergency
     ///         full unwind must never be rate-limited for the owner).
+    ///
+    ///         Changing the delay CLEARS the pending queue. Without that, the
+    ///         control does not bind at the one moment it matters: entries
+    ///         queued while the delay was 0 carry `eta = block.timestamp`, so a
+    ///         compromised operator could pre-queue the whole book and consume
+    ///         it in the same block the owner armed the timelock — and raising
+    ///         an existing delay would leave the shorter, already-running clock
+    ///         in force. The operator simply re-queues under the new delay.
     function setReleaseDelay(uint256 d) external onlyOwner {
         if (d > MAX_RELEASE_DELAY) revert DelayTooLong();
         emit ReleaseDelaySet(releaseDelay, d);
         releaseDelay = d;
+        _clearReleaseQueue();
     }
 
     /// @notice Queue an ETH-side release. Re-queueing REPLACES the pending
@@ -785,6 +794,13 @@ contract DealerVault {
     /// @notice Owner cancels everything pending in the release queue — the
     ///         veto half of the timelock (see the keeper-compromise runbook).
     function vetoRelease() external onlyOwner {
+        _clearReleaseQueue();
+    }
+
+    /// @dev Drop every pending release. Emits only when something was pending,
+    ///      so `ReleaseVetoed` stays a signal worth alerting on.
+    function _clearReleaseQueue() internal {
+        if (queuedReleaseEth == 0 && queuedReleaseUsdc == 0) return;
         emit ReleaseVetoed(queuedReleaseEth, queuedReleaseUsdc);
         queuedReleaseEth = 0;
         queuedReleaseEthEta = 0;

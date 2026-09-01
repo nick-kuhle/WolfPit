@@ -44,11 +44,21 @@ function AdminDesk({ user }: { user: string }) {
   });
   const [policyBusy, setPolicyBusy] = useState(false);
   const [policyUnavailable, setPolicyUnavailable] = useState(false);
+  /** Set when the switch is NOT backed by a store shared across instances. */
+  const [policyNotice, setPolicyNotice] = useState<string | null>(null);
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const refreshPolicy = useCallback(async () => {
     const r = await getTradingPolicy();
     if (r.ok) {
       setPolicy(r.policy);
       setPolicyUnavailable(false);
+      setPolicyNotice(
+        r.shared
+          ? null
+          : r.degraded?.code === "missing-table"
+            ? "wolfpit_policy is missing — apply migrations/0004_wolfpit_policy.sql. Until then only the WOLFPIT_TRADING_PAUSED env switch binds."
+            : "No shared policy store (DATABASE_URL unset). A pause set here would bind one server instance and be lost on the next request — set DATABASE_URL, or use WOLFPIT_TRADING_PAUSED=1 as the kill switch.",
+      );
       // Keep the client mirror in step so non-order UI reflects reality.
       a.setPaused(r.policy.listingsPaused);
       a.setGeo(r.policy.geoFenceUs);
@@ -62,12 +72,15 @@ function AdminDesk({ user }: { user: string }) {
   const flip = useCallback(
     async (key: "listingsPaused" | "geoFenceUs", value: boolean) => {
       setPolicyBusy(true);
+      setPolicyError(null);
       try {
         const r = await setTradingPolicy({ data: { key, value, reason: "" } });
         if (r.ok) {
           setPolicy(r.policy);
           a.setPaused(r.policy.listingsPaused);
           a.setGeo(r.policy.geoFenceUs);
+        } else {
+          setPolicyError(r.error);
         }
       } finally {
         setPolicyBusy(false);
@@ -126,6 +139,16 @@ function AdminDesk({ user }: { user: string }) {
             <p className="mt-3 rounded-[var(--radius-md)] border border-border bg-danger/10 p-2 text-xs">
               Policy store unavailable — orders are being refused, and these
               switches cannot be changed until it can be read.
+            </p>
+          )}
+          {policyNotice && (
+            <p className="mt-3 rounded-[var(--radius-md)] border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
+              {policyNotice}
+            </p>
+          )}
+          {policyError && (
+            <p className="mt-3 rounded-[var(--radius-md)] border border-border bg-danger/10 p-2 text-xs">
+              {policyError}
             </p>
           )}
           <label className="mt-4 flex min-h-11 items-center gap-3 text-sm">

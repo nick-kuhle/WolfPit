@@ -22,11 +22,17 @@ import { PGlite } from "@electric-sql/pglite";
 import {
   PolicyBlockedError,
   checkTradingAllowed,
+  envPolicy,
+  isMissingTableError,
   readPolicy,
   requestCountry,
+  resolvePolicy,
   writePolicy,
   type QueryRunner,
 } from "./policy.server";
+
+/** No environment policy — the default deployment shape. */
+const NO_ENV = { listingsPaused: false, geoFenceUs: false, reason: "" };
 
 let pg: PGlite | null = null;
 async function getPg(): Promise<PGlite> {
@@ -187,3 +193,117 @@ test("a write upserts rather than inserting a second row", async () => {
   assert.equal(p.geoFenceUs, false, "latest write wins");
   assert.equal(p.detail.geoFenceUs.reason, "second");
 });
+
+/* ------------------------------------------------------------------ *
+ * 2026-09-01 outage: the fail-closed rule needs a store to protect
+ *
+ * With no DATABASE_URL the app falls back to PGLite, whose .wasm/.data assets
+ * are not emitted into the Vercel function bundle. Reproduced against
+ * .vercel/output:
+ *   [db] PGLite bootstrap failed: ENOENT ... '_libs/pglite.data'
+ * Every getPolicy() threw, so the gate refused every quote — guarding a pause
+ * that could not exist, because there was no shared store to set it in.
+ * ------------------------------------------------------------------ */
+
+/** A runner whose table has never been created (migration not applied). */
+const missingTableRun = (async () => {
+  const err = new Error('relation "wolfpit_policy" does not exist') as Error & { code: string };
+  err.code = "42P01";
+  throw err;
+}) as unknown as QueryRunner;
+
+test("no declared store + dead fallback: trade, do not refuse", async () => {
+  const r = await checkTradingAllowed({ products: ["spot"], run: brokenRun, storeDeclared: false });
+  assert.equal(r.ok, true, "nothing to protect: no store means no pause could have been set");
+  const res = await resolvePolicy({ run: brokenRun, storeDeclared: false, env: NO_ENV });
+  assert.equal(res.degraded?.code, "no-store");
+  assert.equal(res.source, "default");
+  assert.equal(res.policy.listingsPaused, false);
+});
+
+test("a declared store that is DOWN still refuses (rule unchanged)", async () => {
+  const r = await checkTradingAllowed({ products: ["spot"], run: brokenRun, storeDeclared: true });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.code, "policy-unavailable");
+});
+
+test("a declared store whose table does not exist yet degrades, not refuses", async () => {
+  // 42P01 is unambiguous: the migration has not run, so no policy row exists.
+  assert.equal(isMissingTableError(await capture(() => readPolicy(missingTableRun))), true);
+  const r = await checkTradingAllowed({ products: ["spot"], run: missingTableRun, storeDeclared: true });
+  assert.equal(r.ok, true);
+  const res = await resolvePolicy({ run: missingTableRun, storeDeclared: true, env: NO_ENV });
+  assert.equal(res.degraded?.code, "missing-table");
+});
+
+test("the env kill switch pauses with no database at all", async () => {
+  const env = { listingsPaused: true, geoFenceUs: false, reason: "incident 42" };
+  const res = await resolvePolicy({ run: brokenRun, storeDeclared: false, env });
+  assert.equal(res.policy.listingsPaused, true);
+  assert.equal(res.source, "env");
+  assert.equal(res.policy.detail.listingsPaused.updatedBy, "env");
+  assert.equal(res.policy.detail.listingsPaused.reason, "incident 42");
+});
+
+test("env and database compose as a union of restrictions", async () => {
+  const run = await makeRun();
+  // Database says trade; env says paused → paused. A DB write cannot lift an
+  // env pause…
+  await writePolicy(run, "listingsPaused", false, { reason: "resumed" });
+  let res = await resolvePolicy({
+    run,
+    storeDeclared: true,
+    env: { listingsPaused: true, geoFenceUs: false, reason: "deploy freeze" },
+  });
+  assert.equal(res.policy.listingsPaused, true, "env pause survives a DB 'false'");
+  // …and an unset env cannot lift a DB pause.
+  await writePolicy(run, "listingsPaused", true, { reason: "oracle outage" });
+  res = await resolvePolicy({ run, storeDeclared: true, env: NO_ENV });
+  assert.equal(res.policy.listingsPaused, true, "DB pause survives an unset env");
+  assert.equal(res.source, "database");
+  // The geo-fence composes the same way.
+  res = await resolvePolicy({
+    run,
+    storeDeclared: true,
+    env: { listingsPaused: false, geoFenceUs: true, reason: "" },
+  });
+  assert.equal(res.policy.geoFenceUs, true);
+});
+
+test("envPolicy reads the documented variables", async () => {
+  const prev = { ...process.env };
+  try {
+    process.env.WOLFPIT_TRADING_PAUSED = "1";
+    process.env.WOLFPIT_TRADING_PAUSED_REASON = "maintenance window";
+    process.env.WOLFPIT_GEOFENCE_US = "true";
+    let e = envPolicy();
+    assert.equal(e.listingsPaused, true);
+    assert.equal(e.geoFenceUs, true);
+    assert.equal(e.reason, "maintenance window");
+    process.env.WOLFPIT_TRADING_PAUSED = "0";
+    process.env.WOLFPIT_GEOFENCE_US = "";
+    e = envPolicy();
+    assert.equal(e.listingsPaused, false, "0 is off, not 'a non-empty string'");
+    assert.equal(e.geoFenceUs, false);
+  } finally {
+    process.env = prev;
+  }
+});
+
+test("isMissingTableError does not swallow real outages", () => {
+  assert.equal(isMissingTableError(new Error("connection refused")), false);
+  assert.equal(isMissingTableError(new Error("timeout")), false);
+  const permission = new Error("permission denied for table wolfpit_policy") as Error & { code: string };
+  permission.code = "42501";
+  assert.equal(isMissingTableError(permission), false, "permission denied must still fail closed");
+});
+
+/** Run `fn`, returning whatever it threw (for classifying wrapped errors). */
+async function capture(fn: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await fn();
+    return null;
+  } catch (err) {
+    return err;
+  }
+}

@@ -837,6 +837,74 @@ contract DealerVaultTest {
         require(!ok, "queue beyond reserved book rejected");
     }
 
+    /// Review of 819c255: arming the timelock must BIND what is already
+    ///        pending. A release queued while the delay was 0 carries
+    ///        `eta = block.timestamp`, so before `_clearReleaseQueue()` a
+    ///        compromised operator could pre-queue the whole book and drain it
+    ///        in the very block the owner armed the control.
+    function testArmingTheDelayClearsAPreQueuedRelease() public {
+        address OP = address(0x0B5);
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(10 ether);
+        vault.setOperator(OP);
+        // Launch default: delay 0. The hostile key pre-queues the entire book.
+        vm.prank(OP);
+        vault.queueReleaseCall(10 ether);
+        require(vault.queuedReleaseEthEta() == block.timestamp, "eta is now while the delay is 0");
+        // Owner responds to the incident by arming the timelock.
+        vault.setReleaseDelay(1 days);
+        require(vault.queuedReleaseEth() == 0, "arming clears the pending entry");
+        require(vault.queuedReleaseEthEta() == 0, "and its eta");
+        vm.prank(OP);
+        (bool ok, bytes memory why) = address(vault).call(abi.encodeWithSelector(vault.releaseCall.selector, 10 ether));
+        require(!ok, "pre-queued release must not survive arming");
+        bytes4 sel;
+        assembly {
+            sel := mload(add(why, 32))
+        }
+        require(sel == DealerVault.ReleaseNotReady.selector, "explicit ReleaseNotReady");
+        require(vault.reservedEth() == 10 ether, "book intact");
+        // The operator can re-queue, and now waits out the FULL new delay.
+        vm.prank(OP);
+        vault.queueReleaseCall(10 ether);
+        require(vault.queuedReleaseEthEta() == block.timestamp + 1 days, "clock runs under the new delay");
+    }
+
+    /// Raising an existing delay must restart the clock too — otherwise the
+    ///        pending entry keeps its old, shorter eta.
+    function testRaisingTheDelayRebindsAPendingRelease() public {
+        address OP = address(0x0B5);
+        vault.creditInsurance(20_000e6);
+        vault.writePut(1 ether, 4_000e6); // locks 4_000 USDC
+        vault.setOperator(OP);
+        vault.setReleaseDelay(300);
+        vm.prank(OP);
+        vault.queueReleasePut(4_000e6);
+        vault.setReleaseDelay(1 days); // raise it
+        require(vault.queuedReleaseUsdc() == 0, "raising the delay clears the pending entry");
+        vm.warp(block.timestamp + 301); // only the OLD delay has elapsed
+        vm.prank(OP);
+        (bool ok,) = address(vault).call(abi.encodeWithSelector(vault.releasePut.selector, 4_000e6));
+        require(!ok, "the old, shorter clock must not still govern");
+        require(vault.reservedUsdc() == 4_000e6, "cover intact");
+    }
+
+    /// Disarming (back to 0) also clears, and releases go back to immediate.
+    function testDisarmingClearsAndRestoresImmediateReleases() public {
+        address OP = address(0x0B5);
+        vault.creditInsurance(20_000e6);
+        vault.writeCall(5 ether);
+        vault.setOperator(OP);
+        vault.setReleaseDelay(300);
+        vm.prank(OP);
+        vault.queueReleaseCall(5 ether);
+        vault.setReleaseDelay(0);
+        require(vault.queuedReleaseEth() == 0, "queue cleared on disarm");
+        vm.prank(OP);
+        vault.releaseCall(5 ether); // delay 0: no queue needed
+        require(vault.reservedEth() == 0, "immediate again");
+    }
+
     // ------------------------------------------------------------ B6: WPIT insurance conversion
 
     /// B6 (audit): `insuranceWpit` was dead value — credited by slashes and

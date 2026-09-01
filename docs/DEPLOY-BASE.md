@@ -73,6 +73,10 @@ export BASE_RPC_URL=https://mainnet.base.org
 export BASE_ORACLE_AGG=0x...        # from data.chain.link, day-of
 export BASE_OWNER=0x...             # multisig
 export BASE_OPERATOR=0x...          # keeper hot key
+# Second price source — SET THIS BEFORE TAKING REAL RISK. When present the
+# script deploys MedianOracle and the vault reads that instead of one feed:
+export BASE_ORACLE_AGG_2=0x...      # a second Chainlink-shaped ETH/USD aggregator
+# export BASE_ORACLE_SRC_3=0x...    # optional third source, already ethUsdc()-shaped (e.g. a v3 TWAP adapter)
 # export BASE_ALLOW_ANY_CHAIN=1    # ONLY for Sepolia dry-runs; mainnet script refuses non-8453
 
 forge script script/DeployBase.s.sol \
@@ -80,7 +84,29 @@ forge script script/DeployBase.s.sol \
   --verify --etherscan-api-key $ETHERSCAN_API_KEY
 ```
 
-Terminal prints `oracle=`, `vault=`, `usdc=`, `weth=`. Record them.
+Terminal prints `oracle=`, `vault=`, `usdc=`, `weth=`. Record them. With
+`BASE_ORACLE_AGG_2` set it also prints `oracle2=` and `median (vault reads
+this)=` — the median is the address the vault marks against, so that is the one
+to record as "the oracle". With it unset the script prints a WARNING: the book
+is then marked by a single feed, and any one bad round marks the whole book.
+
+### Oracle trust, and what the script now does about it
+
+`ChainlinkOracle` and `MedianOracle` both set `owner = msg.sender` in their
+constructors — the deploying EOA. The script now calls `setOwner(BASE_OWNER)` on
+every oracle it deploys before it exits, so the hot deploy key does not keep
+`setBand` / `setMaxDevBps` on a live price feed. Verify after deploy:
+
+```bash
+cast call <median> 'owner()(address)' --rpc-url $BASE_RPC_URL   # == BASE_OWNER
+cast call <oracle> 'owner()(address)' --rpc-url $BASE_RPC_URL   # == BASE_OWNER
+```
+
+Note that `DealerVault.setOracle` is owner-callable and takes effect
+IMMEDIATELY — it is not behind the 2-day `ADMIN_TIMELOCK`. That is deliberate
+(an oracle outage must be fixable in one multisig tx) but it means the owner
+multisig is the whole of the price-integrity story. Treat its signer set as a
+production secret.
 
 **Immediately after deploy (from the OWNER multisig):**
 

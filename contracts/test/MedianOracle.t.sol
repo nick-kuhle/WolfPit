@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {MedianOracle} from "../src/oracle/MedianOracle.sol";
 import {ChainlinkOracle} from "../src/oracle/ChainlinkOracle.sol";
 import {MockOracle} from "../src/mocks/MockOracle.sol";
+import {MockERC20} from "../src/mocks/MockERC20.sol";
+import {DealerVault, IERC20, IOracle} from "../src/DealerVault.sol";
 
 /// @notice Minimal Chainlink aggregator stub for the adapter's owner guard.
 contract MockAgg {
@@ -110,5 +112,53 @@ contract MedianOracleTest {
         require(!ok, "zero owner rejected");
         o.setOwner(address(0xB0B));
         require(o.owner() == address(0xB0B), "handover still works");
+    }
+}
+
+/// @notice The deploy path this hardening is FOR: a DealerVault reading the
+///         median instead of one feed (see script/DeployBase.s.sol, which now
+///         deploys MedianOracle whenever BASE_ORACLE_AGG_2 is set). Before this
+///         wiring the contract existed but nothing on the Base launch path used
+///         it, so a single source still marked the whole book.
+contract MedianOracleVaultWiringTest {
+    MockERC20 usdc;
+    MockERC20 weth;
+    MockOracle a;
+    MockOracle b;
+    MedianOracle median;
+    DealerVault vault;
+
+    function setUp() public {
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        a = new MockOracle(4_000e6);
+        b = new MockOracle(4_010e6);
+        median = new MedianOracle(address(a), address(b), address(0));
+        vault = new DealerVault(
+            IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(median)), address(this), address(this), true
+        );
+        usdc.mint(address(this), 1_000_000e6);
+        weth.mint(address(this), 100 ether);
+        usdc.approve(address(vault), type(uint256).max);
+        weth.approve(address(vault), type(uint256).max);
+    }
+
+    function testVaultMarksOnTheMedianMidpoint() public view {
+        require(vault.spot() == 4_005e6, "vault prices off the two-source midpoint");
+    }
+
+    function testOneRoguesSourceCannotMarkTheBook() public {
+        // A single source printing 10x no longer marks anything: the pair
+        // disagrees beyond maxDevBps, the median returns 0, and the vault's
+        // spot() reverts BadOracle rather than accepting a fantasy price.
+        a.set(40_000e6);
+        (bool ok,) = address(vault).call(abi.encodeWithSelector(vault.spot.selector));
+        require(!ok, "disagreement must halt marking, not average into a lie");
+        // Deposits mark through spot() too, so they halt with it.
+        (ok,) = address(vault).call(abi.encodeWithSelector(vault.deposit.selector, uint256(1 ether), uint256(0)));
+        require(!ok, "no deposit may be priced by a disputed oracle");
+        // Back in band: the desk resumes on its own, no admin action needed.
+        a.set(4_020e6);
+        require(vault.spot() == 4_015e6, "resumes once the sources agree again");
     }
 }

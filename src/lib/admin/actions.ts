@@ -75,18 +75,21 @@ export const adminWhoami = createServerFn({ method: "GET" }).handler(async () =>
  * mirrors what it reads back.
  */
 export const getTradingPolicy = createServerFn({ method: "GET" }).handler(async () => {
-  const { getPolicy, PolicyBlockedError } = await import("./policy.server");
-  try {
-    const policy = await getPolicy();
-    return { ok: true as const, policy };
-  } catch (err) {
-    if (err instanceof PolicyBlockedError) {
-      // Report the store being down rather than silently showing "unpaused":
-      // an operator must be able to see that the control is not readable.
-      return { ok: false as const, error: err.message, unavailable: true as const };
-    }
-    throw err;
+  const { policyStatus } = await import("./policy.server");
+  // policyStatus never throws: the operator must be able to SEE the state of
+  // the control, including "there is no shared store behind it".
+  const s = await policyStatus();
+  if (s.source === "unavailable") {
+    return { ok: false as const, error: s.error ?? "Policy store unavailable.", unavailable: true as const };
   }
+  return {
+    ok: true as const,
+    policy: s.policy,
+    source: s.source,
+    shared: s.shared,
+    writable: s.writable,
+    degraded: s.degraded ?? null,
+  };
 });
 
 export const setTradingPolicy = createServerFn({ method: "POST" })
@@ -112,6 +115,14 @@ export const setTradingPolicy = createServerFn({ method: "POST" })
       const policy = await setPolicy(data.key, data.value, { reason: data.reason, by });
       return { ok: true as const, policy };
     } catch (err) {
-      return { ok: false as const, error: "Policy store unavailable; change not applied." };
+      // Surface WHY: "no shared store" is an operator action item (set
+      // DATABASE_URL / use the env kill switch), not a transient blip.
+      const detail = err instanceof Error ? err.message : "";
+      return {
+        ok: false as const,
+        error: detail.startsWith("No shared policy store")
+          ? detail
+          : "Policy store unavailable; change not applied.",
+      };
     }
   });

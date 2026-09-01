@@ -19,6 +19,29 @@ const databaseUrl =
 const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
 
 /**
+ * Is a SHARED database declared for this deployment?
+ *
+ * This is not the same question as "does `getSql()` work". PGLite is a
+ * per-process, in-memory Postgres: it works beautifully in dev and in the live
+ * preview, and in a serverless deployment it is either absent (its `.wasm` /
+ * `.data` assets are not emitted into the function bundle — see the guard at
+ * the bottom of this file) or, worse, present but per-instance, so anything
+ * written to it binds exactly one lambda until that lambda is recycled.
+ *
+ * Any feature whose CORRECTNESS depends on every instance seeing the same row
+ * — the trading pause, the geo-fence — must ask this, not just call `getSql()`.
+ * See src/lib/admin/policy.server.ts.
+ */
+export function hasSharedDatabase(): boolean {
+  return Boolean(databaseUrl);
+}
+
+/** Which backend is active: "neon" (shared) or "pglite" (per-process). */
+export function databaseBackend(): DbSource {
+  return dbSource;
+}
+
+/**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
  * tagged-template and `.query()` forms resolve to an array of row objects:
  *

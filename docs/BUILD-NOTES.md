@@ -6,6 +6,86 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Sun) — PROD OUTAGE: every quote refused. Cause, fix, and two follow-ups
+
+**Symptom.** Live app returned "Trading policy unavailable. Orders are refused
+until it can be read." on every `spotQuote`. Nobody had paused anything.
+
+**Cause — reproduced, not guessed.** Built the real Vercel bundle and imported
+the bundled db chunk directly (`.vercel/output/functions/__server.func/_ssr/db-*.mjs`):
+
+```
+[db] PGLite bootstrap failed: Error: ENOENT: no such file or directory,
+  open '.../__server.func/_libs/pglite.data'
+```
+
+The deployment has no `DATABASE_URL`, so `getSql()` falls back to PGLite; the
+bundler emits pglite's 752 KB of JS but **not** its `.wasm`/`.data` assets, so
+every `getSql()` threw. `getPolicy()` → `PolicyBlockedError` → the WP-07 gate
+refused every order. The gate was protecting a pause that **could not have been
+set**, because there was no shared store to set it in.
+
+**The fix is not "make PGLite work in serverless."** An in-process, per-lambda
+Postgres cannot back a switch whose entire purpose is to be seen by every
+instance. Fail-closed is right; applying it with no store declared is not.
+`resolvePolicy()` now decides on evidence:
+
+| Store declared? | Store reads? | Behaviour |
+| --- | --- | --- |
+| yes (`DATABASE_URL` or injected runner) | yes | database policy, `source: "database"` |
+| yes | **no** (down, auth, timeout) | **refuse everything** — unchanged, this is the case fail-closed is for |
+| yes | table missing (`42P01`) | degrade to env, `degraded: "missing-table"` — migration hasn't run, no policy can exist yet |
+| **no** | n/a | degrade to env, `degraded: "no-store"` — nothing to protect |
+
+- **Env kill switch, no database required**: `WOLFPIT_TRADING_PAUSED`,
+  `WOLFPIT_TRADING_PAUSED_REASON`, `WOLFPIT_GEOFENCE_US`. Env and database
+  compose as a **union of restrictions**: either can pause, neither can lift the
+  other. So a halt is always reachable even with the store dead.
+- **The admin panel stops lying.** `policyStatus()` never throws and returns
+  `{source, shared, writable, degraded}`; `/admin` shows a banner when the
+  switch is not backed by a shared store, and `setTradingPolicy` surfaces the
+  real reason instead of a blanket "unavailable". An operator must never
+  believe a pause took effect when it cannot.
+- `setPolicy` now refuses in production when no shared store is declared,
+  rather than writing to a scratch database that dies with the request.
+- **PGLite is dev-only. Set `DATABASE_URL` in every deployed environment.**
+  Documented in `env.example`.
+
+Verified against the rebuilt production bundle (same broken PGLite as prod):
+spot gate `{ok:true}`, admin status `{source:"default",shared:false,degraded:"no-store"}`,
+`WOLFPIT_TRADING_PAUSED=1` → `{ok:false,code:"paused"}`, geo-fence still
+US-only and never applied to spot. 7 new tests (`policy.server.test.ts` 11→18),
+including one asserting a declared-but-down store *still* refuses.
+
+**Lesson for the next control.** `rate-limit.server.ts` fails **open**, policy
+failed **closed** — that asymmetry is correct and deliberate. But a fail-closed
+control needs its dependency to be a *declared* one, plus a dependency-free
+override. Otherwise the control's failure mode is a self-inflicted outage.
+
+### Two review findings fixed in the same pass
+
+- **Release timelock could be armed too late to bind (`setReleaseDelay`).**
+  While the delay is 0, a queued entry gets `eta = block.timestamp`. A hostile
+  operator could pre-queue the whole book and consume it in the very block the
+  owner armed the timelock; raising an existing delay likewise left the old,
+  shorter clock in force. `setReleaseDelay` now clears the pending queue via a
+  shared `_clearReleaseQueue()` (the `vetoRelease` body, factored out) and
+  emits `ReleaseVetoed`. Desk consequence: arm first, then queue. 3 regression
+  tests, promoted from the probe that found it.
+- **`MedianOracle` existed but nothing deployed it.** `DeployBase.s.sol` built
+  the vault on a single `ChainlinkOracle`, so one feed still marked the whole
+  book. Set `BASE_ORACLE_AGG_2` (and optionally `BASE_ORACLE_SRC_3`) and the
+  script now deploys the median and points the vault at it; with one source it
+  prints a loud WARNING. It also `setOwner(BASE_OWNER)` on **every** oracle —
+  previously the deploying EOA kept `setBand` on a live feed forever. 2 tests
+  cover the vault-through-median path (marks the midpoint; a 10x rogue source
+  halts marking instead of averaging into a lie).
+
+Suites: forge **101/101** (8 suites), node **235/235**, `tsc` clean, `eslint`
+clean, `npm run build` exit 0.
+
+---
+
 ## 2026-09-01 (Tue) — audit P1/P2 close: B4 timelock + runbook, B6 conversion, median oracle
 
 - **B4 (operator = #1 threat).** `DealerVault` gets an owner-armed **release
