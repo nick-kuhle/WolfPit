@@ -22,6 +22,7 @@ import { createServerFn } from "@tanstack/react-start";
 export type DeskProduct = "spot" | "future" | "option" | "race";
 
 /** Products that exist. Adding one here forces it through the gate. */
+/** @public — intentional API surface (gate vocabulary, read by tests and future desks). */
 export const DESK_PRODUCTS: readonly DeskProduct[] = ["spot", "future", "option", "race"] as const;
 
 export type DeskGateResult =
@@ -33,6 +34,7 @@ export type DeskGateResult =
  * STRICTEST thing we have rather than waved through: a typo in a caller must
  * never become an ungated desk.
  */
+/** @public — intentional API surface (gate vocabulary, read by tests and future desks). */
 export function normalizeProduct(raw: unknown): DeskProduct {
   return DESK_PRODUCTS.find((x) => x === raw) ?? "option";
 }

@@ -684,6 +684,7 @@ async function geckoTerminalOhlcv(network: string, pool: string, interval: Chart
  *      surface; coupling risk inputs to a user's zoom level would make the
  *      desk's vol estimate change when someone clicks "15m".
  */
+/** @public — intentional API surface (vol-series depth contract). */
 export const VOL_SERIES_BARS = 1000;
 
 export type VolSeries = {
