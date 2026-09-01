@@ -352,6 +352,7 @@ export function ChartCard({
   price,
   changePct,
   tag,
+  note,
   candles,
   interval,
   status,
@@ -367,6 +368,12 @@ export function ChartCard({
   changePct?: number | null;
   /** Optional badge on the right of the header row (e.g. "sim · indicative"). */
   tag?: ReactNode;
+  /**
+   * Optional second header line. The live swap desk puts the executable pair
+   * rate here: the chart is denominated in USD, so the rate needs its own
+   * labelled line rather than sharing the headline slot.
+   */
+  note?: ReactNode;
   candles: Candle[];
   interval: ChartInterval;
   status?: "ok" | "load" | "empty";
@@ -376,24 +383,27 @@ export function ChartCard({
   const up = (changePct ?? 0) >= 0;
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-panel shadow-xl">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-baseline gap-2">
-          <h2 className="font-display text-lg leading-tight">{symbol}</h2>
-          {quoteSymbol ? <span className="font-mono text-[11px] text-subtle">/ {quoteSymbol}</span> : null}
-          {price && price > 0 ? (
-            <span className={cn("font-mono text-sm tabular-nums", up ? "text-up" : "text-down")}>{fmtPx(price)}</span>
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-baseline gap-2">
+            <h2 className="font-display text-lg leading-tight">{symbol}</h2>
+            {quoteSymbol ? <span className="font-mono text-[11px] text-subtle">/ {quoteSymbol}</span> : null}
+            {price && price > 0 ? (
+              <span className={cn("font-mono text-sm tabular-nums", up ? "text-up" : "text-down")}>{fmtPx(price)}</span>
+            ) : null}
+            {changePct != null ? (
+              <span className={cn("font-mono text-[11px]", up ? "text-up" : "text-down")}>
+                {up ? "+" : "−"}
+                {(Math.abs(changePct) * 100).toFixed(2)}%
+              </span>
+            ) : null}
+            {tag}
+          </div>
+          {name ? (
+            <span className="truncate pl-2 font-mono text-[10px] uppercase tracking-wider text-subtle">{name}</span>
           ) : null}
-          {changePct != null ? (
-            <span className={cn("font-mono text-[11px]", up ? "text-up" : "text-down")}>
-              {up ? "+" : "−"}
-              {(Math.abs(changePct) * 100).toFixed(2)}%
-            </span>
-          ) : null}
-          {tag}
         </div>
-        {name ? (
-          <span className="truncate pl-2 font-mono text-[10px] uppercase tracking-wider text-subtle">{name}</span>
-        ) : null}
+        {note ? <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted">{note}</p> : null}
       </div>
       <ChartPane candles={candles} interval={interval} status={status} onInterval={onInterval} compact={height} />
     </div>

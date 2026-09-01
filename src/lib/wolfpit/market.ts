@@ -367,7 +367,25 @@ function safeBinance(p?: string) {
   return p && /^[A-Z0-9]{5,20}$/.test(p) ? p : "";
 }
 
-const candleJobs = new Map<string, Promise<Candle[]>>();
+/**
+ * Whether a symbol resolves to a real CEX candle feed WITHOUT any on-chain
+ * pool lookup. The live swap chart uses this to decide when a token needs its
+ * contract resolved to a pool (src/lib/swap/chart-feed.ts).
+ */
+export function hasSymbolFeed(symbol: string): boolean {
+  const s = symbol.trim().toUpperCase();
+  return Boolean(COINBASE_MAP[s] ?? BINANCE_MAP[s]);
+}
+
+const candleJobs = new Map<string, { at: number; job: Promise<Candle[]> }>();
+
+/**
+ * Cache TTL for a candle request. A trading chart that never refreshes is a
+ * stale chart: the previous cache was permanent, so a page could sit for hours
+ * showing the bars it fetched on mount. One minute is short enough that the
+ * last bar keeps moving and long enough that the public feeds stay happy.
+ */
+const CANDLE_TTL_MS = 60_000;
 
 export function loadSymbolCandles(d: {
   symbol: string;
@@ -380,9 +398,9 @@ export function loadSymbolCandles(d: {
   const interval = d.interval ?? "1m";
   const key = `${d.symbol}:${interval}:${d.binance ?? ""}:${d.geckoId ?? ""}:${d.network ?? ""}:${d.poolAddress ?? ""}`;
   const hit = candleJobs.get(key);
-  if (hit) return hit;
+  if (hit && Date.now() - hit.at < CANDLE_TTL_MS) return hit.job;
   const job = getSymbolCandles({ ...d, interval }).catch(() => [] as Candle[]);
-  candleJobs.set(key, job);
+  candleJobs.set(key, { at: Date.now(), job });
   return job;
 }
 

@@ -43,6 +43,22 @@ cost in the native token.
 are marked "unverified" in the picker, and the swap card warns when either leg
 is unverified, plus a warning when the route reports a transfer/sell tax.
 
+**Chart.** The live desk charts the leg you are taking a view on, in USD — the
+same series the simulation desk draws for that token. `src/lib/swap/chart-feed.ts`
+ranks the pair (long-tail token > major > stablecoin, ties to the sell leg) and
+resolves that token's **contract** to its deepest pool: chainId → GeckoTerminal
+network slug → `/tokens/{addr}/pools` → DexScreener fallback, memoized 10 min.
+Only pools where the token is the pool's **base** token are eligible, because
+GeckoTerminal OHLCV reports the base token's price — charting the quote side
+would draw the other token's price. Candles refresh every 60 s.
+
+The executable pair rate from the aggregator is shown on its own labelled line
+under the header, never as the chart's headline: the chart is denominated in USD
+and the rate is not. If no real series exists for the token, the chart draws an
+indicative series anchored at the best real price available (resolver spot, else
+the quote-implied USD) and badges it `sim · indicative` — it never anchors at
+1.00 and never badges while a real series is still loading.
+
 The toggle is the only way real funds are reached: the default is Simulation
 (paper, $100k), `?mode=live` or the persisted localStorage choice switches to
 the live desk. The dock's **Trade** tab highlights for both modes.

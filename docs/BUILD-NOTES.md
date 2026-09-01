@@ -6,6 +6,60 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Mon) — live swap chart drew a fabricated series for any non-CEX token
+
+Reported from production (`wolfpit-protocol.vercel.app`): selling ETH for
+**Basecat** on `/trade?mode=live` showed a chart headed "ETH / Basecat" wandering
+around 1.00 with a `sim · indicative` badge, while `?mode=sim` showed the real
+Basecat candles for the same token.
+
+Two defects, both in `src/components/swap/swap-chart.tsx`:
+
+1. **No routing metadata on the candle request.** It called
+   `loadSymbolCandles({ symbol })`. That helper can only reach a feed it is told
+   how to reach — a CEX pair from its symbol maps, a CoinGecko id, or
+   `network` + `poolAddress`. The simulation desk (`desk.tsx`) passes all four
+   because its `Listing` rows come from the GeckoTerminal tape / DexScreener
+   search and already carry the pool; the swap desk passed none. Measured
+   against the live APIs before the fix:
+   `{ symbol: "Basecat" }` → **0 bars**;
+   `{ symbol: "Basecat", network: "base", poolAddress: "0xf794…8944" }` → **200 bars**.
+   With zero bars the component fell into `synthCandles(1, …)` — a random walk
+   anchored at 1.00. It was not failing to load; it was drawing fiction.
+2. **The sell leg was the chart subject.** ETH → Basecat charted ETH, so even a
+   working feed would not have shown the token being bought.
+
+Fix — new `src/lib/swap/chart-feed.ts`:
+
+- `pickSubject()` ranks legs (long-tail 2 > major 1 > stable 0, ties to the sell
+  leg) so the chart follows the token the user is taking a view on.
+- `resolveTokenFeed()` resolves a token CONTRACT to its deepest pool:
+  chainId → GeckoTerminal slug → `/tokens/{addr}/pools` → DexScreener fallback,
+  memoized 10 min. `pickPool()` only accepts pools where our token is the
+  **base** token — GeckoTerminal OHLCV reports the base token's price, so
+  charting a pool where the token is the quote side would draw the *other*
+  token's price.
+- No feed anywhere returns `source: "none"`; the chart then draws an indicative
+  series anchored at the best real price it holds (resolver spot, else the
+  quote-implied USD) and badges it — never 1.00, and never badged while the real
+  series is still loading.
+- The series is now the subject's **USD** price, the same series the simulation
+  desk draws for that token, and the executable pair rate gets its own labelled
+  line (`ChartCard note`) instead of sharing the headline slot.
+
+Also: `loadSymbolCandles` memoized candle jobs **forever**, so a live chart kept
+the bars it fetched on mount for as long as the tab stayed open. Now a 60 s TTL,
+and the swap chart re-pulls on that cadence.
+
+Verified end-to-end against the live APIs: ETH→Basecat and Basecat→ETH both
+resolve `geckoterminal`/`base`/`0xf794…8944` → 200 bars, last 0.02774;
+ETH↔USDC → 350 bars from the symbol feed; an unlisted contract → 0 bars,
+`source: "none"` (no invented pool). `tsc` clean · eslint clean · `npm test`
+**228 pass / 0 fail** (36 + 61 + 131; +9 new in `chart-feed.test.ts`) ·
+`npm run build` exit 0. No Solidity touched, so no forge run.
+
+---
+
 ## 2026-08-31 (Mon) — HOOK.md RV spec realigned to math.ts (F3 follow-up)
 
 `70ae20f` (F1–F9) pinned `λ = 0.94, τ = 60 s` in `HOOK.md` §5.1 with the note

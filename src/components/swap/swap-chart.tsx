@@ -2,156 +2,165 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChartCard } from "@/components/desk/chart";
 import { BAR_MS, synthCandles } from "@/lib/wolfpit/engine";
 import { loadSymbolCandles, type ChartInterval } from "@/lib/wolfpit/market";
+import { candleArgsFor, isStableSymbol, pickSubject, resolveTokenFeed, type TokenFeed } from "@/lib/swap/chart-feed";
 import type { Candle } from "@/lib/wolfpit/types";
 import type { useSwap } from "@/lib/swap/use-swap";
-
-/** Stablecoins we price *against* rather than chart. */
-const QUOTE_SYMS = new Set(["USDC", "USDT", "DAI", "USD", "USDBC", "FDUSD", "USDE"]);
+import { fmtPx } from "@/lib/utils";
 
 /**
  * Price chart for the pair the user is swapping.
  *
- * Honesty rules (a trading surface must never show a wrong number as a price):
- *   • The headline number is the LIVE quote rate (buy/sell amounts from the
- *     aggregator) whenever one exists — that is the executable price.
- *   • When the quote leg is a stable, the subject's USD candles ARE the pair
- *     series, so the chart history is real.
- *   • When the quote leg is not a stable (e.g. AERO/ETH) and BOTH legs have
- *     candle feeds, the series is the true ratio subject÷quote, bucket-joined.
- *   • Otherwise there is no real history for this pair — draw a synthetic
- *     series ANCHORED AT the live rate (never a fake "1.00") and badge it
- *     "sim" so it can't be mistaken for market data.
+ * What was broken (fixed 2026-08-31)
+ * ----------------------------------
+ * This chart called `loadSymbolCandles({ symbol })` with the symbol ALONE.
+ * That helper can only reach a feed it is told how to reach: a CEX pair from
+ * its symbol maps, a CoinGecko id, or network + poolAddress. For any token
+ * outside the ~30 CEX majors it therefore returned zero bars, the component
+ * fell through to `synthCandles(1, …)`, and the live desk drew a fabricated
+ * random walk around 1.00 while the simulation desk — which passes the pool
+ * through from its tape row — drew the real thing. Verified against the live
+ * APIs: `{ symbol: "Basecat" }` → 0 bars, `{ symbol: "Basecat", network:
+ * "base", poolAddress: "0xf794…8944" }` → 200 bars.
+ *
+ * It also charted the SELL leg, so ETH → Basecat was headed "ETH / Basecat"
+ * instead of showing Basecat at all.
+ *
+ * Honesty rules (a trading surface must never show a wrong number as a price)
+ * --------------------------------------------------------------------------
+ *   • The chart subject is the leg the user is taking a view on: the long-tail
+ *     token over a major, a major over a stablecoin (see `pickSubject`).
+ *   • The series is the subject's real USD price — the SAME series the
+ *     simulation desk draws for that token, resolved from its contract to its
+ *     deepest pool. The headline is that series' last print, labelled `/ USD`.
+ *   • The executable pair rate from the aggregator is shown as its own line,
+ *     labelled as a quote, so it is never confused with the charted series.
+ *   • If no real series exists for the subject, draw a synthetic one anchored
+ *     at the best real price we hold and badge it "sim · indicative".
  */
 export function SwapChart({ swap, height = 240 }: { swap: ReturnType<typeof useSwap>; height?: number }) {
-  const { sell, buy, quote } = swap.state;
+  const { chainId, sell, buy, quote } = swap.state;
   const [interval, setIv] = useState<ChartInterval>("1h");
   const [bars, setBars] = useState<Candle[]>([]);
   const [live, setLive] = useState(false); // series is real market data
   const [status, setStatus] = useState<"load" | "ok" | "empty">("load");
+  const [feed, setFeed] = useState<TokenFeed | null>(null);
 
-  // The instrument to chart: prefer the non-stable leg. If both legs are
-  // stables (e.g. USDC→USDT), just chart the sell leg.
-  const subject = useMemo(() => {
-    const sellStable = QUOTE_SYMS.has(sell.symbol.toUpperCase());
-    const buyStable = QUOTE_SYMS.has(buy.symbol.toUpperCase());
-    if (!sellStable) return sell;
-    if (!buyStable) return buy;
-    return sell;
-  }, [sell, buy]);
-
-  const quoteTok = subject.symbol === sell.symbol ? buy : sell;
+  // The instrument to chart. Ties resolve to the sell leg, so the choice stays
+  // put while the user is still picking the other side.
+  const { subject, quote: quoteTok } = useMemo(() => pickSubject(sell, buy), [sell, buy]);
 
   /**
-   * Live executable pair rate in human units, from the aggregator quote,
-   * ORIENTED as the header reads it: quoteTok per 1 subject (subject / quoteTok).
-   *
-   * The raw quote gives buy-per-sell. That equals subject/quoteTok only when the
-   * subject IS the sell leg; when the subject is the buy leg (e.g. paying USDC to
-   * buy ETH) we must invert, otherwise the headline shows ETH-per-USDC (~0.00025)
-   * while the chart shows ETH/USD (~4000) — a number contradicting its own axis.
+   * Live executable pair rate in human units, read the way the ticket reads it:
+   * buy-token per 1 sell-token. Shown as its own line rather than as the
+   * chart's headline — the chart is denominated in USD.
    */
-  const liveRate = useMemo(() => {
+  const pairRate = useMemo(() => {
     if (!quote || !quote.ok) return null;
     const buyN = Number(quote.buyAmount);
     const sellN = Number(quote.sellAmount);
     if (!Number.isFinite(buyN) || !Number.isFinite(sellN) || buyN <= 0 || sellN <= 0) return null;
-    // Base-unit ratio → human units: decimals of the sell side cancel against
-    // the buy side only after shifting by their difference.
+    // Base-unit ratio → human units: shift by the decimals difference.
     const shift = 10 ** (sell.decimals - buy.decimals);
-    const buyPerSell = (buyN / sellN) * shift; // buy-token per sell-token
-    if (!Number.isFinite(buyPerSell) || buyPerSell <= 0) return null;
-    // Orient to subject/quoteTok: subject=sell → buyPerSell; subject=buy → invert.
-    const r = subject.symbol === sell.symbol ? buyPerSell : 1 / buyPerSell;
-    return Number.isFinite(r) && r > 0 ? r : null;
-  }, [quote, sell.decimals, buy.decimals, sell.symbol, subject.symbol]);
+    const buyPerSell = (buyN / sellN) * shift;
+    return Number.isFinite(buyPerSell) && buyPerSell > 0 ? buyPerSell : null;
+  }, [quote, sell.decimals, buy.decimals]);
 
-  // Latest live rate without re-running the candle fetch on every quote
-  // refresh (the quote updates as the user types; candle history does not).
-  const liveRateRef = useRef<number | null>(null);
-  liveRateRef.current = liveRate;
+  /**
+   * The subject's USD price implied by the live quote, used to anchor a
+   * fallback series when the subject has no feed but the other leg is a
+   * stablecoin (then one unit of the quote leg IS one dollar).
+   */
+  const impliedUsd = useMemo(() => {
+    if (pairRate == null || !isStableSymbol(quoteTok.symbol)) return null;
+    // pairRate is buy-per-sell; convert to "quote-leg units per 1 subject".
+    const perSubject = subject.symbol === sell.symbol ? pairRate : 1 / pairRate;
+    return Number.isFinite(perSubject) && perSubject > 0 ? perSubject : null;
+  }, [pairRate, quoteTok.symbol, subject.symbol, sell.symbol]);
 
+  const impliedRef = useRef<number | null>(null);
+  impliedRef.current = impliedUsd;
+
+  // 1) Resolve the subject contract to a chartable feed (pool / CEX / gecko id).
   useEffect(() => {
+    let dead = false;
+    setFeed(null);
+    setStatus("load");
+    void resolveTokenFeed({
+      chainId,
+      address: subject.address,
+      symbol: subject.symbol,
+      native: subject.native,
+    }).then((f) => {
+      if (!dead) setFeed(f);
+    });
+    return () => {
+      dead = true;
+    };
+  }, [chainId, subject.address, subject.symbol, subject.native]);
+
+  // 2) Load the candles for that feed, and keep them fresh (live desk).
+  useEffect(() => {
+    if (!feed) return;
     let dead = false;
     setStatus("load");
     const ms = BAR_MS[interval];
     const seed = subject.symbol.split("").reduce((a, ch) => a + ch.charCodeAt(0), 0);
-    const quoteStable = QUOTE_SYMS.has(quoteTok.symbol.toUpperCase());
+    const args = candleArgsFor(subject, feed);
 
-    const finish = (rows: Candle[], isLive: boolean) => {
-      if (dead) return;
-      setBars(rows);
-      setLive(isLive);
-      setStatus("ok");
+    const pull = () => {
+      void loadSymbolCandles({ ...args, interval }).then((rows) => {
+        if (dead) return;
+        if (rows.length >= 8) {
+          setBars(rows);
+          setLive(true);
+          setStatus("ok");
+          return;
+        }
+        // No real series. Anchor the indicative one at the best real price we
+        // hold — the resolver's spot, else the quote-implied USD — never 1.00.
+        const anchor = feed.priceUsd && feed.priceUsd > 0 ? feed.priceUsd : (impliedRef.current ?? 0);
+        setBars(synthCandles(anchor > 0 ? anchor : 1, ms, Date.now(), seed, false));
+        setLive(false);
+        setStatus("ok");
+      });
     };
 
-    if (quoteStable) {
-      // Pair ≈ subject/USD — the subject's own candle feed is the pair series.
-      void loadSymbolCandles({ symbol: subject.symbol, interval }).then((rows) => {
-        if (dead) return;
-        if (rows.length >= 8) finish(rows, true);
-        else finish(synth(synthAnchor(), ms, seed), false);
-      });
-      return () => {
-        dead = true;
-      };
-    }
-
-    // Non-stable quote: build the true ratio series when both legs have feeds.
-    void Promise.all([
-      loadSymbolCandles({ symbol: subject.symbol, interval }),
-      loadSymbolCandles({ symbol: quoteTok.symbol, interval }),
-    ]).then(([a, b]) => {
-      if (dead) return;
-      const bByT = new Map(b.map((c) => [c.t, c]));
-      const ratio = a.flatMap((ca) => {
-        const cb = bByT.get(ca.t);
-        if (!cb || cb.c <= 0 || cb.o <= 0) return [];
-        return [
-          {
-            t: ca.t,
-            o: ca.o / cb.o,
-            h: ca.h / Math.max(cb.l, 1e-12),
-            l: ca.l / Math.max(cb.h, 1e-12),
-            c: ca.c / cb.c,
-            v: ca.v,
-          } satisfies Candle,
-        ];
-      });
-      if (ratio.length >= 8) finish(ratio, true);
-      else finish(synth(synthAnchor(), ms, seed), false);
-    });
-
-    function synthAnchor(): number {
-      // Anchor the synthetic series at the REAL pair rate when we have one.
-      return liveRateRef.current ?? 1;
-    }
-    function synth(px: number, ms: number, seed: number): Candle[] {
-      return synthCandles(px > 0 ? px : 1, ms, Date.now(), seed, false);
-    }
-
+    pull();
+    const timer = setInterval(pull, 60_000);
     return () => {
       dead = true;
+      clearInterval(timer);
     };
-  }, [subject.symbol, quoteTok.symbol, interval]);
+  }, [feed, subject, interval]);
 
   const last = bars.length ? bars[bars.length - 1]!.c : 0;
   const first = bars.length ? bars[0]!.c : 0;
   const chg = first > 0 ? (last - first) / first : 0;
-  // Headline = the executable rate when live; else the series' own last print.
-  const headline = liveRate ?? (live ? last : 0);
+  // Headline = the charted series' own last print, in USD.
+  const headline = live ? last : (feed?.priceUsd ?? 0);
 
   return (
     <ChartCard
       symbol={subject.symbol}
-      quoteSymbol={quoteTok.symbol}
+      quoteSymbol="USD"
       name={subject.name}
       price={headline}
       changePct={live && bars.length ? chg : null}
       tag={
-        !live ? (
+        // Only once the load has settled: badging "indicative" while the real
+        // series is still in flight labels good data as fake.
+        status === "ok" && !live ? (
           <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-warn">
             sim · indicative
           </span>
+        ) : null
+      }
+      note={
+        pairRate != null ? (
+          <>
+            <span className="text-subtle">quote</span> 1 {sell.symbol} ={" "}
+            <span className="text-fg">{fmtPx(pairRate)}</span> {buy.symbol}
+          </>
         ) : null
       }
       candles={bars}
