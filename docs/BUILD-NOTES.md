@@ -6,6 +6,46 @@ Ritual: [WEEK1.md](./WEEK1.md) W1-10.
 
 ---
 
+## 2026-08-31 (Sun, later still) — "Importing a module script failed" after a deploy
+
+Operator opened /admin in a tab that predated a redeploy and got the app's
+full-screen error component: **Something went wrong — Importing a module
+script failed.**
+
+Not a broken deployment. Verified live: `/admin` correctly 307s to
+`/admin/login`, that page is 200, and every chunk it references resolves. The
+tab was simply holding the PREVIOUS build's router manifest:
+
+```
+/assets/admin-CznGl7bW.js      -> 404   (what the open tab asked for)
+/assets/admin.login-Xt59PWiz.js-> 404
+/assets/admin-BxdQFtU4.js      -> 200   (what the deployment now serves)
+```
+
+Every deploy renames hashed chunks, so any tab open across a deploy hits this
+on its next lazy route. Reloading fixes it — nobody should need to know that.
+
+- `src/lib/stale-chunk.ts`: `isStaleChunkError()` matches the four signatures
+  browsers actually emit (Safari "Importing a module script failed", Chrome
+  "Failed to fetch dynamically imported module", Firefox "error loading
+  dynamically imported module", and the text/html MIME variant) and NOTHING
+  else — a network blip or an app bug must never be hidden behind a refresh.
+  `shouldReload()` is a bounded loop guard: 2 attempts per 60 s, then the real
+  error renders. Corrupt or read-only sessionStorage still allows recovery.
+- `AppErrorComponent` now self-heals on that one signature ("Loading the latest
+  version…", plus a manual Reload button if the budget is spent) and is
+  unchanged for every other error.
+- `installStaleChunkGuard()` (from `getRouter()`) also catches the cases that
+  never reach the router: `vite:preloadError`, plus matching `unhandledrejection`
+  and `error` events.
+
+5 new tests. Suites: node **247/247**, tsc + eslint clean, build exit 0.
+
+Confirmed separately that the deployment now has admin credentials:
+`adminWhoami` returns `{configured: true}`.
+
+---
+
 ## 2026-08-31 (Sun, later) — admin sign-in did nothing, silently
 
 Operator report: "it's not signing me in, and it doesn't give me an error."
