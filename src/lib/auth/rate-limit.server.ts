@@ -72,17 +72,36 @@ export interface RequestLike {
 }
 
 /**
- * Best-effort caller IP. Prefers `cf-connecting-ip` (set by Cloudflare, not
- * spoofable by the client) over the first `x-forwarded-for` hop (spoofable
- * when the origin is reachable directly or the proxy appends instead of
- * overwriting). Truncated defensively.
+ * Best-effort caller IP (audit S-2). Trust model, platform by platform:
+ *
+ *   - Vercel (the production host) OVERWRITES `x-forwarded-for` with the real
+ *     client IP and "does not forward external IPs... to prevent IP spoofing"
+ *     (vercel.com/docs/headers/request-headers), so on Vercel the whole chain
+ *     is platform-set.
+ *   - Appending reverse proxies (nginx `$proxy_add_x_forwarded_for` and
+ *     friends) put client-INJECTED values FIRST and the observed client IP
+ *     LAST — the first hop an attacker fully controls.
+ *
+ * Taking the LAST non-empty hop is correct under both regimes; taking the
+ * first (the old code) let an appending-proxy caller rotate the rate-limit
+ * key at will. `cf-connecting-ip` is only meaningful when traffic actually
+ * transits Cloudflare — anywhere else a client can inject it freely — so it
+ * demotes to a fallback for requests that carry no forwarding chain at all.
+ * Truncated defensively.
  */
 export function clientIp(request: RequestLike | null | undefined): string | undefined {
   if (!request) return undefined;
+  const fwd = request.headers.get("x-forwarded-for");
+  if (fwd) {
+    const hops = fwd
+      .split(",")
+      .map((h) => h.trim())
+      .filter(Boolean);
+    const last = hops[hops.length - 1];
+    if (last) return last.slice(0, 64);
+  }
   const cf = request.headers.get("cf-connecting-ip")?.trim();
   if (cf) return cf.slice(0, 64);
-  const fwd = request.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim().slice(0, 64) || undefined;
   return undefined;
 }
 

@@ -37,11 +37,34 @@ export function normalizeProduct(raw: unknown): DeskProduct {
   return DESK_PRODUCTS.find((x) => x === raw) ?? "option";
 }
 
+/** Per-IP ceiling on gate checks (audit N-2): same cadence as the 0x proxy. */
+const DESK_GATE_MAX_PER_MIN = 120;
+
 export const deskOpen = createServerFn({ method: "GET" })
   .validator((d: { product?: string }): { product: DeskProduct } => ({
     product: normalizeProduct(d?.product),
   }))
   .handler(async ({ data }): Promise<DeskGateResult> => {
+    // The gate service-queries the policy store on EVERY order click, on every
+    // desk. Unthrottled, a single caller turns that into free DB load (a GET
+    // needs no body, no session). Same fail-open quota limiter as the swap
+    // proxy: a store hiccup must not freeze the desks, and the cost of a
+    // missed throttle is DB load, not a compliance breach — the gate's own
+    // fail-closed policy check still runs whenever the counter store is down.
+    try {
+      const { getRequest } = await import("@tanstack/react-start/server");
+      const { clientIp, bumpLimit } = await import("../auth/rate-limit.server");
+      const ip = clientIp(getRequest());
+      if (await bumpLimit("deskg", ip ?? "unknown", DESK_GATE_MAX_PER_MIN, 60)) {
+        return {
+          ok: false,
+          code: "policy-unavailable",
+          error: "Too many desk checks from this address. Wait a moment and retry.",
+        };
+      }
+    } catch {
+      /* fail-open on store/request errors — the policy check below decides */
+    }
     const { checkTradingAllowed } = await import("@/lib/admin/policy.server");
     return checkTradingAllowed({ products: [data.product] });
   });
