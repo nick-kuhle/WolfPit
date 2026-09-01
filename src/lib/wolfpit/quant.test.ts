@@ -281,8 +281,6 @@ describe("M-07 / #23 — trader escrow cannot cash-secure a house put", () => {
 });
 
 describe("M-08 / #22 — a limit binds the realised average, not just the trigger", () => {
-  const exp = initialState().clock + 3 * 86_400_000;
-
   it("a buy limit partial-fills at the limit instead of overpaying 25%", () => {
     // The reviewer's repro: BUY LIMIT @4000 for 500 ETH against 2,500 ETH of
     // depth filled at an average of 5,015.05. We use a limit above the mark so

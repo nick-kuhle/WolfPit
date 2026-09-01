@@ -83,6 +83,7 @@ const oauthClientId = env("WOLFPIT_AUTH_CLIENT_ID") ?? PREVIEW_CLIENT_ID;
 const oauthClientSecret = env("WOLFPIT_AUTH_CLIENT_SECRET") ?? PREVIEW_CLIENT_SECRET;
 
 /** True when federated sign-in is active (real auth is enforced). */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const authConfigured =
   !authDisabled && Boolean(oauthClientId && oauthClientSecret);
 
@@ -148,6 +149,7 @@ const database = databaseUrl
   : { dialect: pgliteDialect(() => getPglite()), type: "postgres" as const };
 
 /** Session token cookie name — also read by the live-preview popup completion page. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const SESSION_TOKEN_COOKIE = "__Host-wolfpit-auth.session_token";
 
 // Built separately so the `betterAuth({...})` call stays easy to edit without
@@ -254,10 +256,12 @@ export const auth = betterAuth({
   ],
 });
 
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function readSessionToken(): string | null {
   return getCookie(SESSION_TOKEN_COOKIE) ?? null;
 }
 
 // Re-exported for convenience; the array lives in the dependency-free
 // `providers.ts` so the client can import it too.
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export { AUTH_PROVIDERS } from "./providers";

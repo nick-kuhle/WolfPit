@@ -1,3 +1,12 @@
+/**
+ * PLANNED — DESIGNED, NOT YET WIRED. Nothing in `src/` imports this module
+ * today; knip listing it as an unused file is expected and correct. It is
+ * part of the credential-auth surface kept intact by deliberate decision
+ * (docs/BUILD-NOTES.md: "Planned auth modules kept intact"), pending the
+ * launch that turns auth on. Read the module header below before wiring it
+ * in — the threat model (cookie isolation, popup flow, failures-only
+ * throttling) is load-bearing.
+ */
 import { useState, type ReactNode } from "react";
 import { Navigate } from "@tanstack/react-router";
 import { authEnabled, signOut } from "./client";

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {logAddr, logLine} from "./ConsoleLog.sol";
 import {DealerVault, IERC20, IOracle} from "../src/DealerVault.sol";
 import {ChainlinkOracle} from "../src/oracle/ChainlinkOracle.sol";
 import {TestERC20} from "../src/TestERC20.sol";
@@ -27,7 +28,13 @@ import {Stake} from "../src/Stake.sol";
  *                        works before a feed is wired — see the warning it
  *                        prints. Never available in DeployBase.
  *     WPIT_CAP           WPIT cap in whole tokens (default 100_000_000)
- *     SEPOLIA_ALLOW_ANY_CHAIN=1  bypass the 84532 guard (local anvil only)
+ *     SEPOLIA_ALLOW_ANY_CHAIN=1  bypass the 84532 guard (local anvil only).
+ *                        Note this relaxes only the chain check: away from
+ *                        Base Sepolia the vault still requires a CONTRACT
+ *                        owner, so a full local rehearsal either points
+ *                        SEPOLIA_OWNER at a contract or runs anvil with
+ *                        --chain-id 84532. The EOA dev-wallet path exists on
+ *                        Base Sepolia only.
  *
  * Run:
  *   forge script script/DeploySepolia.s.sol \
@@ -44,12 +51,6 @@ interface Vm {
     function startBroadcast() external;
     function stopBroadcast() external;
     function label(address, string calldata) external;
-}
-
-interface Console {
-    function log(string calldata) external;
-    function log(string calldata, address) external;
-    function log(string calldata, uint256) external;
 }
 
 /**
@@ -95,7 +96,6 @@ contract ManualOracle {
 
 contract DeploySepolia {
     Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
-    Console constant console = Console(0x000000000000000000636F6e736F6c652e6c6f67);
 
     uint256 constant BASE_SEPOLIA = 84532;
     uint256 constant DEFAULT_CAP = 100_000_000 ether;
@@ -143,8 +143,19 @@ contract DeploySepolia {
         d.manualOracle = agg == address(0);
         d.oracle = d.manualOracle ? address(new ManualOracle(SEED_PRICE)) : address(new ChainlinkOracle(agg));
 
+        // Contract-owner enforcement follows the CHAIN, not the operator's
+        // intent (audit N-1): on Base Sepolia the owner is a dev EOA by design
+        // — "on a testnet a single dev key is the point" — so hardcoding
+        // `true` here just bricked the documented launch with
+        // OwnerNotContract() at the vault step (reproduced by dry-run).
+        // Everywhere else the strict requirement stands: if this script is
+        // ever pointed at another chain via SEPOLIA_ALLOW_ANY_CHAIN, an EOA
+        // owner still reverts. Mainnet goes through DeployBase, which always
+        // passes true, exactly as `Deployer`'s local shape opts out.
         d.vault = address(
-            new DealerVault(IERC20(d.usdc), IERC20(d.weth), IOracle(d.oracle), owner, operator, true)
+            new DealerVault(
+                IERC20(d.usdc), IERC20(d.weth), IOracle(d.oracle), owner, operator, block.chainid != BASE_SEPOLIA
+            )
         );
 
         // token0/token1 order matches the UI pool naming; 30 bps is the pair's
@@ -180,24 +191,24 @@ contract DeploySepolia {
     }
 
     function _print() internal {
-        console.log("");
-        console.log("=== Base Sepolia deployment - paste into Vercel (Preview + Production) ===");
-        console.log("VITE_CHAIN=base-sepolia");
-        console.log("VITE_VAULT_SEPOLIA", d.vault);
-        console.log("VITE_WPIT_SEPOLIA", d.wpit);
-        console.log("VITE_USDC_SEPOLIA", d.usdc);
-        console.log("VITE_WETH_SEPOLIA", d.weth);
-        console.log("VITE_POOL_ETH_USDC_SEPOLIA", d.poolEthUsdc);
-        console.log("VITE_POOL_WPIT_USDC_SEPOLIA", d.poolWpitUsdc);
-        console.log("VITE_POOL_WPIT_ETH_SEPOLIA", d.poolWpitEth);
-        console.log("VITE_FARM_SEPOLIA", d.farm);
-        console.log("VITE_STAKE_SEPOLIA", d.stake);
-        console.log("ORACLE", d.oracle);
-        console.log("");
-        console.log("NEXT: from the dev wallet call wpit.acceptMinter() to finish the mint handover,");
-        console.log("then run SeedSepolia.s.sol to mint test tokens and fund the pools.");
+        logLine("");
+        logLine("=== Base Sepolia deployment - paste into Vercel (Preview + Production) ===");
+        logLine("VITE_CHAIN=base-sepolia");
+        logAddr("VITE_VAULT_SEPOLIA", d.vault);
+        logAddr("VITE_WPIT_SEPOLIA", d.wpit);
+        logAddr("VITE_USDC_SEPOLIA", d.usdc);
+        logAddr("VITE_WETH_SEPOLIA", d.weth);
+        logAddr("VITE_POOL_ETH_USDC_SEPOLIA", d.poolEthUsdc);
+        logAddr("VITE_POOL_WPIT_USDC_SEPOLIA", d.poolWpitUsdc);
+        logAddr("VITE_POOL_WPIT_ETH_SEPOLIA", d.poolWpitEth);
+        logAddr("VITE_FARM_SEPOLIA", d.farm);
+        logAddr("VITE_STAKE_SEPOLIA", d.stake);
+        logAddr("ORACLE", d.oracle);
+        logLine("");
+        logLine("NEXT: from the dev wallet call wpit.acceptMinter() to finish the mint handover,");
+        logLine("then run SeedSepolia.s.sol to mint test tokens and fund the pools.");
         if (d.manualOracle) {
-            console.log(
+            logLine(
                 "WARNING: no SEPOLIA_ORACLE_AGG given, so a ManualOracle was deployed. Price is owner-set and "
                 "does NOT track the market. Set a Chainlink aggregator before judging any risk behaviour."
             );

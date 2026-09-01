@@ -155,7 +155,6 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     ethBid: clamp(nn(raw.ethBid, eth), ETH_MIN, ETH_MAX),
     ethAsk: clamp(nn(raw.ethAsk, eth), ETH_MIN, ETH_MAX),
     wpit,
-    btc: nn(raw.btc),
     iv: clamp(nn(raw.iv, base.iv), 0.1, 3),
     // realizedVol is restored for display continuity, but volCandles is NOT:
     // a cached series is stale by definition and re-pricing from it would be

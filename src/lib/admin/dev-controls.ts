@@ -25,12 +25,14 @@ export const BASE_SEPOLIA = 84532;
 export const BASE_MAINNET = 8453;
 
 /** Chains where dev controls may appear. Mainnet is deliberately absent. */
+/** @public — intentional API surface (chain list + ceilings, read by tests and wiring). */
 export const DEV_CONTROL_CHAINS: readonly number[] = [BASE_SEPOLIA, 31337] as const;
 
 export function devControlsAvailable(chainId: number | null | undefined): boolean {
   return typeof chainId === "number" && DEV_CONTROL_CHAINS.includes(chainId);
 }
 
+/** @public — intentional API surface (calldata the operator's wallet signs). */
 export type Call = { to: Hex; data: Hex; label: string };
 
 export type BuildResult = { ok: true; call: Call } | { ok: false; error: string };
@@ -57,9 +59,12 @@ const SET_PRICE_ABI = [
  * the pools useless and the bug report worthless, so the amount a human types
  * is bounded before it becomes calldata.
  */
+/** @public — intentional API surface (chain list + ceilings, read by tests and wiring). */
 export const MAX_MINT = 100_000_000;
 /** USDC per ETH. Outside this the oracle is not being tested, it is being broken. */
+/** @public — intentional API surface (chain list + ceilings, read by tests and wiring). */
 export const MIN_PRICE = 1;
+/** @public — intentional API surface (chain list + ceilings, read by tests and wiring). */
 export const MAX_PRICE = 1_000_000;
 
 function guard(chainId: number | null | undefined, ...addrs: (string | undefined)[]): string | null {

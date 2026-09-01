@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {DealerVault, IERC20, IOracle} from "../src/DealerVault.sol";
 import {ChainlinkOracle} from "../src/oracle/ChainlinkOracle.sol";
+import {logAddr, logLine} from "./ConsoleLog.sol";
 import {MedianOracle} from "../src/oracle/MedianOracle.sol";
 
 interface Vm {
@@ -14,14 +15,8 @@ interface Vm {
     function label(address account, string calldata newName) external;
 }
 
-interface Console {
-    function log(string calldata label, address value) external;
-    function log(string calldata message) external;
-}
-
 /// @dev forge-std-free bindings.
 Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
-Console constant console = Console(0x000000000000000000636F6e736F6c652e6c6f67);
 
 /**
  * @notice Base mainnet launch deploy (runbook: docs/DEPLOY-BASE.md).
@@ -105,20 +100,20 @@ contract DeployBase {
         vm.label(address(oracle), "ChainlinkOracle");
         vm.label(address(vault), "DealerVault");
         // Terminal summary — copy into the desk config (VITE_VAULT etc.).
-        console.log("oracle", address(oracle));
+        logAddr("oracle", address(oracle));
         if (address(median) != address(0)) {
             vm.label(address(oracle2), "ChainlinkOracle2");
             vm.label(address(median), "MedianOracle");
-            console.log("oracle2", address(oracle2));
-            console.log("median (vault reads this)", address(median));
-            if (src3 != address(0)) console.log("source3", src3);
+            logAddr("oracle2", address(oracle2));
+            logAddr("median (vault reads this)", address(median));
+            if (src3 != address(0)) logAddr("source3", src3);
         } else {
-            console.log(
+            logLine(
                 "WARNING: single price source. Set BASE_ORACLE_AGG_2 to deploy behind MedianOracle before taking real risk."
             );
         }
-        console.log("vault", address(vault));
-        console.log("usdc", usdc);
-        console.log("weth", weth);
+        logAddr("vault", address(vault));
+        logAddr("usdc", usdc);
+        logAddr("weth", weth);
     }
 }

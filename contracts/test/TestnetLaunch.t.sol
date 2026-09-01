@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IERC20} from "../src/DealerVault.sol";
+import {DealerVault, IERC20} from "../src/DealerVault.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {SimplePair} from "../src/SimplePair.sol";
+import {TestERC20} from "../src/TestERC20.sol";
+import {WPIT} from "../src/WPIT.sol";
+import {DeploySepolia} from "../script/DeploySepolia.s.sol";
 
 interface Vm {
     function prank(address) external;
+    function setEnv(string calldata, string calldata) external;
+    function chainId(uint256) external;
 }
 
 /// @notice Testnet-launch prerequisites.
@@ -73,5 +78,66 @@ contract TestnetLaunchTest {
             revert("fee below the 5 bps band accepted");
         } catch {}
         require(pair.feeBps() == 30, "unchanged");
+    }
+
+    // ------------------------------------------------------------ deploy script
+
+    /// Audit N-1 regression: the deploy script must run to completion with the
+    ///        EOA dev wallet its own docs prescribe for SEPOLIA_OWNER. Before
+    ///        the fix it passed `enforceContractOwner = true` and the vault
+    ///        constructor reverted OwnerNotContract() — the launch died at the
+    ///        fifth deployment, and no test ever executed the script, so a
+    ///        105/105 suite shipped a bricked launch path.
+    function testDeployScriptRunsWithAnEoaDevWallet() public {
+        vm.setEnv("SEPOLIA_OWNER", "0x000000000000000000000000000000000000dEF1");
+        vm.chainId(84532); // the guard passes by chain, no override needed
+        DeploySepolia script = new DeploySepolia();
+        script.run();
+
+        (
+            address usdcT,
+            address wethT,
+            address wpitT,
+            address oracleA,
+            address vault,
+            address p1,
+            address p2,
+            address p3,
+            address farm,
+            address stake,
+            bool manual
+        ) = script.d();
+        require(vault != address(0) && vault.code.length > 0, "vault deployed");
+        require(DealerVault(vault).owner() == DEV, "dev wallet owns the vault - an EOA is the point on a testnet");
+        require(DealerVault(vault).operator() == DEV, "operator defaults to the dev wallet");
+        require(usdcT != address(0) && wethT != address(0) && wpitT != address(0), "tokens deployed");
+        require(oracleA != address(0) && manual, "manual-oracle fallback when no aggregator is given");
+        require(p1 != address(0) && p2 != address(0) && p3 != address(0), "pools deployed");
+        require(farm != address(0) && stake != address(0), "farm and stake deployed");
+
+        // The handover actually happened: nothing stays on the deploy key.
+        require(TestERC20(usdcT).owner() == DEV, "tUSDC handed over");
+        require(TestERC20(wethT).owner() == DEV, "tWETH handed over");
+        require(SimplePair(p1).owner() == DEV, "ETH/USDC pool handed over");
+        // WPIT's mint key moves by the two-step handshake — proposed, never
+        // auto-accepted, so a typo shows up between two transactions.
+        require(WPIT(wpitT).pendingMinter() == DEV, "mint handover proposed to the dev wallet");
+    }
+
+    /// The relaxation follows the CHAIN, not the operator's word: with the
+    ///        any-chain override set on a NON-Sepolia chain id, an EOA owner
+    ///        must still revert OwnerNotContract(). This is what keeps a
+    ///        `--broadcast` mistake from ever landing an EOA-owned vault on a
+    ///        chain that matters.
+    function testDeployScriptStaysStrictOffSepolia() public {
+        vm.setEnv("SEPOLIA_OWNER", "0x000000000000000000000000000000000000dEF1");
+        vm.setEnv("SEPOLIA_ALLOW_ANY_CHAIN", "1");
+        vm.chainId(8453); // Base mainnet id, with the escape hatch armed
+        DeploySepolia script = new DeploySepolia();
+        try script.run() {
+            revert("expected OwnerNotContract");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.OwnerNotContract.selector, "must revert OwnerNotContract");
+        }
     }
 }

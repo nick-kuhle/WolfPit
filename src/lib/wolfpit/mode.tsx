@@ -1,29 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  MODE_CHAIN,
-  MODE_COPY,
-  MODE_KEY,
-  modeStatuses,
-  normalizeMode,
-  type Mode,
-  type ModeStatus,
-} from "./mode-config";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { MODE_CHAIN, MODE_COPY, MODE_KEY, modeStatuses, normalizeMode, type Mode } from "./mode-config";
+import { ModeContext, type ModeCtx } from "./use-mode";
 
 /**
  * React binding for the app-wide trading mode. The rules themselves live in
- * `mode-config.ts` so they can be imported (and tested) without React.
+ * `mode-config.ts` so they can be imported (and tested) without React; the
+ * context and `useMode` hook live in `use-mode.ts` so this file exports only
+ * the provider component (react-refresh purity).
  */
-type Ctx = {
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  /** Every mode, with whether this deployment can serve it. */
-  statuses: ModeStatus[];
-  available: Mode[];
-  chain: (typeof MODE_CHAIN)[Mode];
-  copy: (typeof MODE_COPY)[Mode];
-};
-
-const ModeContext = createContext<Ctx | null>(null);
 
 function readEnv(key: string): string | undefined {
   try {
@@ -71,24 +55,9 @@ export function ModeProvider({ children }: { children: ReactNode }) {
     [available],
   );
 
-  const value = useMemo<Ctx>(
+  const value = useMemo<ModeCtx>(
     () => ({ mode, setMode, statuses, available, chain: MODE_CHAIN[mode], copy: MODE_COPY[mode] }),
     [mode, setMode, statuses, available],
   );
   return <ModeContext.Provider value={value}>{children}</ModeContext.Provider>;
-}
-
-/** Read the app-wide mode. Safe outside the provider (returns sim). */
-export function useMode(): Ctx {
-  const ctx = useContext(ModeContext);
-  return (
-    ctx ?? {
-      mode: "sim",
-      setMode: () => {},
-      statuses: modeStatuses({}),
-      available: ["sim"],
-      chain: MODE_CHAIN.sim,
-      copy: MODE_COPY.sim,
-    }
-  );
 }

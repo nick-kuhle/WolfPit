@@ -6,6 +6,7 @@ import {
 } from "jose";
 
 export const GATE_IDENTITY_HEADER = "x-wolfpit-identity";
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const GATE_JWKS_PATH = "/__gate/identity-key";
 
 const JWKS_CACHE_TTL_MS = 300_000;
@@ -126,6 +127,7 @@ type GateEndpoints = { issuer: string; jwksUrl: string };
  *     otherwise: no header, no verification, sign-in falls through to Better
  *     Auth's own sessions.
  */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function resolveGateEndpoints(headers: Headers): GateEndpoints | null {
   const explicit = env("WOLFPIT_GATE_ORIGIN");
   if (explicit) {

@@ -37,6 +37,7 @@ export function hasSharedDatabase(): boolean {
 }
 
 /** Which backend is active: "neon" (shared) or "pglite" (per-process). */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function databaseBackend(): DbSource {
   return dbSource;
 }

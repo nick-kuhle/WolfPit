@@ -10,10 +10,10 @@ import { cn, fmtPx, fmtQty } from "@/lib/utils";
 export const Route = createFileRoute("/orders")({ component: OrdersPage });
 
 type Asset = "USDC" | "ETH" | "WPIT";
-type Fx = "USD" | "EUR" | "GBP" | "JPY" | "BTC";
+type Fx = "USD" | "EUR" | "GBP" | "JPY";
 
-const FX_PER_USD: Record<Fx, number> = { USD: 1, EUR: 0.93, GBP: 0.79, JPY: 147, BTC: 0 };
-const FX_SYM: Record<Fx, string> = { USD: "$", EUR: "€", GBP: "£", JPY: "¥", BTC: "₿" };
+const FX_PER_USD: Record<Fx, number> = { USD: 1, EUR: 0.93, GBP: 0.79, JPY: 147 };
+const FX_SYM: Record<Fx, string> = { USD: "$", EUR: "€", GBP: "£", JPY: "¥" };
 
 function shotQty(shot: CashShot | undefined, asset: Asset) {
   if (!shot) return null;
@@ -28,11 +28,7 @@ function usdOf(qty: number, asset: Asset, eth: number, wpit: number) {
   return qty * wpit;
 }
 
-function fmtFx(usd: number, fx: Fx, btc: number) {
-  if (fx === "BTC") {
-    const b = btc > 0 ? usd / btc : 0;
-    return `₿${b.toFixed(b >= 1 ? 4 : 6)}`;
-  }
+function fmtFx(usd: number, fx: Fx) {
   const n = usd * FX_PER_USD[fx];
   const sym = FX_SYM[fx];
   if (fx === "JPY") return `${sym}${Math.round(n).toLocaleString("en-US")}`;
@@ -45,7 +41,6 @@ function OrdersPage() {
   const cancel = useWolf((s) => s.cancelOrder);
   const eth = useWolf((s) => s.eth);
   const wpit = useWolf((s) => s.wpit);
-  const btc = useWolf((s) => s.btc);
   const [asset, setAsset] = useState<Asset>("USDC");
   const [fx, setFx] = useState<Fx>("USD");
 
@@ -113,7 +108,7 @@ function OrdersPage() {
                 </button>
               </div>
               {fills.map((f) => (
-                <FillRow key={f.id} f={f} asset={asset} fx={fx} eth={eth} wpit={wpit} btc={btc} />
+                <FillRow key={f.id} f={f} asset={asset} fx={fx} eth={eth} wpit={wpit} />
               ))}
             </div>
           )}
@@ -135,14 +130,12 @@ function FillRow({
   fx,
   eth,
   wpit,
-  btc,
 }: {
   f: OrderFill;
   asset: Asset;
   fx: Fx;
   eth: number;
   wpit: number;
-  btc: number;
 }) {
   const b = shotQty(f.before, asset);
   const a = shotQty(f.after, asset);
@@ -165,7 +158,7 @@ function FillRow({
       <span className={cn("text-right tabular-nums", d == null ? "text-muted" : d > 0 ? "text-up" : d < 0 ? "text-down" : "text-muted")}>
         {d == null ? "—" : fmtQty(d, true)}
       </span>
-      <span className="text-right tabular-nums text-brass">{usd == null ? "—" : fmtFx(usd, fx, btc)}</span>
+      <span className="text-right tabular-nums text-brass">{usd == null ? "—" : fmtFx(usd, fx)}</span>
     </div>
   );
 }
@@ -188,6 +181,6 @@ function Toggle<T extends string>({ value, onChange, opts }: { value: T; onChang
 }
 
 function nextFx(fx: Fx): Fx {
-  const order: Fx[] = ["USD", "EUR", "GBP", "JPY", "BTC"];
+  const order: Fx[] = ["USD", "EUR", "GBP", "JPY"];
   return order[(order.indexOf(fx) + 1) % order.length]!;
 }

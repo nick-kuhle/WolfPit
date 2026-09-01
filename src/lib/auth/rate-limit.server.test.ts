@@ -16,6 +16,7 @@ import {
   ADMIN_RL_MAX_USER,
   RL_MAX_ACCT,
   RL_WINDOW_SEC,
+  clientIp,
   createAdminLoginGuard,
   guardAuthRequest,
   type AdminThrottle,
@@ -275,4 +276,45 @@ test("auth guard: non-sensitive endpoints never touch the store", async () => {
     c: number;
   }[];
   assert.equal(rows[0]!.c, 0, "GET callbacks must not write");
+});
+
+// ────────────────────────────── audit S-2: clientIp ─────────────────────────
+// The leftmost x-forwarded-for hop is whatever the caller injected when the
+// proxy APPENDS; only the rightmost hop (or Vercel's overwrite) is real.
+// Rate-limit keys must not be rotatable by header cosmetics.
+
+test("clientIp: Vercel overwrite regime - single platform-set value", () => {
+  const req = new Request("http://localhost/", { headers: { "x-forwarded-for": "203.0.113.7" } });
+  assert.equal(clientIp(req), "203.0.113.7");
+});
+
+test("clientIp: appending-proxy regime - the LAST hop is the real client", () => {
+  const req = new Request("http://localhost/", {
+    headers: { "x-forwarded-for": "1.2.3.4, 10.0.0.9, 203.0.113.7" },
+  });
+  assert.equal(clientIp(req), "203.0.113.7", "1.2.3.4 is attacker-injected; only the last hop is observed");
+});
+
+test("clientIp: spoofing the leftmost hop does not rotate the key", () => {
+  const mk = (spoofed: string) =>
+    new Request("http://localhost/", { headers: { "x-forwarded-for": `${spoofed}, 203.0.113.7` } });
+  assert.equal(clientIp(mk("8.8.8.8")), clientIp(mk("9.9.9.9")), "same observed client, same key");
+});
+
+test("clientIp: an injected cf-connecting-ip must not beat the forwarding chain", () => {
+  const req = new Request("http://localhost/", {
+    headers: { "x-forwarded-for": "203.0.113.7", "cf-connecting-ip": "6.6.6.6" },
+  });
+  assert.equal(clientIp(req), "203.0.113.7");
+});
+
+test("clientIp: cf-connecting-ip is the fallback when no chain exists", () => {
+  const req = new Request("http://localhost/", { headers: { "cf-connecting-ip": "198.51.100.4" } });
+  assert.equal(clientIp(req), "198.51.100.4");
+});
+
+test("clientIp: empty and whitespace-only hops are skipped", () => {
+  const req = new Request("http://localhost/", { headers: { "x-forwarded-for": " , , 203.0.113.7 " } });
+  assert.equal(clientIp(req), "203.0.113.7");
+  assert.equal(clientIp(null), undefined);
 });

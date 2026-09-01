@@ -6,7 +6,6 @@ interface IERC20 {
     function transferFrom(address from, address to, uint256 amt) external returns (bool);
     function approve(address spender, uint256 amt) external returns (bool);
     function balanceOf(address who) external view returns (uint256);
-    function decimals() external view returns (uint8);
 }
 
 /// @notice Minimal junior-tranche interface (Stake) the vault may slash.
@@ -136,6 +135,10 @@ contract DealerVault {
     error BadCalldata();
     error ReleaseNotReady();
     error DelayTooLong();
+    /// @notice A release (or queued release) larger than the reserved book.
+    ///         Distinct from Zero() so a keeper bug reports honestly instead
+    ///         of masquerading as a zero-size call (audit C-4).
+    error ReleaseTooLarge();
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -240,13 +243,17 @@ contract DealerVault {
         oracle = next;
     }
 
-    /// @notice Pause / resume the pit. OWNER or OPERATOR — the fail-closed
-    ///         watcher signs as the OPERATOR, so an on-chain halt must not
-    ///         revert NotOwner; the operator's manual `Pause{v}` command can
-    ///         also resume after review. A third party stays locked out.
-    ///         Pausing stops new risk (the `live` gate); safe LP withdrawals
-    ///         remain available while paused.
+    /// @notice Pause / resume the pit, asymmetrically (audit C-3). HALTING is
+    ///         owner OR operator — the fail-closed watcher signs as the keeper
+    ///         hot key, so an on-chain halt must never revert NotOwner.
+    ///         RESUMING is owner-only: a compromised keeper key could
+    ///         otherwise unpause behind the watcher's back and keep trading,
+    ///         silently undoing step 1 of the compromise runbook. A third
+    ///         party stays locked out of both directions. Pausing stops new
+    ///         risk (the `live` gate); safe LP withdrawals remain available
+    ///         while paused.
     function pause(bool v) external onlyOperator {
+        if (!v && msg.sender != owner) revert NotOwner();
         paused = v;
         emit PausedSet(v);
     }
@@ -456,6 +463,40 @@ contract DealerVault {
         _consume(setAllowanceCapId(token, next));
         emit AllowanceCapSet(address(token), allowanceCap[address(token)], next);
         allowanceCap[address(token)] = next;
+    }
+
+    // ------------------------------------------------------- instant revoke
+    // Audit C-2: ADMIN_TIMELOCK exists so depositors can exit before a
+    // RISK-INCREASING change lands. Applying the same 2-day queue to
+    // REVOCATIONS meant the runbook had no instant lever in a router
+    // incident. The three levers below are owner-only and effective in the
+    // same transaction; they reuse the existing events so the keeper alert
+    // wiring (TargetAllowed / SelectorAllowed / AllowanceSet) sees them
+    // unchanged. Grants stay timelocked — only the risk-DECREASING direction
+    // is instant. Revoking what was never granted is allowed (idempotent
+    // under incident pressure; no fat-finger revert).
+
+    /// @notice Remove a router from the `exec` allowlist immediately. Stops
+    ///         keeper-initiated calls; see revokeAllowance for direct pulls.
+    function revokeTarget(address target) external onlyOwner {
+        allowedTarget[target] = false;
+        emit TargetAllowed(target, false);
+    }
+
+    /// @notice Remove a selector from the `exec` allowlist immediately.
+    function revokeSelector(bytes4 selector) external onlyOwner {
+        allowedSelector[selector] = false;
+        emit SelectorAllowed(selector, false);
+    }
+
+    /// @notice Zero a router's token allowance immediately. This is the one
+    ///         lever that stops DIRECT pulls: an allowlisted router holding a
+    ///         live ERC-20 allowance can transferFrom the vault without
+    ///         touching `exec` at all (bounded only by allowanceCap), so in a
+    ///         router incident revoking the target is not enough.
+    function revokeAllowance(IERC20 token, address spender) external onlyOwner {
+        token.safeApprove(spender, 0);
+        emit AllowanceSet(address(token), spender, 0);
     }
 
     /// @notice Keeper executes an allowlisted aggregator call (swap/hedge).
@@ -727,25 +768,40 @@ contract DealerVault {
     ///         excluded from the trading balance. Reverts when real balances
     ///         are below reserved + insurance amounts — a loss must be
     ///         investigated, never silently absorbed into the ledger.
+    ///
+    ///         Audit C-1: the floor checks above are NOT the inventory law.
+    ///         `exec` only guarantees balance ≥ insurance + reserved, so a
+    ///         hedge that sold free WETH down to the floor reconciled
+    ///         "cleanly" while leaving reserved > α·balance — the one silent
+    ///         breach of the law the contracts never re-checked. The
+    ///         book-sync is exactly where that breach lands, so it enforces
+    ///         the same α check openShort runs on its own atomic path. If an
+    ///         incident genuinely requires breaching α, the owner first
+    ///         unwinds the reserved book (releaseCall/releasePut), then
+    ///         reconciles — the sequence is monotonic, never wedged.
     function reconcileBalances() external onlyOperator {
         uint256 e = weth.balanceOf(address(this));
         uint256 u = usdc.balanceOf(address(this));
         if (u < insuranceUsdc) revert UnreconciledLoss();
         u -= insuranceUsdc; // trading USDC only
         if (e < reservedEth || u < reservedUsdc) revert UnreconciledLoss();
+        if (reservedEth * 10_000 > e * ALPHA_BPS) revert UtilCap();
+        if (reservedUsdc * 10_000 > u * ALPHA_BPS) revert UtilCap();
         ethBal = e;
         usdcBal = u;
     }
 
     function releaseCall(uint256 size) external live onlyOperator nonReentrant {
-        if (size > reservedEth) revert Zero();
+        if (size == 0) revert Zero();
+        if (size > reservedEth) revert ReleaseTooLarge();
         _consumeReleaseQueue(true, size);
         reservedEth -= size;
         emit RiskReleased(this.releaseCall.selector, size);
     }
 
     function releasePut(uint256 lock) external live onlyOperator nonReentrant {
-        if (lock > reservedUsdc) revert Zero();
+        if (lock == 0) revert Zero();
+        if (lock > reservedUsdc) revert ReleaseTooLarge();
         _consumeReleaseQueue(false, lock);
         reservedUsdc -= lock;
         emit RiskReleased(this.releasePut.selector, lock);
@@ -777,7 +833,8 @@ contract DealerVault {
     ///         entry and restarts the clock — a compromised key cannot stack
     ///         a large release behind an innocuous one.
     function queueReleaseCall(uint256 size) external live onlyOperator {
-        if (size == 0 || size > reservedEth) revert Zero();
+        if (size == 0) revert Zero();
+        if (size > reservedEth) revert ReleaseTooLarge();
         queuedReleaseEth = size;
         queuedReleaseEthEta = block.timestamp + releaseDelay;
         emit ReleaseQueued(this.releaseCall.selector, size, queuedReleaseEthEta);
@@ -785,7 +842,8 @@ contract DealerVault {
 
     /// @notice Queue a USDC-side release (same replace-and-restart rule).
     function queueReleasePut(uint256 lock) external live onlyOperator {
-        if (lock == 0 || lock > reservedUsdc) revert Zero();
+        if (lock == 0) revert Zero();
+        if (lock > reservedUsdc) revert ReleaseTooLarge();
         queuedReleaseUsdc = lock;
         queuedReleaseUsdcEta = block.timestamp + releaseDelay;
         emit ReleaseQueued(this.releasePut.selector, lock, queuedReleaseUsdcEta);

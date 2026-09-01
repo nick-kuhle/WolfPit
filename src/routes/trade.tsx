@@ -9,7 +9,7 @@ import { useSwap } from "@/lib/swap/use-swap";
 import { SWAP_CHAINS } from "@/lib/swap/chains";
 import { SWAP_FEE_BPS, bpsToPct } from "@/lib/swap/config";
 import { cn } from "@/lib/utils";
-import { useMode } from "@/lib/wolfpit/mode";
+import { useMode } from "@/lib/wolfpit/use-mode";
 
 /**
  * The trade page hosts the desks:

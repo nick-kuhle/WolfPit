@@ -5,6 +5,7 @@ import {DealerVault, IERC20} from "../src/DealerVault.sol";
 import {TestERC20} from "../src/TestERC20.sol";
 import {WPIT} from "../src/WPIT.sol";
 import {SimplePair} from "../src/SimplePair.sol";
+import {logLine, logUint} from "./ConsoleLog.sol";
 
 /**
  * Fund the Base Sepolia desk: mint test tokens to the dev wallet, seed the
@@ -29,15 +30,8 @@ interface Vm {
     function stopBroadcast() external;
 }
 
-interface Console {
-    function log(string calldata) external;
-    function log(string calldata, uint256) external;
-    function log(string calldata, address) external;
-}
-
 contract SeedSepolia {
     Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
-    Console constant console = Console(0x000000000000000000636F6e736F6c652e6c6f67);
 
     /// @dev Storage, not locals: solc runs out of stack slots with a dozen
     ///      addresses and amounts in one frame.
@@ -127,12 +121,12 @@ contract SeedSepolia {
     }
 
     function _print() internal {
-        console.log("seeded ETH/USDC   weth:", ethSide);
-        console.log("                  usdc:", usdcSide);
-        console.log("seeded WPIT/USDC  wpit:", wpitForUsdcPool);
-        console.log("seeded WPIT/ETH   wpit:", wpitForEthPool);
-        console.log("vault inventory   usdc:", VAULT_USDC);
-        console.log("vault insurance   usdc:", INSURANCE);
-        console.log("Desk is funded. Switch the app to Testnet and trade.");
+        logUint("seeded ETH/USDC   weth:", ethSide);
+        logUint("                  usdc:", usdcSide);
+        logUint("seeded WPIT/USDC  wpit:", wpitForUsdcPool);
+        logUint("seeded WPIT/ETH   wpit:", wpitForEthPool);
+        logUint("vault inventory   usdc:", VAULT_USDC);
+        logUint("vault insurance   usdc:", INSURANCE);
+        logLine("Desk is funded. Switch the app to Testnet and trade.");
     }
 }

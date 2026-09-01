@@ -231,6 +231,7 @@ async function prodRun(): Promise<QueryRunner> {
 }
 
 /** Read the live policy from the app database. Throws when it cannot be read. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export async function getPolicy(): Promise<Policy> {
   return readPolicy(await prodRun());
 }
@@ -457,6 +458,7 @@ export async function checkTradingAllowed(opts: {
 }
 
 /** Convenience wrapper that throws instead of returning a result. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export async function assertTradingAllowed(opts: {
   products?: string[];
   headers?: { get(name: string): string | null } | null;

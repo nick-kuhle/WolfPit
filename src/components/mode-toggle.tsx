@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { MODE_COPY, type Mode } from "@/lib/wolfpit/mode-config";
-import { useMode } from "@/lib/wolfpit/mode";
+import { useMode } from "@/lib/wolfpit/use-mode";
 
 /**
  * The sim / testnet / live selector. Lives in the app shell, so it appears on

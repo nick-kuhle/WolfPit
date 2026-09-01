@@ -22,6 +22,7 @@ function isPreviewEmbedderOrigin(origin: string, allow: readonly string[] = []):
  * `https://<app>.example.com`). Empty suffix ⇒ never a preview guest, so the
  * browser behaves like any deployed app.
  */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function isSandboxPreviewGuestHost(
   hostname: string,
   suffix: string = String(

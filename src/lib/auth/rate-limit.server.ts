@@ -41,10 +41,13 @@
  * ADMIN PANEL section below).
  */
 export const RL_WINDOW_SEC = 15 * 60;
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const RL_MAX_IP = 20;
 export const RL_MAX_ACCT = 5;
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export const RL_MAX_PAIR = 5;
 
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export class RateLimitedError extends Error {
   readonly status = 429;
   constructor() {
@@ -53,6 +56,7 @@ export class RateLimitedError extends Error {
   }
 }
 
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export class RateLimitStoreError extends Error {
   readonly status = 503;
   constructor() {
@@ -72,17 +76,36 @@ export interface RequestLike {
 }
 
 /**
- * Best-effort caller IP. Prefers `cf-connecting-ip` (set by Cloudflare, not
- * spoofable by the client) over the first `x-forwarded-for` hop (spoofable
- * when the origin is reachable directly or the proxy appends instead of
- * overwriting). Truncated defensively.
+ * Best-effort caller IP (audit S-2). Trust model, platform by platform:
+ *
+ *   - Vercel (the production host) OVERWRITES `x-forwarded-for` with the real
+ *     client IP and "does not forward external IPs... to prevent IP spoofing"
+ *     (vercel.com/docs/headers/request-headers), so on Vercel the whole chain
+ *     is platform-set.
+ *   - Appending reverse proxies (nginx `$proxy_add_x_forwarded_for` and
+ *     friends) put client-INJECTED values FIRST and the observed client IP
+ *     LAST — the first hop an attacker fully controls.
+ *
+ * Taking the LAST non-empty hop is correct under both regimes; taking the
+ * first (the old code) let an appending-proxy caller rotate the rate-limit
+ * key at will. `cf-connecting-ip` is only meaningful when traffic actually
+ * transits Cloudflare — anywhere else a client can inject it freely — so it
+ * demotes to a fallback for requests that carry no forwarding chain at all.
+ * Truncated defensively.
  */
 export function clientIp(request: RequestLike | null | undefined): string | undefined {
   if (!request) return undefined;
+  const fwd = request.headers.get("x-forwarded-for");
+  if (fwd) {
+    const hops = fwd
+      .split(",")
+      .map((h) => h.trim())
+      .filter(Boolean);
+    const last = hops[hops.length - 1];
+    if (last) return last.slice(0, 64);
+  }
   const cf = request.headers.get("cf-connecting-ip")?.trim();
   if (cf) return cf.slice(0, 64);
-  const fwd = request.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim().slice(0, 64) || undefined;
   return undefined;
 }
 
@@ -278,6 +301,7 @@ export async function guardAuthRequest(
 }
 
 /** Convenience for server-function middleware: throws RateLimitedError. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export async function assertNotRateLimited(request: Request): Promise<void> {
   const g = await guardAuthRequest(request);
   if (g.blocked) throw g.blocked.status === 429 ? new RateLimitedError() : new RateLimitStoreError();
@@ -287,6 +311,7 @@ export async function assertNotRateLimited(request: Request): Promise<void> {
  * IP-only check for non-POST surfaces such as the sign-in popup initiation
  * (`/auth/popup` is a GET that starts an OAuth flow). True = throttled.
  */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export async function throttledByIp(request: Request): Promise<boolean> {
   const ip = clientIp(request) ?? "unknown";
   try {
@@ -298,6 +323,7 @@ export async function throttledByIp(request: Request): Promise<boolean> {
 }
 
 /** The caller's IP, or undefined when unknown (for logging/audit). */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function callerIp(request: RequestLike | null | undefined): string | undefined {
   return clientIp(request);
 }

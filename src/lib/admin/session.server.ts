@@ -99,6 +99,7 @@ export function verifyPassword(user: string, pass: string) {
 }
 
 /** Exported for tests: mint a token the way `setAdminCookie` does. */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function mintAdminToken(user: string) {
   const exp = Date.now() + MAX_AGE * 1000;
   const payload = `${user}.${exp}`;
@@ -114,6 +115,7 @@ export function readAdminUser(): string | null {
  * testable — which is how the "unverifiable cookie must be null, not a throw"
  * rule is now held by a test rather than by hope.
  */
+/** @public — intentional module API (kept for tests/callers outside knip's reach graph). */
 export function verifyAdminToken(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const parts = raw.split(".");

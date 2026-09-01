@@ -35,6 +35,16 @@ import { erc20Abi, type Hex } from "viem";
 // safely be used until that signing/submission flow exists end to end.
 const ZEROX_BASE = "https://api.0x.org/swap/allowance-holder";
 
+/**
+ * Hard ceiling on any 0x upstream call (audit S-1): without it a hung
+ * aggregator request pins a serverless invocation (and the user's desk) until
+ * the platform kills it. The existing catch maps the abort to the same
+ * friendly unreachable-aggregator error as any other fetch failure. The token
+ * search surface already does this (token-search-impl, 5 s); quotes get more
+ * headroom because a firm quote is the step with money attached.
+ */
+const ZEROX_TIMEOUT_MS = 8_000;
+
 function apiKey(): string | undefined {
   const k = process.env.ZEROX_API_KEY;
   return k && k.trim() ? k.trim() : undefined;
@@ -238,6 +248,7 @@ export async function fetchSpotQuote(req: QuoteRequest): Promise<QuoteResult> {
   try {
     res = await fetch(url, {
       headers: { "0x-api-key": key, "0x-version": "v2" },
+      signal: AbortSignal.timeout(ZEROX_TIMEOUT_MS),
     });
   } catch {
     return { ok: false, error: "Could not reach the aggregator. Try again." };
