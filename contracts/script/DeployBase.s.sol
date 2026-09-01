@@ -60,7 +60,7 @@ contract DeployBase {
         vm.startBroadcast();
         ChainlinkOracle oracle = new ChainlinkOracle(agg);
         DealerVault vault =
-            new DealerVault(IERC20(usdc), IERC20(weth), IOracle(address(oracle)), owner, operator);
+            new DealerVault(IERC20(usdc), IERC20(weth), IOracle(address(oracle)), owner, operator, true);
         vm.stopBroadcast();
 
         vm.label(address(oracle), "ChainlinkOracle");

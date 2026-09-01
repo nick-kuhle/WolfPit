@@ -85,6 +85,7 @@ contract HedgeDrainRouter {
 }
 
 interface Vm {
+    function warp(uint256) external;
     function prank(address) external;
     function startPrank(address) external;
     function stopPrank() external;
@@ -98,11 +99,40 @@ contract DealerVaultTest {
     DealerVault vault;
     address constant ALICE = address(0xA11CE);
 
+    /// WP-05 / #12: `allowTarget` and `setAllowance` are now timelocked, so the
+    /// tests queue the action, warp past ADMIN_TIMELOCK, and then execute it.
+    /// The warp is deliberate: a test that skipped it would not be exercising
+    /// the control the issue asked for.
+    function _allowTarget(address target, bool ok) internal {
+        vault.queueAllowTarget(target, ok);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowTarget(target, ok);
+    }
+
+    function _setAllowance(IERC20 token, address spender, uint256 amount) internal {
+        vault.queueSetAllowance(token, spender, amount);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.setAllowance(token, spender, amount);
+    }
+
+    function _allowSelector(bytes4 selector, bool ok) internal {
+        vault.queueAllowSelector(selector, ok);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowSelector(selector, ok);
+    }
+
+    /// Wire a router the way a real launch would: allowlist the address, allow
+    /// the selector it is called with, and grant a BOUNDED allowance.
+    function _wireRouter(address router, bytes4 selector) internal {
+        _allowTarget(router, true);
+        _allowSelector(selector, true);
+    }
+
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         oracle = new MockOracle(4_000e6);
-        vault = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(oracle)), address(this), address(this));
+        vault = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(oracle)), address(this), address(this), true);
         usdc.mint(address(this), 2_000_000e6);
         weth.mint(address(this), 200 ether);
         usdc.mint(ALICE, 2_000_000e6);
@@ -240,8 +270,9 @@ contract DealerVaultTest {
     function _routerFixture() internal returns (SwapRouter router) {
         router = new SwapRouter(weth, usdc);
         usdc.mint(address(router), 10_000_000e6);
-        vault.allowTarget(address(router), true);
-        vault.setAllowance(IERC20(address(weth)), address(router), type(uint256).max);
+        _wireRouter(address(router), SwapRouter.sell.selector);
+        // Bounded, not unlimited: WP-05 / #12 caps grants at the per-token ceiling.
+        _setAllowance(IERC20(address(weth)), address(router), 100 ether);
     }
 
     /// Atomic openShort: router swap + booking in ONE tx, booked from
@@ -344,7 +375,7 @@ contract DealerVaultTest {
 
     function testFirstDepositTooSmallReverts() public {
         MockOracle o2 = new MockOracle(4_000e6);
-        DealerVault v2 = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(o2)), address(this), address(this));
+        DealerVault v2 = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(o2)), address(this), address(this), true);
         usdc.approve(address(v2), type(uint256).max);
         try v2.deposit(0, 100e6) {
             revert("expected FirstDepositTooSmall");
@@ -362,7 +393,17 @@ contract DealerVaultTest {
         try vault.exec(address(rec), data) {
             revert("expected BadTarget");
         } catch {}
-        vault.allowTarget(address(rec), true);
+        _allowTarget(address(rec), true);
+        // WP-05 / #12: an allowlisted ADDRESS is not sufficient any more. With
+        // the target allowed but the selector not, the call must still refuse —
+        // otherwise arbitrary calldata to an allowlisted router stays a drain
+        // path, which was the point of the finding.
+        try vault.exec(address(rec), data) {
+            revert("expected BadSelector");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.BadSelector.selector, "must revert BadSelector");
+        }
+        _allowSelector(bytes4(keccak256("ping(uint256)")), true);
         vault.exec(address(rec), data);
         require(rec.pad() == 7, "exec ran");
         require(rec.lastCaller() == address(vault), "vault is msg.sender");
@@ -449,8 +490,8 @@ contract DealerVaultTest {
     function testExecCannotSpendInsuranceReserve() public {
         vault.creditInsurance(20_000e6);
         DrainRouter router = new DrainRouter(IERC20(address(usdc)));
-        vault.allowTarget(address(router), true);
-        vault.setAllowance(IERC20(address(usdc)), address(router), type(uint256).max);
+        _wireRouter(address(router), SwapRouter.sell.selector);
+        _setAllowance(IERC20(address(usdc)), address(router), 400_000e6);
         bytes memory data = abi.encodeWithSignature("drain(address,uint256)", address(vault), 400_001e6);
         try vault.exec(address(router), data) {
             revert("expected InsuranceSpent");
@@ -490,8 +531,9 @@ contract DealerVaultTest {
         vault.creditInsurance(20_000e6);
         vault.writeCall(40 ether); // reservedEth = 40
         DrainRouter router = new DrainRouter(IERC20(address(weth)));
-        vault.allowTarget(address(router), true);
-        vault.setAllowance(IERC20(address(weth)), address(router), type(uint256).max);
+        _wireRouter(address(router), SwapRouter.sell.selector);
+        // Bounded, not unlimited: WP-05 / #12 caps grants at the per-token ceiling.
+        _setAllowance(IERC20(address(weth)), address(router), 100 ether);
         bytes memory data = abi.encodeWithSignature("drain(address,uint256)", address(vault), 61 ether);
         try vault.exec(address(router), data) {
             revert("expected CoverSpent: WETH below reservedEth");
@@ -505,8 +547,8 @@ contract DealerVaultTest {
         vault.creditInsurance(20_000e6);
         vault.writePut(10 ether, 4000e6); // reservedUsdc = 40_000e6
         DrainRouter router = new DrainRouter(IERC20(address(usdc)));
-        vault.allowTarget(address(router), true);
-        vault.setAllowance(IERC20(address(usdc)), address(router), type(uint256).max);
+        _wireRouter(address(router), SwapRouter.sell.selector);
+        _setAllowance(IERC20(address(usdc)), address(router), 400_000e6);
         // 400k trading + 20k insurance = 420k total; draining 380,001 leaves
         // 39,999 total => trading = 19,999 < reservedUsdc 40,000.
         bytes memory data = abi.encodeWithSignature("drain(address,uint256)", address(vault), 380_001e6);
@@ -525,9 +567,16 @@ contract DealerVaultTest {
         vault.creditInsurance(20_000e6);
         HedgeDrainRouter router = new HedgeDrainRouter(weth, usdc);
         usdc.mint(address(router), 10_000_000e6);
-        vault.allowTarget(address(router), true);
-        vault.setAllowance(IERC20(address(weth)), address(router), type(uint256).max);
-        vault.setAllowance(IERC20(address(usdc)), address(router), type(uint256).max);
+        _wireRouter(address(router), SwapRouter.sell.selector);
+        // Bounded, not unlimited: WP-05 / #12 caps grants at the per-token
+        // ceiling. This test needs the drain to actually LAND so it can prove
+        // the insurance floor catches it, so the allowance is set to the full
+        // 1,000,000 USDC cap -- still bounded, deliberately not
+        // type(uint256).max. (At a 400_000e6 grant the token rejects the
+        // 420_000e6 pull first and the guard under test never runs; that
+        // interaction is covered by testSetAllowanceRejectsOverCapGrant.)
+        _setAllowance(IERC20(address(weth)), address(router), 100 ether);
+        _setAllowance(IERC20(address(usdc)), address(router), 1_000_000e6);
         router.setDrain(420_000e6); // eats the entire vault USDC balance
         bytes memory data = abi.encodeWithSignature("sell(uint256)", 1 ether);
         try vault.openShort(1 ether, address(router), data, 0) {

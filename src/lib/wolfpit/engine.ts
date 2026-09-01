@@ -26,6 +26,8 @@ import {
   bsVega,
   clamp,
   ewmaRv,
+  ewmaRvAdaptive,
+  RV_MIN_BARS,
   ivSmile,
   monthEnd,
   nextFriday,
@@ -93,6 +95,10 @@ export function initialState(now = T0): EngineState {
     liveSource: "sim-fallback",
     iv: 0.62,
     realizedVol: 0.55,
+    volCandles: [],
+    rvBars: 0,
+    rvSpanHours: 0,
+    rvLive: false,
     candles: seedCandles(now, eth, "eth"),
     wpitCandles: seedCandles(now, wpit, "wpit"),
     account: {
@@ -239,6 +245,8 @@ export function applyLive(
   feed: {
     eth: number;
     candles: EngineState["candles"];
+    /** Dedicated long-history series for the vol estimate; see market.ts. */
+    volCandles?: EngineState["candles"];
     btc?: number;
     at: number;
     source: string;
@@ -257,7 +265,20 @@ export function applyLive(
       circuitUntil = Math.max(circuitUntil, (feed.at || s.clock) + 15 * 60 * 1000);
     }
   }
-  const rv = ewmaRv(feed.candles);
+  /*
+   * Vol comes from the dedicated long series when the caller supplied one, and
+   * falls back to the chart candles otherwise. The fallback is the ~5 h series
+   * that caused M-02's dispersion problem, so it is kept only for the offline
+   * sim path -- a live caller should always pass volCandles.
+   *
+   * rvQuality decides whether the number is real. If the series is flat or too
+   * short, ewmaRvAdaptive returns the prior (0.55) rather than a value clamped
+   * to the 0.15 floor: on a structurally short-gamma book, "I have no data"
+   * must never be reported as "vol is low".
+   */
+  const volSrc = feed.volCandles && feed.volCandles.length >= RV_MIN_BARS ? feed.volCandles : feed.candles;
+  const est = ewmaRvAdaptive(volSrc);
+  const rv = est.rv;
   const next: EngineState = {
     ...s,
     eth,
@@ -265,6 +286,10 @@ export function applyLive(
     ethAsk: clamp(feed.ethAsk && feed.ethAsk > 0 ? feed.ethAsk : eth, ETH_MIN, ETH_MAX),
     btc: feed.btc ?? s.btc,
     candles: feed.candles,
+    volCandles: feed.volCandles && feed.volCandles.length > 0 ? feed.volCandles : s.volCandles,
+    rvBars: est.quality.bars,
+    rvSpanHours: est.quality.spanHours,
+    rvLive: est.quality.ok,
     realizedVol: clamp(rv, 0.15, 2),
     iv: clamp(1.08 * rv, 0.28, 1.6),
     clock: feed.at,

@@ -63,3 +63,55 @@ export const adminWhoami = createServerFn({ method: "GET" }).handler(async () =>
   const user = readAdminUser();
   return { user };
 });
+
+/* ------------------------------------------------------------------ *
+ * WP-07 / #13 — trading policy (pause + geo-fence), server-owned
+ * ------------------------------------------------------------------ */
+
+/**
+ * The client used to OWN these flags (Zustand + localStorage), which meant
+ * pause applied to one browser and the geo-fence could be lifted from
+ * devtools. These functions make the server the owner; the client store
+ * mirrors what it reads back.
+ */
+export const getTradingPolicy = createServerFn({ method: "GET" }).handler(async () => {
+  const { getPolicy, PolicyBlockedError } = await import("./policy.server");
+  try {
+    const policy = await getPolicy();
+    return { ok: true as const, policy };
+  } catch (err) {
+    if (err instanceof PolicyBlockedError) {
+      // Report the store being down rather than silently showing "unpaused":
+      // an operator must be able to see that the control is not readable.
+      return { ok: false as const, error: err.message, unavailable: true as const };
+    }
+    throw err;
+  }
+});
+
+export const setTradingPolicy = createServerFn({ method: "POST" })
+  .validator(
+    (d: { key: "listingsPaused" | "geoFenceUs"; value: boolean; reason?: string }): {
+      key: "listingsPaused" | "geoFenceUs";
+      value: boolean;
+      reason: string;
+    } => ({
+      key: d.key === "geoFenceUs" ? "geoFenceUs" : "listingsPaused",
+      value: Boolean(d.value),
+      reason: typeof d.reason === "string" ? d.reason.trim().slice(0, 200) : "",
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { readAdminUser } = await import("./session.server");
+    const { setPolicy, callerIpForAudit } = await import("./policy.server");
+    // Changing the pause switch or a compliance boundary is a privileged write.
+    const admin = readAdminUser();
+    if (!admin) return { ok: false as const, error: "Admin sign-in required." };
+    const by = `${admin}@${await callerIpForAudit()}`;
+    try {
+      const policy = await setPolicy(data.key, data.value, { reason: data.reason, by });
+      return { ok: true as const, policy };
+    } catch (err) {
+      return { ok: false as const, error: "Policy store unavailable; change not applied." };
+    }
+  });

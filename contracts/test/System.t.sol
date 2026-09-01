@@ -30,7 +30,7 @@ contract SystemTest {
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         oracle = new MockOracle(4_000e6);
         wpit = new WPIT(100_000_000 ether);
-        vault = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(oracle)), address(this), address(this));
+        vault = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(oracle)), address(this), address(this), true);
         pairUsdc = new SimplePair(wpit, usdc, 30);
         pairEth = new SimplePair(wpit, weth, 30);
         farm = new Farm(wpit, vault);

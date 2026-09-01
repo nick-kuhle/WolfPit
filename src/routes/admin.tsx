@@ -1,8 +1,8 @@
 import { createFileRoute, Link, Outlet, redirect, useRouterState } from "@tanstack/react-router";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/shell";
 import { Button } from "@/components/ui/button";
-import { adminLogout, adminWhoami } from "@/lib/admin/actions";
+import { adminLogout, adminWhoami, getTradingPolicy, setTradingPolicy } from "@/lib/admin/actions";
 import { deployTestBook, useAdmin, type ContractBook } from "@/lib/admin/config";
 import { chainLabel } from "@/lib/wolfpit/chain";
 import { useWolf } from "@/lib/wolfpit/store";
@@ -28,6 +28,53 @@ function AdminGate() {
 function AdminDesk({ user }: { user: string }) {
   const a = useAdmin();
   const wolf = useWolf();
+  /*
+   * Server-owned policy (WP-07 / #13). Read on mount and mirrored into the
+   * client store so the rest of the UI keeps working without awaiting a
+   * round-trip on every render — but the server re-checks on every
+   * order-accepting call regardless, so the mirror is never load-bearing.
+   */
+  const [policy, setPolicy] = useState({
+    listingsPaused: a.listingsPaused,
+    geoFenceUs: a.geoFenceUs,
+    detail: {
+      listingsPaused: { reason: "", updatedBy: "", updatedAt: "" },
+      geoFenceUs: { reason: "", updatedBy: "", updatedAt: "" },
+    },
+  });
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyUnavailable, setPolicyUnavailable] = useState(false);
+  const refreshPolicy = useCallback(async () => {
+    const r = await getTradingPolicy();
+    if (r.ok) {
+      setPolicy(r.policy);
+      setPolicyUnavailable(false);
+      // Keep the client mirror in step so non-order UI reflects reality.
+      a.setPaused(r.policy.listingsPaused);
+      a.setGeo(r.policy.geoFenceUs);
+    } else {
+      setPolicyUnavailable(true);
+    }
+  }, [a]);
+  useEffect(() => {
+    void refreshPolicy();
+  }, [refreshPolicy]);
+  const flip = useCallback(
+    async (key: "listingsPaused" | "geoFenceUs", value: boolean) => {
+      setPolicyBusy(true);
+      try {
+        const r = await setTradingPolicy({ data: { key, value, reason: "" } });
+        if (r.ok) {
+          setPolicy(r.policy);
+          a.setPaused(r.policy.listingsPaused);
+          a.setGeo(r.policy.geoFenceUs);
+        }
+      } finally {
+        setPolicyBusy(false);
+      }
+    },
+    [a],
+  );
   const [eth, setEth] = useState(String(wolf.vault.eth));
   const [usdc, setUsdc] = useState(String(wolf.vault.usdc));
   const [busy, setBusy] = useState(false);
@@ -69,13 +116,47 @@ function AdminDesk({ user }: { user: string }) {
         <section className="mt-8 rounded-[var(--radius-lg)] border border-border bg-surface p-4 sm:p-5">
           <h2 className="text-sm font-medium">Listings</h2>
           <p className="mt-1 text-xs text-muted">Chain {chainLabel()} · paper engine</p>
+          {/*
+            WP-07 / #13: these are MIRRORS of server state, not the source of
+            truth. The toggle writes to wolfpit_policy via setTradingPolicy and
+            then re-reads, so what is shown is what every other session sees.
+            Editing localStorage no longer changes anything.
+          */}
+          {policyUnavailable && (
+            <p className="mt-3 rounded-[var(--radius-md)] border border-border bg-danger/10 p-2 text-xs">
+              Policy store unavailable — orders are being refused, and these
+              switches cannot be changed until it can be read.
+            </p>
+          )}
           <label className="mt-4 flex min-h-11 items-center gap-3 text-sm">
-            <input type="checkbox" checked={a.listingsPaused} onChange={(e) => a.setPaused(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={policy.listingsPaused}
+              disabled={policyBusy}
+              onChange={(e) => flip("listingsPaused", e.target.checked)}
+            />
             Pause new futures and options
+            {policy.detail.listingsPaused.updatedAt && (
+              <span className="text-xs text-muted">
+                · {policy.detail.listingsPaused.updatedBy || "unknown"}{" "}
+                {new Date(policy.detail.listingsPaused.updatedAt).toLocaleString()}
+              </span>
+            )}
           </label>
           <label className="flex min-h-11 items-center gap-3 text-sm">
-            <input type="checkbox" checked={a.geoFenceUs} onChange={(e) => a.setGeo(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={policy.geoFenceUs}
+              disabled={policyBusy}
+              onChange={(e) => flip("geoFenceUs", e.target.checked)}
+            />
             US geo-fence (hide minis)
+            {policy.detail.geoFenceUs.updatedAt && (
+              <span className="text-xs text-muted">
+                · {policy.detail.geoFenceUs.updatedBy || "unknown"}{" "}
+                {new Date(policy.detail.geoFenceUs.updatedAt).toLocaleString()}
+              </span>
+            )}
           </label>
         </section>
 

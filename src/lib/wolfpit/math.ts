@@ -156,8 +156,96 @@ export function ivSmile(atm: number, S: number, K: number, T: number) {
  */
 export const MAD_TO_SIGMA = Math.sqrt(Math.PI / 2);
 
-/** Default vol memory: 4 hours, expressed in minutes, not as a bare decimal. */
+/**
+ * Vol memory. Two regimes, because the answer depends on how much history the
+ * feed can actually supply:
+ *
+ *   VOL_BARS_TARGET = 1000 x 1h (~41 days)  ->  RV_HALF_LIFE_DEEP_MIN = 1440 (24 h)
+ *   chart feed only (~300 x 1m, ~5 h)       ->  RV_HALF_LIFE_MIN      =  240 (4 h)
+ *
+ * Measured at a known sigma=0.60 (600 GBM paths, 1h bars), rv/sigma mean+-sd:
+ *
+ *   half-life   eff. bars    24 h history    120 h    336 h   1000 h
+ *       4 h           6        100%+-22     100%+-22  100%+-22  100%+-22
+ *      12 h          18         99%+-24     100%+-13  100%+-13  100%+-13
+ *      24 h          35         99%+-40     100%+-10  100%+-9   100%+-9
+ *      48 h          70         98%+-55     100%+-15  100%+-7   100%+-7
+ *      96 h         139         98%+-65     100%+-32  100%+-8   100%+-5
+ *
+ * Every row is unbiased once the history covers the window; the sd column is
+ * what differs. With a deep series a 24 h half-life cuts dispersion from
+ * +-22% to +-9%. With only ~5 h of tape a 24 h half-life is unusable (+-40%
+ * and rising), which is why the shallow regime keeps 4 h. Choosing the longer
+ * window without fixing the feed would have made the estimate WORSE.
+ */
 export const RV_HALF_LIFE_MIN = 240;
+
+/** Vol memory once the dedicated long series is available (~41 days of 1h bars). */
+export const RV_HALF_LIFE_DEEP_MIN = 1440;
+
+/**
+ * Minimum usable observations before the estimator says anything. Below this
+ * the caller gets the prior, not a number derived from noise.
+ */
+export const RV_MIN_BARS = 8;
+
+/**
+ * What the estimator actually had to work with. Vol reliability must be
+ * OBSERVABLE rather than assumed: a caller that cannot see the sample size
+ * cannot tell a real 20% vol from a broken feed reporting 20%.
+ */
+export type RvQuality = {
+  /** Candles supplied. */
+  bars: number;
+  /** Candles with a usable positive close on both sides of the return. */
+  usable: number;
+  /** Distinct closes. A series with one distinct price carries zero information. */
+  distinct: number;
+  /** Seconds per bar, from the first two timestamps. */
+  barSec: number;
+  /** Hours of history covered. */
+  spanHours: number;
+  /** True when the series carries enough information to estimate vol. */
+  ok: boolean;
+  /** Why not, when ok is false. */
+  reason: "ok" | "too-few-bars" | "flat-series" | "no-positive-closes";
+};
+
+/** Inspect a candle series without estimating from it. */
+export function rvQuality(candles: { t: number; c: number }[]): RvQuality {
+  const bars = candles.length;
+  let usable = 0;
+  let distinct = 0;
+  const seen = new Set<number>();
+  for (let i = 0; i < bars; i++) {
+    const c = candles[i]!.c;
+    if (c > 0 && Number.isFinite(c)) {
+      if (!seen.has(c)) {
+        seen.add(c);
+        distinct++;
+      }
+    }
+    if (i > 0) {
+      const a = candles[i - 1]!.c;
+      if (a > 0 && c > 0) usable++;
+    }
+  }
+  const barSec =
+    bars > 1 ? Math.max(1, (candles[1]!.t - candles[0]!.t) / 1000) : 0;
+  const spanHours = (bars > 1 ? (bars - 1) * barSec : 0) / 3600;
+  // A flat series is NOT low vol. Zero variation means absent data, and
+  // reporting it as a small number is how a short-gamma book ends up
+  // underpriced -- the estimator would clamp to its floor and look sane.
+  const reason: RvQuality["reason"] =
+    bars < RV_MIN_BARS
+      ? "too-few-bars"
+      : usable === 0
+        ? "no-positive-closes"
+        : distinct < 2
+          ? "flat-series"
+          : "ok";
+  return { bars, usable, distinct, barSec, spanHours, ok: reason === "ok", reason };
+}
 
 /** λ for a given bar length and half-life: λ = 0.5^(bar/halfLife). */
 export function ewmaLambda(barSec: number, halfLifeMin = RV_HALF_LIFE_MIN): number {
@@ -165,12 +253,26 @@ export function ewmaLambda(barSec: number, halfLifeMin = RV_HALF_LIFE_MIN): numb
   return Math.pow(0.5, bars);
 }
 
+/**
+ * The prior returned when the series carries no usable information. This is
+ * NOT a floor: a broken feed must not be allowed to look like a calm market.
+ * 0.55 is the same cold-start value used below RV_MIN_BARS, so a flat or
+ * corrupt series degrades to "unknown, assume normal vol" rather than to the
+ * 0.15 clamp, which on a short-gamma book would underprice every option.
+ */
+export const RV_PRIOR = 0.55;
+
+/**
+ * @returns annualised sigma, or RV_PRIOR when the series is degenerate.
+ *          Callers that need to distinguish the two must use rvQuality().
+ */
 export function ewmaRv(
   candles: { t: number; c: number }[],
   halfLifeMin = RV_HALF_LIFE_MIN,
 ) {
-  if (candles.length < 8) return 0.55;
-  const barSec = Math.max(1, (candles[1]!.t - candles[0]!.t) / 1000);
+  const q = rvQuality(candles);
+  if (!q.ok) return RV_PRIOR;
+  const barSec = q.barSec;
   const lambda = ewmaLambda(barSec, halfLifeMin);
   let ewma = 0;
   let n = 0;
@@ -183,8 +285,26 @@ export function ewmaRv(
       n++;
     }
   }
-  if (n === 0) return 0.55;
+  if (n === 0) return RV_PRIOR;
   const annual =
     ewma * MAD_TO_SIGMA * Math.sqrt((365.25 * 24 * 3600) / barSec);
   return Math.min(2, Math.max(0.15, annual));
+}
+
+/**
+ * Half-life appropriate to the series actually in hand. Choosing a long memory
+ * for a short history is the failure mode #25 proposed; this picks from the
+ * measured table above instead.
+ */
+export function halfLifeForHistory(spanHours: number): number {
+  if (spanHours >= 720) return RV_HALF_LIFE_DEEP_MIN; // 30 d of history -> 24 h memory
+  if (spanHours >= 120) return 720; // 5 d -> 12 h
+  return RV_HALF_LIFE_MIN; // shallow -> 4 h
+}
+
+/** Estimate vol, choosing the memory from the history the feed supplied. */
+export function ewmaRvAdaptive(candles: { t: number; c: number }[]) {
+  const q = rvQuality(candles);
+  if (!q.ok) return { rv: RV_PRIOR, quality: q };
+  return { rv: ewmaRv(candles, halfLifeForHistory(q.spanHours)), quality: q };
 }

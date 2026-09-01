@@ -157,7 +157,16 @@ export function sanitizeState(raw: Partial<EngineState> | null | undefined, fall
     wpit,
     btc: nn(raw.btc),
     iv: clamp(nn(raw.iv, base.iv), 0.1, 3),
+    // realizedVol is restored for display continuity, but volCandles is NOT:
+    // a cached series is stale by definition and re-pricing from it would be
+    // worse than waiting 15 s for the next pull. rvLive therefore starts false
+    // and flips true on the first applyLive carrying a real series, so the UI
+    // can distinguish "measured" from "restored, pending refresh".
     realizedVol: clamp(nn(raw.realizedVol, base.realizedVol), 0.1, 3),
+    volCandles: base.volCandles,
+    rvBars: base.rvBars,
+    rvSpanHours: base.rvSpanHours,
+    rvLive: false,
     clock,
     circuitUntil,
     liveAt: Math.min(nn(raw.liveAt), clock),

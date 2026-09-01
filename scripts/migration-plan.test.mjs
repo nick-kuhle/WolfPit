@@ -70,11 +70,27 @@ test("the sign-in schema ships outside the globbed directory (throttle is always
   // The Better Auth sign-in schema is OPT-IN: nothing but the always-on
   // throttle table (+ its prune index) may ship at the migrations/ root, or
   // the glob would apply sign-in tables to apps that never asked for them.
-  const THROTTLE_ONLY = new Set(["0002_wolfpit_rate_limit.sql", "0003_rate_limit_prune.sql"]);
+  // Always-on migrations: the ones that must exist whether or not an app turns
+  // sign-in on. Anything else at this path would be applied to apps that never
+  // asked for it, so this set is deliberately small and each entry justified.
+  //
+  //   0002/0003 — the brute-force throttle; the ADMIN login throttle needs it
+  //               with sign-in off too.
+  //   0004      — the trading policy table (WP-07 / #13). Pause and the
+  //               geo-fence are server-owned controls that must bind every
+  //               session, and they gate order-accepting server functions that
+  //               run with sign-in off. Gating them behind the opt-in auth
+  //               schema would make the incident switch unavailable in exactly
+  //               the default configuration that ships.
+  const ALWAYS_ON = new Set([
+    "0002_wolfpit_rate_limit.sql",
+    "0003_rate_limit_prune.sql",
+    "0004_wolfpit_policy.sql",
+  ]);
   assert.deepEqual(
-    rootFiles.filter((f) => !THROTTLE_ONLY.has(f)),
+    rootFiles.filter((f) => !ALWAYS_ON.has(f)),
     [],
-    "unexpected non-throttle migration at migrations/ root",
+    "unexpected non-always-on migration at migrations/ root",
   );
   // The throttle table ships at BOTH paths by design: the root copy is always
   // applied (the ADMIN login throttle needs it with sign-in off too), and the
@@ -88,6 +104,10 @@ test("the sign-in schema ships outside the globbed directory (throttle is always
     rootFiles.includes("0003_rate_limit_prune.sql"),
     "always-on throttle prune migration missing at migrations/ root",
   );
+  assert.ok(
+    rootFiles.includes("0004_wolfpit_policy.sql"),
+    "always-on trading policy migration missing at migrations/ root",
+  );
   const authNames = authMigrationNames();
   // Both the Better Auth schema and the F14 rate-limit table must ship there —
   // a missing 0002 means sign-in-on deployments never get wolfpit_rate_limit.
@@ -95,6 +115,10 @@ test("the sign-in schema ships outside the globbed directory (throttle is always
   assert.ok(
     authNames.includes("0002_wolfpit_rate_limit.sql"),
     "0002_wolfpit_rate_limit.sql missing from migrations/auth/",
+  );
+  assert.ok(
+    authNames.includes("0004_wolfpit_policy.sql"),
+    "0004_wolfpit_policy.sql missing from migrations/auth/",
   );
 });
 

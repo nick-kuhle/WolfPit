@@ -75,6 +75,8 @@ type Actions = {
   applyLive: (feed: {
     eth: number;
     candles: EngineState["candles"];
+    /** Dedicated long-history vol series; see getVolHistory in market.ts. */
+    volCandles?: EngineState["candles"];
     btc?: number;
     at: number;
     source: string;

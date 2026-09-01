@@ -38,7 +38,12 @@ contract Deployer {
             IERC20(address(weth)),
             IOracle(address(oracle)),
             address(this), // owner during construction so the wiring below works
-            msg.sender // operator: the deployer, from the start
+            msg.sender, // operator: the deployer, from the start
+            // WP-05 / #12: `address(this)` has no code yet mid-construction, so
+            // the contract-owner assertion cannot hold here. This helper is a
+            // launch-shape fixture, NOT the Base mainnet path; DeployBase.s.sol
+            // passes true and requires a real multisig.
+            false
         );
         if (!withWpit) {
             vault.transferOwnership(msg.sender);

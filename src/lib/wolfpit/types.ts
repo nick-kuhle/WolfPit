@@ -171,6 +171,18 @@ export type EngineState = {
   wpit: number;
   iv: number;
   realizedVol: number;
+  /**
+   * Dedicated long-history vol series (~1h bars, ~41 days), separate from
+   * `candles` which serves the chart at whatever interval the user picked.
+   * Risk inputs must not depend on the chart's zoom level.
+   */
+  volCandles: Candle[];
+  /** Bars in the series the vol estimate actually came from. */
+  rvBars: number;
+  /** Hours of history behind the vol estimate. */
+  rvSpanHours: number;
+  /** True when the vol estimate came from real data rather than the prior. */
+  rvLive: boolean;
   candles: Candle[];
   wpitCandles: Candle[];
   btc: number;

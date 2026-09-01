@@ -79,6 +79,17 @@ export const spotQuote = createServerFn({ method: "POST" })
     if (!/^\d+$/.test(data.sellAmount) || /^0+$/.test(data.sellAmount)) {
       return { ok: false, error: "Amount must be a positive integer in token base units." };
     }
+    /*
+     * WP-07 / #13: server-side pause/geo enforcement. A `taker` turns this into
+     * a FIRM executable quote, i.e. the last step before an order, so the gate
+     * belongs here and not only in the client store. Enforced from shared
+     * server state, so flipping pause stops every session at once and no
+     * localStorage edit can lift the geo-fence. Fails closed on store errors:
+     * an operator who pauses the book must not get "store down, allowed".
+     */
+    const { checkTradingAllowed } = await import("../admin/policy.server");
+    const gate = await checkTradingAllowed({ products: ["spot"] });
+    if (!gate.ok) return { ok: false, error: gate.error };
     if (await throttled(await callerIpOf(), "rpcq")) {
       return { ok: false, error: "Too many quote requests. Wait a moment and try again." };
     }

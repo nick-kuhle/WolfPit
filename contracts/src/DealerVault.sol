@@ -72,6 +72,21 @@ contract DealerVault {
     /// @notice DEX aggregator routers `exec` may call (owner-set).
     mapping(address => bool) public allowedTarget;
 
+    /// @notice WP-05 / #12: function selectors `exec` may forward. Without this
+    ///         an allowlisted router could be called with ANY calldata, and any
+    ///         router that exposes a token-moving function becomes a drain path.
+    mapping(bytes4 => bool) public allowedSelector;
+
+    /// @notice token => ceiling on any single allowance granted to a router.
+    ///         Per-token because a single scalar cannot span decimals: 1e12 is
+    ///         1,000,000 USDC (6 dp) but 0.000001 WETH (18 dp). A token with no
+    ///         cap set has a cap of 0, so grants to it revert — fail closed.
+    mapping(address => uint256) public allowanceCap;
+
+    /// @notice id => epoch second at which the queued action becomes executable
+    ///         (0 = not queued).
+    mapping(bytes32 => uint256) public adminReadyAt;
+
     error NotOwner();
     error NotOperator();
     error Paused();
@@ -90,6 +105,12 @@ contract DealerVault {
     error InsufficientShares();
     error InsuranceSpent();
     error CoverSpent();
+    error NotQueued();
+    error TimelockPending();
+    error OwnerNotContract();
+    error AllowanceTooLarge();
+    error BadSelector();
+    error BadCalldata();
 
     event OwnershipTransferStarted(address indexed from, address indexed to);
     event OwnershipTransferred(address indexed from, address indexed to);
@@ -104,6 +125,10 @@ contract DealerVault {
     event RiskOpened(bytes4 indexed sig, uint256 a, uint256 b);
     event RiskReleased(bytes4 indexed sig, uint256 a);
     event Executed(address indexed target, bytes data);
+    event AdminQueued(bytes32 indexed id, uint256 readyAt);
+    event AdminCancelled(bytes32 indexed id);
+    event SelectorAllowed(bytes4 indexed selector, bool allowed);
+    event AllowanceCapSet(address indexed token, uint256 previous, uint256 next);
 
     uint256 private _lock = 1;
 
@@ -129,13 +154,33 @@ contract DealerVault {
         _lock = 1;
     }
 
-    constructor(IERC20 usdc_, IERC20 weth_, IOracle oracle_, address owner_, address operator_) {
+    /// @param enforceContractOwner_ Production deploys MUST pass true. The only
+    ///        caller that passes false is `Deployer`, a launch-shape helper that
+    ///        needs transient self-ownership to wire stake/feeder — and which is
+    ///        not on the Base mainnet deploy path (`DeployBase.s.sol` passes
+    ///        true). See WP-05 / #12.
+    constructor(
+        IERC20 usdc_,
+        IERC20 weth_,
+        IOracle oracle_,
+        address owner_,
+        address operator_,
+        bool enforceContractOwner_
+    ) {
         if (owner_ == address(0) || operator_ == address(0)) revert Zero();
+        // WP-05 / #12: the owner key can allowlist a router and grant it an
+        // allowance, so a single compromised EOA is a complete drain path.
+        // Require a contract (multisig / timelock module) at construction so
+        // the trust model the README advertises is the one that was deployed.
+        if (enforceContractOwner_ && owner_.code.length == 0) revert OwnerNotContract();
         usdc = usdc_;
         weth = weth_;
         oracle = oracle_;
         owner = owner_;
         operator = operator_;
+        // Bounded by default; raising a cap is itself a timelocked action.
+        allowanceCap[address(usdc_)] = DEFAULT_USDC_CAP;
+        allowanceCap[address(weth_)] = DEFAULT_WETH_CAP;
         emit OwnershipTransferred(address(0), owner_);
         emit OperatorSet(address(0), operator_);
     }
@@ -223,23 +268,126 @@ contract DealerVault {
 
     // --------------------------------------------------- aggregator spot route
 
+    /// @notice WP-05 / #12: delay before a queued privileged action executes.
+    ///         Two days is long enough for depositors to see a pending router
+    ///         allowlist change and withdraw before it can move their funds.
+    uint256 public constant ADMIN_TIMELOCK = 2 days;
+
+    /// @notice Default allowance ceilings, sized for a hedge rather than for
+    ///         draining the book: 1,000,000 USDC and 500 WETH. Raising either is
+    ///         a timelocked action, so depositors get ADMIN_TIMELOCK of notice
+    ///         and can withdraw before a larger grant takes effect.
+    uint256 public constant DEFAULT_USDC_CAP = 1_000_000e6;
+    uint256 public constant DEFAULT_WETH_CAP = 500 ether;
+
+    function _queue(bytes32 id) internal {
+        if (adminReadyAt[id] != 0) revert NotQueued(); // already pending
+        uint256 readyAt = block.timestamp + ADMIN_TIMELOCK;
+        adminReadyAt[id] = readyAt;
+        emit AdminQueued(id, readyAt);
+    }
+
+    /// @dev Consumes a queued action, reverting until the delay has elapsed.
+    ///      The id binds the EXACT parameters queued, so an owner cannot queue a
+    ///      benign action and execute a different one against the same slot.
+    function _consume(bytes32 id) internal {
+        uint256 readyAt = adminReadyAt[id];
+        if (readyAt == 0) revert NotQueued();
+        if (block.timestamp < readyAt) revert TimelockPending();
+        delete adminReadyAt[id]; // single-use
+    }
+
+    /// @notice Cancel a queued action before it matures.
+    function cancelAdmin(bytes32 id) external onlyOwner {
+        if (adminReadyAt[id] == 0) revert NotQueued();
+        delete adminReadyAt[id];
+        emit AdminCancelled(id);
+    }
+
+    function allowTargetId(address target, bool ok) public pure returns (bytes32) {
+        return keccak256(abi.encode("allowTarget", target, ok));
+    }
+
+    /// @notice Step 1 of 2: queue a router allowlist change.
+    function queueAllowTarget(address target, bool ok) external onlyOwner {
+        _queue(allowTargetId(target, ok));
+    }
+
+    /// @notice Step 2 of 2: apply it, no earlier than ADMIN_TIMELOCK after queueing.
     function allowTarget(address target, bool ok) external onlyOwner {
+        _consume(allowTargetId(target, ok));
         if (target == address(this) || target == address(0)) revert BadTarget();
         allowedTarget[target] = ok;
         emit TargetAllowed(target, ok);
     }
 
-    /// @notice Owner grants token allowances to allowlisted routers only.
+    function setAllowanceId(IERC20 token, address spender, uint256 amount)
+        public
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode("setAllowance", address(token), spender, amount));
+    }
+
+    /// @notice Step 1 of 2: queue an allowance grant.
+    function queueSetAllowance(IERC20 token, address spender, uint256 amount) external onlyOwner {
+        _queue(setAllowanceId(token, spender, amount));
+    }
+
+    /// @notice Step 2 of 2: grant token allowances to allowlisted routers only,
+    ///         bounded by `allowanceCap` rather than type(uint256).max.
     function setAllowance(IERC20 token, address spender, uint256 amount) external onlyOwner {
+        _consume(setAllowanceId(token, spender, amount));
         if (!allowedTarget[spender]) revert BadTarget();
+        // WP-05 / #12: an unlimited approval to an allowlisted router is a
+        // complete withdrawal path for whoever holds that router's key.
+        if (amount > allowanceCap[address(token)]) revert AllowanceTooLarge();
         token.safeApprove(spender, amount); // WP-09 / #10
         emit AllowanceSet(address(token), spender, amount);
+    }
+
+    function allowSelectorId(bytes4 selector, bool ok) public pure returns (bytes32) {
+        return keccak256(abi.encode("allowSelector", selector, ok));
+    }
+
+    /// @notice Step 1 of 2: queue a selector allowlist change.
+    function queueAllowSelector(bytes4 selector, bool ok) external onlyOwner {
+        _queue(allowSelectorId(selector, ok));
+    }
+
+    /// @notice Step 2 of 2: permit or forbid a function selector in `exec`.
+    function allowSelector(bytes4 selector, bool ok) external onlyOwner {
+        _consume(allowSelectorId(selector, ok));
+        allowedSelector[selector] = ok;
+        emit SelectorAllowed(selector, ok);
+    }
+
+    function setAllowanceCapId(IERC20 token, uint256 next) public pure returns (bytes32) {
+        return keccak256(abi.encode("setAllowanceCap", address(token), next));
+    }
+
+    /// @notice Step 1 of 2: queue a change to a token's allowance ceiling.
+    function queueSetAllowanceCap(IERC20 token, uint256 next) external onlyOwner {
+        _queue(setAllowanceCapId(token, next));
+    }
+
+    /// @notice Step 2 of 2: raise or lower a token's allowance ceiling.
+    function setAllowanceCap(IERC20 token, uint256 next) external onlyOwner {
+        _consume(setAllowanceCapId(token, next));
+        emit AllowanceCapSet(address(token), allowanceCap[address(token)], next);
+        allowanceCap[address(token)] = next;
     }
 
     /// @notice Keeper executes an allowlisted aggregator call (swap/hedge).
     ///         Value is not attached; routers pull pre-approved tokens.
     function exec(address target, bytes calldata data) external onlyOperator nonReentrant returns (bytes memory) {
         if (!allowedTarget[target]) revert BadTarget();
+        // WP-05 / #12: an allowlisted ADDRESS is not enough. Routers expose many
+        // token-moving entry points, so arbitrary calldata to an allowlisted
+        // router is still a drain path. The selector must be allowlisted too.
+        if (data.length < 4) revert BadCalldata();
+        bytes4 selector = bytes4(data[:4]);
+        if (!allowedSelector[selector]) revert BadSelector();
         emit Executed(target, data);
         (bool ok, bytes memory ret) = target.call(data);
         if (!ok) {

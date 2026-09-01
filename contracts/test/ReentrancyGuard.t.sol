@@ -11,6 +11,7 @@ import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockOracle} from "../src/mocks/MockOracle.sol";
 
 interface Vm {
+    function warp(uint256) external;
     function startPrank(address) external;
     function stopPrank() external;
 }
@@ -116,7 +117,12 @@ contract ReentrancyGuardTest {
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         oracle = new MockOracle(4_000e6);
         vault = new DealerVault(
-            IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(oracle)), address(this), OPERATOR
+            IERC20(address(usdc)),
+            IERC20(address(weth)),
+            IOracle(address(oracle)),
+            address(this),
+            OPERATOR,
+            true // WP-05 / #12: address(this) is the test contract, so it has code
         );
         usdc.mint(address(this), 2_000_000e6);
         weth.mint(address(this), 200 ether);
@@ -126,9 +132,17 @@ contract ReentrancyGuardTest {
         vault.creditInsurance(20_000e6); // unblock short gamma for the probes
     }
 
+    /// WP-05 / #12: allowTarget/setAllowance are timelocked and `exec`/`openShort`
+    /// now require the calldata selector to be allowlisted too, so the helper
+    /// queues each action, warps past ADMIN_TIMELOCK, then applies it.
     function _allowlist(address router) internal {
         vm.startPrank(address(this));
+        vault.queueAllowTarget(router, true);
+        vault.queueAllowSelector(ReentrantRouter.pwn.selector, true);
+        vault.queueSetAllowance(IERC20(address(weth)), router, 100 ether);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
         vault.allowTarget(router, true);
+        vault.allowSelector(ReentrantRouter.pwn.selector, true);
         vault.setAllowance(IERC20(address(weth)), router, 100 ether);
         vm.stopPrank();
     }

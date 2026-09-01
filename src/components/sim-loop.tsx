@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useDesk, wpitListing } from "@/lib/wolfpit/desk";
-import { getLiveMarket, getUniverse } from "@/lib/wolfpit/market";
+import { getLiveMarket, getUniverse, getVolHistory } from "@/lib/wolfpit/market";
+import type { Candle } from "@/lib/wolfpit/types";
 import { useWolf } from "@/lib/wolfpit/store";
 import { useTerms } from "@/lib/wolfpit/terms";
 
@@ -17,10 +18,21 @@ export function SimLoop() {
   }, [rehydrate, rehydrateTerms]);
   useEffect(() => {
     let dead = false;
+    // The vol series is ~1h bars, so it does not need the chart's 15 s cadence.
+    // Held here and merged into each applyLive call; null leaves the previous
+    // series in place rather than degrading the estimate.
+    let volCandles: Candle[] = [];
+    const pullVol = () => {
+      void getVolHistory({ data: {} })
+        .then((v) => {
+          if (!dead && v) volCandles = v.candles;
+        })
+        .catch(() => undefined);
+    };
     const pull = () => {
       void getLiveMarket({ data: { interval: "1m" } })
         .then((feed) => {
-          if (!dead) applyLive(feed);
+          if (!dead) applyLive({ ...feed, volCandles });
         })
         .catch(() => undefined);
       void getUniverse()
@@ -39,11 +51,15 @@ export function SimLoop() {
           setUniverse([wpitListing(wolf.wpit, 0.12)]);
         });
     };
+    pullVol();
     pull();
     const id = window.setInterval(pull, 15_000);
+    // 1h bars move slowly; 10 minutes is far inside any staleness that matters.
+    const volId = window.setInterval(pullVol, 600_000);
     return () => {
       dead = true;
       window.clearInterval(id);
+      window.clearInterval(volId);
     };
   }, [applyLive, setUniverse]);
   useEffect(() => {

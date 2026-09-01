@@ -48,7 +48,7 @@ contract ReviewFixesTest {
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         oracle = new MockOracle(4_000e6);
         wpit = new WPIT(100_000_000 ether);
-        vault = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(oracle)), address(this), address(this));
+        vault = new DealerVault(IERC20(address(usdc)), IERC20(address(weth)), IOracle(address(oracle)), address(this), address(this), true);
         pairUsdc = new SimplePair(IERC20(address(wpit)), IERC20(address(usdc)), 30);
         farm = new Farm(wpit, vault);
         stake = new Stake(wpit, vault);
@@ -350,5 +350,304 @@ contract FalseToken {
 
     function transferFrom(address, address, uint256) external pure returns (bool) {
         return false;
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ * WP-05 / #12 — constrain the owner/operator drain path
+ * ------------------------------------------------------------------ */
+
+/// @notice Stands in for a multisig: has code, so it satisfies the
+///         contract-owner assertion. It deliberately does nothing else.
+contract FakeMultisig {}
+
+/// @notice Router with two entry points, so the selector allowlist can be shown
+///         to permit one and refuse the other on the SAME allowlisted address.
+contract TwoFaceRouter {
+    IERC20 public immutable token;
+
+    constructor(IERC20 t) {
+        token = t;
+    }
+
+    /// The benign hedge entry point.
+    function hedge(uint256 amt) external {
+        token.transferFrom(msg.sender, address(this), amt);
+    }
+
+    /// The drain entry point: same contract, same allowance, different selector.
+    function pwn(address from, uint256 amt) external {
+        token.transferFrom(from, address(this), amt);
+    }
+}
+
+contract Wp05DrainPathTest {
+    Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+    MockERC20 usdc;
+    MockERC20 weth;
+    MockOracle oracle;
+    DealerVault vault;
+    address constant ALICE = address(0xA11CE);
+
+    function setUp() public {
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        oracle = new MockOracle(4_000e6);
+        // address(this) is a contract, so the owner assertion is satisfiable.
+        vault = new DealerVault(
+            IERC20(address(usdc)),
+            IERC20(address(weth)),
+            IOracle(address(oracle)),
+            address(this),
+            address(this),
+            true
+        );
+        usdc.mint(address(this), 2_000_000e6);
+        weth.mint(address(this), 200 ether);
+        usdc.approve(address(vault), type(uint256).max);
+        weth.approve(address(vault), type(uint256).max);
+        vault.deposit(100 ether, 400_000e6);
+        vault.creditInsurance(20_000e6);
+    }
+
+    // ------------------------------------------------------------- multisig
+
+    /// The trust model the README advertises must be the one that got deployed:
+    /// a bare EOA owner is a single key that can allowlist a router, grant it an
+    /// allowance, and walk out with the book.
+    function testConstructorRejectsEoaOwner() public {
+        vm.prank(ALICE); // ALICE is an EOA: no code at that address
+        try new DealerVault(
+            IERC20(address(usdc)),
+            IERC20(address(weth)),
+            IOracle(address(oracle)),
+            ALICE,
+            address(this),
+            true
+        ) {
+            revert("expected OwnerNotContract");
+        } catch (bytes memory why) {
+            require(
+                bytes4(why) == DealerVault.OwnerNotContract.selector,
+                "must revert OwnerNotContract"
+            );
+        }
+    }
+
+    /// A contract owner (multisig / timelock module) is accepted.
+    function testConstructorAcceptsContractOwner() public {
+        FakeMultisig ms = new FakeMultisig();
+        DealerVault v = new DealerVault(
+            IERC20(address(usdc)),
+            IERC20(address(weth)),
+            IOracle(address(oracle)),
+            address(ms),
+            address(this),
+            true
+        );
+        require(v.owner() == address(ms), "multisig is the owner");
+    }
+
+    // ----------------------------------------------------------- timelock
+
+    /// allowTarget cannot be applied cold: it must be queued first.
+    function testAllowTargetRequiresQueueing() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        try vault.allowTarget(address(r), true) {
+            revert("expected NotQueued");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotQueued.selector, "must revert NotQueued");
+        }
+        require(!vault.allowedTarget(address(r)), "target is still not allowlisted");
+    }
+
+    /// Queueing is not enough either — the delay must actually elapse.
+    function testAllowTargetWaitsForTimelock() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        vault.queueAllowTarget(address(r), true);
+        // One second short of the delay.
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() - 1);
+        try vault.allowTarget(address(r), true) {
+            revert("expected TimelockPending");
+        } catch (bytes memory why) {
+            require(
+                bytes4(why) == DealerVault.TimelockPending.selector,
+                "must revert TimelockPending"
+            );
+        }
+        require(!vault.allowedTarget(address(r)), "still not allowlisted before maturity");
+
+        vm.warp(block.timestamp + 2);
+        vault.allowTarget(address(r), true);
+        require(vault.allowedTarget(address(r)), "allowlisted once the delay elapsed");
+    }
+
+    /// The queued id binds the exact parameters, so queueing a benign action
+    /// cannot authorise a different one.
+    function testQueuedActionIsBoundToItsParameters() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        // Queue "allow r", then try to execute "allow some other address".
+        vault.queueAllowTarget(address(r), true);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        address other = address(0xBEEF);
+        try vault.allowTarget(other, true) {
+            revert("expected NotQueued for the un-queued parameters");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotQueued.selector, "must revert NotQueued");
+        }
+        require(!vault.allowedTarget(other), "the other address was never allowlisted");
+    }
+
+    /// A queued action is single-use: it cannot be replayed.
+    function testQueuedActionIsSingleUse() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        vault.queueAllowTarget(address(r), true);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowTarget(address(r), true);
+        try vault.allowTarget(address(r), true) {
+            revert("expected NotQueued on replay");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotQueued.selector, "must revert NotQueued");
+        }
+    }
+
+    /// The owner can withdraw a pending action before it matures.
+    function testCancelAdmin() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        bytes32 id = vault.allowTargetId(address(r), true);
+        vault.queueAllowTarget(address(r), true);
+        require(vault.adminReadyAt(id) != 0, "queued");
+        vault.cancelAdmin(id);
+        require(vault.adminReadyAt(id) == 0, "cleared");
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        try vault.allowTarget(address(r), true) {
+            revert("expected NotQueued after cancel");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotQueued.selector, "must revert NotQueued");
+        }
+    }
+
+    // ------------------------------------------------------ allowance cap
+
+    /// An unlimited approval to an allowlisted router is a complete withdrawal
+    /// path for whoever holds that router's key, so it must be refused.
+    function testSetAllowanceRejectsOverCapGrant() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(usdc)));
+        vault.queueAllowTarget(address(r), true);
+        vault.queueSetAllowance(IERC20(address(usdc)), address(r), type(uint256).max);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowTarget(address(r), true);
+        try vault.setAllowance(IERC20(address(usdc)), address(r), type(uint256).max) {
+            revert("expected AllowanceTooLarge");
+        } catch (bytes memory why) {
+            require(
+                bytes4(why) == DealerVault.AllowanceTooLarge.selector,
+                "must revert AllowanceTooLarge"
+            );
+        }
+        require(
+            usdc.allowance(address(vault), address(r)) == 0,
+            "no allowance was granted"
+        );
+    }
+
+    /// A grant at exactly the cap is allowed, and the balance delta proves the
+    /// router can move at most that much.
+    function testSetAllowanceAcceptsGrantAtCap() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(usdc)));
+        uint256 cap = vault.allowanceCap(address(usdc));
+        require(cap == 1_000_000e6, "default USDC cap");
+        vault.queueAllowTarget(address(r), true);
+        vault.queueSetAllowance(IERC20(address(usdc)), address(r), cap);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowTarget(address(r), true);
+        vault.setAllowance(IERC20(address(usdc)), address(r), cap);
+        require(usdc.allowance(address(vault), address(r)) == cap, "allowance set at the cap");
+    }
+
+    /// The cap is per-token: the WETH cap is 500e18, not the USDC figure. A flat
+    /// scalar would have allowed 0.000001 WETH.
+    function testAllowanceCapIsPerToken() public {
+        require(vault.allowanceCap(address(usdc)) == 1_000_000e6, "USDC cap");
+        require(vault.allowanceCap(address(weth)) == 500 ether, "WETH cap");
+        // A token nobody configured has a cap of 0, so every grant fails closed.
+        address stranger = address(0xC0FFEE);
+        require(vault.allowanceCap(stranger) == 0, "unconfigured token has no allowance headroom");
+    }
+
+    /// Raising a cap is itself timelocked.
+    function testRaiseCapIsTimelocked() public {
+        vault.queueSetAllowanceCap(IERC20(address(usdc)), 5_000_000e6);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() - 1);
+        try vault.setAllowanceCap(IERC20(address(usdc)), 5_000_000e6) {
+            revert("expected TimelockPending");
+        } catch (bytes memory why) {
+            require(
+                bytes4(why) == DealerVault.TimelockPending.selector,
+                "must revert TimelockPending"
+            );
+        }
+        require(vault.allowanceCap(address(usdc)) == 1_000_000e6, "cap unchanged before maturity");
+        vm.warp(block.timestamp + 2);
+        vault.setAllowanceCap(IERC20(address(usdc)), 5_000_000e6);
+        require(vault.allowanceCap(address(usdc)) == 5_000_000e6, "cap raised after the delay");
+    }
+
+    // -------------------------------------------------- selector allowlist
+
+    /// Allowlisting an ADDRESS is not sufficient. Two entry points on the same
+    /// allowlisted router, same allowance: only the allowlisted one may run.
+    function testExecRequiresAllowlistedSelector() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        vault.queueAllowTarget(address(r), true);
+        vault.queueAllowSelector(TwoFaceRouter.hedge.selector, true);
+        vault.queueSetAllowance(IERC20(address(weth)), address(r), 10 ether);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowTarget(address(r), true);
+        vault.allowSelector(TwoFaceRouter.hedge.selector, true);
+        vault.setAllowance(IERC20(address(weth)), address(r), 10 ether);
+
+        // The allowlisted selector runs.
+        vault.exec(address(r), abi.encodeWithSelector(TwoFaceRouter.hedge.selector, 1 ether));
+
+        // The drain selector on the SAME allowlisted address must not.
+        uint256 before = weth.balanceOf(address(vault));
+        try vault.exec(
+            address(r),
+            abi.encodeWithSelector(TwoFaceRouter.pwn.selector, address(vault), 50 ether)
+        ) {
+            revert("expected BadSelector");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.BadSelector.selector, "must revert BadSelector");
+        }
+        require(weth.balanceOf(address(vault)) == before, "nothing moved via the blocked selector");
+    }
+
+    /// Calldata too short to carry a selector is rejected rather than treated as
+    /// an empty call that silently succeeds.
+    function testExecRejectsCalldataWithoutSelector() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        vault.queueAllowTarget(address(r), true);
+        vm.warp(block.timestamp + vault.ADMIN_TIMELOCK() + 1);
+        vault.allowTarget(address(r), true);
+        try vault.exec(address(r), hex"0011") {
+            revert("expected BadCalldata");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.BadCalldata.selector, "must revert BadCalldata");
+        }
+    }
+
+    /// A non-owner cannot queue anything, so the timelock cannot be pre-loaded
+    /// by an attacker for a later owner mistake.
+    function testQueueingIsOwnerOnly() public {
+        TwoFaceRouter r = new TwoFaceRouter(IERC20(address(weth)));
+        vm.prank(ALICE);
+        try vault.queueAllowTarget(address(r), true) {
+            revert("expected NotOwner");
+        } catch (bytes memory why) {
+            require(bytes4(why) == DealerVault.NotOwner.selector, "must revert NotOwner");
+        }
+        require(vault.adminReadyAt(vault.allowTargetId(address(r), true)) == 0, "nothing queued");
     }
 }

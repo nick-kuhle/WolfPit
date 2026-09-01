@@ -645,3 +645,118 @@ async function geckoTerminalOhlcv(network: string, pool: string, interval: Chart
 
 
 
+
+/* ------------------------------------------------------------------ *
+ * Dedicated long-history vol series (CANDLE_LIMITS permanent fix)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The chart feed is capped at ~300 bars whatever the interval, so at 1m it
+ * carries about 5 hours of history. No lambda can fix that: the Monte-Carlo in
+ * math.ts shows a 24 h half-life reading 206% of true sigma on 5 h of tape, and
+ * a 17-day half-life reading 235%. The estimator was never the problem; the
+ * history length was.
+ *
+ * So vol gets its own series, fetched on its own cadence at a granularity the
+ * window actually needs: 1h bars, ~1000 of them, ~41 days. At that depth a 24 h
+ * half-life measures +-9% instead of +-22%.
+ *
+ * Two rules this file must not break:
+ *   1. NEVER fabricate candles here. The CoinGecko spot fallback synthesises 60
+ *      flat candles because a price line needs *something* to draw; a flat
+ *      series fed to the vol estimator reads as zero vol and clamps to the
+ *      floor, underpricing every option on a short-gamma book. A missing vol
+ *      series returns null and the engine keeps its prior.
+ *   2. Never widen the chart interval to get more history. The chart is a UI
+ *      surface; coupling risk inputs to a user's zoom level would make the
+ *      desk's vol estimate change when someone clicks "15m".
+ */
+export const VOL_SERIES_BARS = 1000;
+
+export type VolSeries = {
+  candles: Candle[];
+  at: number;
+  source: string;
+};
+
+export const getVolHistory = createServerFn({ method: "GET" })
+  .validator((d: { symbol?: string } | undefined) => d ?? {})
+  .handler(async ({ data }): Promise<VolSeries | null> => {
+    const bin = await binanceVolHistory(data.symbol);
+    if (bin) return bin;
+    const cob = await coinbaseVolHistory(data.symbol);
+    if (cob) return cob;
+    // Deliberately no synthetic fallback. null means "no vol data", and the
+    // engine treats that as unknown rather than as calm.
+    return null;
+  });
+
+/** Binance allows limit up to 1000 on /klines, which is exactly our target. */
+async function binanceVolHistory(symbol?: string): Promise<VolSeries | null> {
+  try {
+    const pair = symbol && symbol !== "ETH" ? `${symbol.toUpperCase()}USDT` : "ETHUSDT";
+    const res = await fetch(
+      `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1h&limit=${VOL_SERIES_BARS}`,
+    );
+    if (!res.ok) return null;
+    const raw = (await res.json()) as (string | number)[][];
+    const candles = raw
+      .map((r) => ({
+        t: Number(r[0]),
+        o: Number(r[1]),
+        h: Number(r[2]),
+        l: Number(r[3]),
+        c: Number(r[4]),
+        v: Number(r[5]),
+      }))
+      .filter((c) => c.c > 0 && Number.isFinite(c.c))
+      .sort((a, b) => a.t - b.t);
+    if (candles.length < 8) return null;
+    return { candles, at: Date.now(), source: "Binance" };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Coinbase caps /candles at 300 per request, so a deep series needs paging.
+ * Two pages of 1h gives 600 bars (~25 days) -- less than Binance but still
+ * far past the 5 h the chart feed provides.
+ */
+async function coinbaseVolHistory(symbol?: string): Promise<VolSeries | null> {
+  try {
+    const product =
+      symbol && symbol !== "ETH"
+        ? `${COINBASE_MAP[symbol.toUpperCase()] ?? `${symbol.toUpperCase()}-USD`}`
+        : "ETH-USD";
+    const hour = 3600;
+    const end = Math.floor(Date.now() / 1000);
+    const pages = [
+      { start: end - 600 * hour, end: end - 300 * hour },
+      { start: end - 300 * hour, end },
+    ];
+    const out: Candle[] = [];
+    for (const p of pages) {
+      const res = await fetch(
+        `https://api.exchange.coinbase.com/products/${product}/candles?granularity=${hour}&start=${new Date(p.start * 1000).toISOString()}&end=${new Date(p.end * 1000).toISOString()}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!res.ok) continue;
+      const raw = (await res.json()) as number[][];
+      for (const r of raw) {
+        const c = Number(r[4]);
+        if (c > 0 && Number.isFinite(c)) {
+          out.push({ t: r[0]! * 1000, o: Number(r[3]), h: Number(r[2]), l: Number(r[1]), c, v: Number(r[5]) });
+        }
+      }
+    }
+    const seen = new Set<number>();
+    const candles = out
+      .sort((a, b) => a.t - b.t)
+      .filter((c) => (seen.has(c.t) ? false : (seen.add(c.t), true)));
+    if (candles.length < 8) return null;
+    return { candles, at: Date.now(), source: "Coinbase" };
+  } catch {
+    return null;
+  }
+}

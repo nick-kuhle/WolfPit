@@ -397,3 +397,135 @@ describe("M-09 / #26 — resting orders keep time priority and are never dropped
     assert.equal(after.working[0]!.id, oldest, "the oldest resting order was not evicted");
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * CANDLE_LIMITS permanent fix — vol history and the quality gate
+ * ------------------------------------------------------------------ */
+
+import {
+  ewmaRvAdaptive,
+  halfLifeForHistory,
+  rvQuality,
+  RV_HALF_LIFE_DEEP_MIN,
+  RV_PRIOR,
+  RV_MIN_BARS,
+} from "./math.ts";
+
+/** A GBM series of `bars` bars at `barSec` spacing, known annual sigma. */
+function gbm(bars: number, barSec: number, sigma = TRUE_SIGMA, s0 = 4000) {
+  const out: { t: number; c: number }[] = [];
+  let s = s0;
+  const dt = barSec / (365.25 * 24 * 3600);
+  out.push({ t: 0, c: s });
+  for (let i = 1; i < bars; i++) {
+    let u = 0;
+    let v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    s *= Math.exp(-0.5 * sigma * sigma * dt + sigma * Math.sqrt(dt) * z);
+    out.push({ t: i * barSec * 1000, c: s });
+  }
+  return out;
+}
+
+describe("CANDLE_LIMITS — a flat series must not read as low vol", () => {
+  it("flags a flat series instead of estimating from it", () => {
+    const flat = Array.from({ length: 60 }, (_, i) => ({
+      t: i * 60_000,
+      c: 4000,
+    }));
+    const q = rvQuality(flat);
+    assert.equal(q.ok, false);
+    assert.equal(q.reason, "flat-series");
+    assert.equal(q.distinct, 1, "one distinct close carries no information");
+    // The regression that mattered: this used to return 0.15, the clamp floor,
+    // so a dead feed priced options at IV 0.28 on a short-gamma book.
+    assert.equal(ewmaRv(flat), RV_PRIOR);
+    assert.notEqual(ewmaRv(flat), 0.15, "must not fall through to the floor");
+  });
+
+  it("flags a too-short series", () => {
+    const q = rvQuality(gbm(RV_MIN_BARS - 1, 3600));
+    assert.equal(q.ok, false);
+    assert.equal(q.reason, "too-few-bars");
+    assert.equal(ewmaRv(gbm(3, 3600)), RV_PRIOR);
+  });
+
+  it("flags a series with no usable positive closes", () => {
+    const bad = Array.from({ length: 20 }, (_, i) => ({ t: i * 60_000, c: 0 }));
+    const q = rvQuality(bad);
+    assert.equal(q.ok, false);
+    assert.equal(q.reason, "no-positive-closes");
+  });
+
+  it("accepts a real series and reports what it had", () => {
+    const c = gbm(1000, 3600);
+    const q = rvQuality(c);
+    assert.equal(q.ok, true);
+    assert.equal(q.reason, "ok");
+    assert.equal(q.bars, 1000);
+    assert.equal(q.barSec, 3600);
+    assert.ok(Math.abs(q.spanHours - 999) < 1, `span was ${q.spanHours}`);
+  });
+});
+
+describe("CANDLE_LIMITS — half-life is chosen from the history in hand", () => {
+  it("keeps the shallow 4 h memory for a short series", () => {
+    assert.equal(halfLifeForHistory(5), RV_HALF_LIFE_MIN);
+    assert.equal(halfLifeForHistory(100), RV_HALF_LIFE_MIN);
+  });
+
+  it("uses 12 h in the middle regime", () => {
+    assert.equal(halfLifeForHistory(120), 720);
+    assert.equal(halfLifeForHistory(700), 720);
+  });
+
+  it("only uses the 24 h memory once history actually supports it", () => {
+    assert.equal(halfLifeForHistory(720), RV_HALF_LIFE_DEEP_MIN);
+    assert.equal(halfLifeForHistory(1000), RV_HALF_LIFE_DEEP_MIN);
+    // The point of the whole fix: a deep series makes the long memory safe.
+    // On ~5 h of tape the same memory reads 206% of true sigma.
+    assert.ok(RV_HALF_LIFE_DEEP_MIN > RV_HALF_LIFE_MIN);
+  });
+
+  it("estimates unbiasedly from a deep 1h series with the adaptive memory", () => {
+    const est = ewmaRvAdaptive(gbm(1000, 3600));
+    assert.equal(est.quality.ok, true);
+    assert.equal(est.quality.barSec, 3600);
+    const ratio = est.rv / TRUE_SIGMA;
+    assert.ok(
+      ratio > 0.85 && ratio < 1.15,
+      `adaptive rv/sigma = ${ratio.toFixed(4)} on 1000x1h, expected ~1`,
+    );
+  });
+
+  it("is measurably tighter on a deep series than on 5 h of tape", () => {
+    // The claim the fix rests on: same estimator, more history -> less noise.
+    const runs = 120;
+    const sd = (xs: number[]) => {
+      const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+      return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length);
+    };
+    const shallow: number[] = [];
+    const deep: number[] = [];
+    for (let i = 0; i < runs; i++) {
+      shallow.push(ewmaRvAdaptive(gbm(300, 60)).rv / TRUE_SIGMA);
+      deep.push(ewmaRvAdaptive(gbm(1000, 3600)).rv / TRUE_SIGMA);
+    }
+    const sdDeep = sd(deep);
+    const sdShallow = sd(shallow);
+    assert.ok(
+      sdDeep < sdShallow,
+      `deep sd ${sdDeep.toFixed(4)} should beat shallow sd ${sdShallow.toFixed(4)}`,
+    );
+  });
+
+  it("returns the prior, not a number, when the series is degenerate", () => {
+    const est = ewmaRvAdaptive(
+      Array.from({ length: 60 }, (_, i) => ({ t: i * 3600_000, c: 4000 })),
+    );
+    assert.equal(est.quality.ok, false);
+    assert.equal(est.rv, RV_PRIOR);
+  });
+});

@@ -15,6 +15,11 @@ export default tseslint.config(
       ".nitro/**",
       "node_modules/**",
       "src/routeTree.gen.ts",
+      // #4: OpenZeppelin is vendored here as a Foundry submodule. It is a
+      // third-party dependency with its own lint config (CommonJS scripts,
+      // mocha globals), so linting it produces thousands of errors that say
+      // nothing about our code. Foundry compiles it; we do not review it here.
+      "contracts/lib/**",
     ],
   },
   js.configs.recommended,
